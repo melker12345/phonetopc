@@ -1,4 +1,10 @@
-"""In-process fake phonetopc/1 server for tests (follows spec/PROTOCOL.md draft 1).
+"""In-process fake phonetopc/1 server for tests (follows spec/PROTOCOL.md and SECURITY.md).
+
+In dev mode (the default) it serves plaintext ``ws://``. With ``secure=True``
+it serves ``wss://`` with the test-vector phone certificate from
+spec/conformance/vectors/ (or the PC one, to provoke a pin mismatch), checks
+``hello.auth.token`` against ``tokens``, answers ``-32010`` and closes with 1008
+on a bad token, and reports ``pc`` in the ``hello`` result (SECURITY.md 5).
 
 Every client message is validated against spec/schemas/phonetopc-1.schema.json
 (as a request) and every server message the fake sends is validated too, so the
@@ -13,9 +19,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import hmac
 import itertools
 import json
 import math
+import ssl
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +34,14 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PATH = REPO_ROOT / "spec" / "schemas" / "phonetopc-1.schema.json"
 SCHEMA: dict[str, Any] = json.loads(SCHEMA_PATH.read_text())
+VECTORS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors"
+VECTORS: dict[str, Any] = json.loads((VECTORS_DIR / "vectors.json").read_text())
+#: Pins of the test-vector certificates, by name ("phone", "pc").
+PINS = {v["cert"].removesuffix("-cert.pem"): v["pin"] for v in VECTORS["pin"]}
+
+#: The token and PC of the default pairing of a secure FakeServer.
+TOKEN = "dGVzdC10b2tlbi10ZXN0LXRva2VuLXRlc3QtdG9rZW4"
+PC = {"id": "9d1c0ffee0ddba11", "name": "pytest-pc"}
 
 _validator_cls = jsonschema.validators.validator_for(SCHEMA)
 #: Validates any phonetopc/1 message.
@@ -89,6 +105,7 @@ ERRORS = {
     "method_not_found": -32601,
     "invalid_request": -32600,
     "parse_error": -32700,
+    "unauthorized": -32010,
 }
 
 
@@ -176,6 +193,8 @@ class Session:
         self.server = server
         self.ws = ws
         self.hello_done = False
+        #: Token this session authenticated with (secure mode).
+        self.token: str | None = None
         self.subs: dict[str, dict[str, Any]] = {}
         #: Method of each request still awaiting its response, by id.
         self.methods: dict[tuple[str, Any], str] = {}
@@ -188,7 +207,14 @@ class Session:
 
 
 class FakeServer:
-    def __init__(self) -> None:
+    def __init__(self, *, secure: bool = False, cert: str = "phone") -> None:
+        #: Serve wss:// with the test-vector certificate ``cert`` ("phone" or "pc").
+        self.secure = secure
+        self.cert = cert
+        #: Accepted tokens and the PC each one belongs to (secure mode).
+        self.tokens: dict[str, dict[str, str]] = {TOKEN: dict(PC)}
+        #: Paths of the HTTP upgrade requests received (to prove a client sent nothing).
+        self.http_requests: list[str] = []
         self.supported_protocols = ["phonetopc/1"]
         #: Catalog sources reported as available: false (-> source_unavailable).
         self.unavailable: set[str] = {"game_rotation_vector"}
@@ -227,7 +253,15 @@ class FakeServer:
     # -- lifecycle --------------------------------------------------------
 
     async def start(self) -> None:
-        self._server = await serve(self._handler, "127.0.0.1", 0)
+        ctx = None
+        if self.secure:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(
+                VECTORS_DIR / f"{self.cert}-cert.pem", VECTORS_DIR / f"{self.cert}-key.pem"
+            )
+        self._server = await serve(
+            self._handler, "127.0.0.1", 0, ssl=ctx, process_request=self._on_http
+        )
         sock = next(iter(self._server.sockets))
         self.port = sock.getsockname()[1]
 
@@ -239,6 +273,20 @@ class FakeServer:
     @property
     def addr(self) -> str:
         return f"127.0.0.1:{self.port}"
+
+    @property
+    def pin(self) -> str:
+        return PINS[self.cert]
+
+    def _on_http(self, connection: ServerConnection, request: Any) -> None:
+        self.http_requests.append(request.path)
+
+    async def revoke(self, token: str) -> None:
+        """Forget ``token`` and close its sessions with 1008, like the phone app does."""
+        self.tokens.pop(token, None)
+        for session in self.sessions:
+            if session.token == token:
+                await session.ws.close(1008, "revoked")
 
     # -- helpers for tests ------------------------------------------------
 
@@ -408,17 +456,24 @@ class FakeServer:
                     supported=self.supported_protocols,
                 )
                 return
+            result: dict[str, Any] = {
+                "protocol": "phonetopc/1",
+                "server": {"name": "fake", "version": "0.0.1"},
+                "device": DEVICE,
+                "capabilities": ["events", "get"],
+            }
+            if self.secure:  # SECURITY.md section 5; auth is ignored in dev mode
+                auth = params.get("auth")
+                token = auth.get("token") if isinstance(auth, dict) else None
+                pc = self._check_token(token)
+                if pc is None:
+                    await self._error(session, req_id, "unauthorized", "unknown or revoked token")
+                    await session.ws.close(1008, "unauthorized")
+                    return
+                session.token = token
+                result["pc"] = pc
             session.hello_done = True
-            await self._result(
-                session,
-                req_id,
-                {
-                    "protocol": "phonetopc/1",
-                    "server": {"name": "fake", "version": "0.0.1"},
-                    "device": DEVICE,
-                    "capabilities": ["events", "get"],
-                },
-            )
+            await self._result(session, req_id, result)
             return
         if method == "list_sensors":
             sensors = copy.deepcopy(SENSORS)
@@ -436,6 +491,15 @@ class FakeServer:
             await self._result(session, req_id, {})
         elif method == "get":
             await self._get(session, req_id, params)
+
+    def _check_token(self, token: Any) -> dict[str, str] | None:
+        if not isinstance(token, str):
+            return None
+        found = None
+        for known, pc in self.tokens.items():  # constant time per token, no early exit
+            if hmac.compare_digest(known.encode(), token.encode()):
+                found = pc
+        return found
 
     def _sensor(self, source: Any) -> dict[str, Any] | None:
         return next((s for s in SENSORS if s["source"] == source), None)
@@ -518,3 +582,18 @@ class FakeServer:
                 "device": DEVICE["id"],
             },
         )
+
+
+def device_entry(server: FakeServer | None = None, **fields: Any) -> dict[str, Any]:
+    """A devices.json entry for ``server`` (the fake phone), as `phonetopc pair` writes it."""
+    entry: dict[str, Any] = {
+        "id": DEVICE["id"],
+        "name": "Fake Phone",
+        "pin": PINS["phone"],
+        "token": TOKEN,
+        "port": server.port if server else 8765,
+        "addresses": ["127.0.0.1"],
+        "paired_at": "2026-10-09T16:40:00Z",
+    }
+    entry.update(fields)
+    return entry
