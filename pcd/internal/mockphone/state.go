@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/pairing"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 	"github.com/melker12345/phonetopc/pcd/internal/store"
@@ -237,4 +238,15 @@ func (st *State) Changed() func() bool {
 		last = fi
 		return changed
 	}
+}
+
+// PhoneInfo describes this phone to a PC during pairing: it serves on port
+// at addrs.
+func (id Identity) PhoneInfo(port int, addrs []string) pairing.PhoneInfo {
+	return pairing.PhoneInfo{ID: id.ID, Name: id.Name, Pin: id.Pin, Port: port, Addresses: addrs}
+}
+
+// Record stores the outcome of a pairing made with package pairing.
+func (st *State) Record(p pairing.PairedPC) error {
+	return st.PutPC(PairedPC{ID: p.ID, Name: p.Name, Pin: p.Pin, Token: p.Token})
 }

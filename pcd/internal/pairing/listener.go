@@ -44,6 +44,9 @@ type Paired struct {
 	Phone PhoneInfo
 	Token string
 	Way   Way
+	// RemoteHost is the address the phone connected from, often also where
+	// it serves.
+	RemoteHost string
 }
 
 // Options configures a Listener.
@@ -564,7 +567,11 @@ func (s *session) finish(params json.RawMessage) (any, func(), error) {
 	if !security.ValidToken(p.Token) {
 		return nil, nil, invalid(fmt.Errorf("params.token must be base64url of %d bytes", security.TokenSize))
 	}
-	paired := Paired{Phone: s.phone, Token: p.Token, Way: s.way}
+	host, _, err := net.SplitHostPort(s.remote)
+	if err != nil {
+		host = ""
+	}
+	paired := Paired{Phone: s.phone, Token: p.Token, Way: s.way, RemoteHost: host}
 	// §4.4: store first, then answer.
 	if err := s.l.opts.Save(paired); err != nil {
 		return nil, nil, protocol.NewError(protocol.CodeInternalError, "the PC could not store the pairing: %v", err)

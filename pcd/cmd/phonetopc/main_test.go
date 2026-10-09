@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -21,22 +22,44 @@ func startMock(t *testing.T) (*mockphone.Server, string) {
 	return srv, strings.TrimPrefix(hs.URL, "http://")
 }
 
+// testEnv returns an environment with an empty, private credential store
+// and mDNS off, plus extra.
+func testEnv(t *testing.T, extra map[string]string) map[string]string {
+	env := map[string]string{
+		"XDG_CONFIG_HOME":   t.TempDir(),
+		"HOME":              "/nonexistent",
+		"PHONETOPC_NO_MDNS": "1",
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
+}
+
 func runCLI(t *testing.T, ctx context.Context, env map[string]string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	return runCLIWith(t, ctx, env, nil, args...)
+}
+
+func runCLIWith(t *testing.T, ctx context.Context, env map[string]string, stdin io.Reader, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	if env == nil {
+		env = testEnv(t, nil)
+	}
 	var out, errb bytes.Buffer
-	code = run(ctx, args, &out, &errb, func(k string) string { return env[k] })
+	code = run(ctx, args, stdin, &out, &errb, func(k string) string { return env[k] })
 	return code, out.String(), errb.String()
 }
 
 func TestInfoAndAddrFromEnv(t *testing.T) {
 	_, addr := startMock(t)
-	code, out, errs := runCLI(t, context.Background(), map[string]string{"PHONETOPC_ADDR": addr}, "info")
+	code, out, errs := runCLI(t, context.Background(), testEnv(t, map[string]string{"PHONETOPC_ADDR": addr, "PHONETOPC_INSECURE_DEV": "1"}), "info")
 	if code != 0 || !strings.Contains(out, "phonetopc/1") || !strings.Contains(out, "mock-0001") {
 		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errs)
 	}
 	// --addr overrides the environment, before or after the command.
-	for _, args := range [][]string{{"--addr", addr, "info", "--json"}, {"info", "--json", "--addr", addr}} {
-		code, out, errs = runCLI(t, context.Background(), map[string]string{"PHONETOPC_ADDR": "127.0.0.1:1"}, args...)
+	for _, args := range [][]string{{"--insecure-dev", "--addr", addr, "info", "--json"}, {"info", "--json", "--addr", addr, "--insecure-dev"}} {
+		code, out, errs = runCLI(t, context.Background(), testEnv(t, map[string]string{"PHONETOPC_ADDR": "127.0.0.1:1"}), args...)
 		var h protocol.HelloResult
 		if code != 0 || json.Unmarshal([]byte(out), &h) != nil || h.Device.ID != "mock-0001" {
 			t.Errorf("%v: code %d\nstdout %s\nstderr %s", args, code, out, errs)
@@ -46,7 +69,7 @@ func TestInfoAndAddrFromEnv(t *testing.T) {
 
 func TestList(t *testing.T) {
 	_, addr := startMock(t)
-	code, out, errs := runCLI(t, context.Background(), nil, "--addr", addr, "list")
+	code, out, errs := runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "list")
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, errs)
 	}
@@ -63,16 +86,16 @@ func TestList(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	_, addr := startMock(t)
-	code, out, _ := runCLI(t, context.Background(), nil, "--addr", addr, "get", "battery")
+	code, out, _ := runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "get", "battery")
 	if code != 0 || !strings.Contains(out, "battery/state") || !strings.Contains(out, "level=87") {
 		t.Errorf("code %d, out %q", code, out)
 	}
-	code, out, _ = runCLI(t, context.Background(), nil, "--addr", addr, "get", "gyro", "--json")
+	code, out, _ = runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "get", "gyro", "--json")
 	var r protocol.Reading
 	if code != 0 || json.Unmarshal([]byte(out), &r) != nil || r.Source != "gyro" {
 		t.Errorf("code %d, out %q", code, out)
 	}
-	code, _, errs := runCLI(t, context.Background(), nil, "--addr", addr, "get", "nope")
+	code, _, errs := runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "get", "nope")
 	if code != 1 || !strings.Contains(errs, "-32001") || !strings.Contains(errs, "unknown_source") {
 		t.Errorf("code %d, stderr %q", code, errs)
 	}
@@ -80,7 +103,7 @@ func TestGet(t *testing.T) {
 
 func TestTail(t *testing.T) {
 	_, addr := startMock(t)
-	code, out, errs := runCLI(t, context.Background(), nil, "--addr", addr, "tail", "gyro", "--rate", "100", "--count", "5")
+	code, out, errs := runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "tail", "gyro", "--rate", "100", "--count", "5")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 5 || !strings.Contains(lines[4], "gyro/rotation  #4  [") || !strings.HasSuffix(lines[4], "rad/s") {
 		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errs)
@@ -89,7 +112,7 @@ func TestTail(t *testing.T) {
 		t.Errorf("stderr %q", errs)
 	}
 
-	code, out, _ = runCLI(t, context.Background(), nil, "--addr", addr, "tail", "--json", "accelerometer", "--count=3", "--min-delta", "0.01")
+	code, out, _ = runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", addr, "tail", "--json", "accelerometer", "--count=3", "--min-delta", "0.01")
 	lines = strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 3 {
 		t.Fatalf("code %d, out %s", code, out)
@@ -109,7 +132,7 @@ func TestTailInterruptExitsCleanly(t *testing.T) {
 	var code int
 	var out string
 	go func() {
-		code, out, _ = runCLI(t, ctx, nil, "--addr", addr, "tail", "ui")
+		code, out, _ = runCLI(t, ctx, nil, "--insecure-dev", "--addr", addr, "tail", "ui")
 		close(done)
 	}()
 	time.Sleep(200 * time.Millisecond)
@@ -136,7 +159,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestConnectionRefused(t *testing.T) {
-	code, _, errs := runCLI(t, context.Background(), nil, "--addr", "127.0.0.1:1", "info")
+	code, _, errs := runCLI(t, context.Background(), nil, "--insecure-dev", "--addr", "127.0.0.1:1", "info")
 	if code != 1 || !strings.Contains(errs, "dial") {
 		t.Errorf("code %d, stderr %q", code, errs)
 	}

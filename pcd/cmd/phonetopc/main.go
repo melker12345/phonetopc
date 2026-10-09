@@ -1,11 +1,13 @@
-// Command phonetopc talks to a phonetopc phone (or the mock) directly.
+// Command phonetopc pairs with phonetopc phones and talks to them (or to the
+// mock) directly.
 //
-//	phonetopc [--addr host:port] info
-//	phonetopc [--addr host:port] list
-//	phonetopc [--addr host:port] get <source> [--json]
-//	phonetopc [--addr host:port] tail <source> [--type T] [--rate HZ] [--min-delta D] [--count N] [--json]
+//	phonetopc pair [--yes] [--png FILE]
+//	phonetopc devices | unpair <device> | pc
+//	phonetopc [--device D] info | list | get <source> | tail <source> ...
+//	phonetopc --insecure-dev --addr host:port info ...
 //
-// The address defaults to $PHONETOPC_ADDR, then 127.0.0.1:8765.
+// Without --insecure-dev every connection is secure (wss:// with the phone's
+// pinned key and this PC's token, SECURITY.md); see usage for details.
 package main
 
 import (
@@ -32,22 +34,40 @@ const version = "0.1.0"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, os.Getenv)
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
 	stop()
 	os.Exit(code)
 }
 
-const usage = `Usage: phonetopc [--addr host:port] <command> [flags] [args]
+const usage = `Usage: phonetopc [flags] <command> [flags] [args]
 
 Commands:
+  pair                 pair with a phone (shows a QR code and accepts "Find on network")
+  devices              list paired phones
+  unpair <device>      forget a paired phone
+  pc                   show this PC's id, name and pin
   info                 show the phone's hello information
   list                 list the phone's sensors
   get <source>         read the latest value of a source
   tail <source>        stream events of a source until Ctrl-C
 
 Flags (accepted before or after the command):
-  --addr host:port     phone address (default $PHONETOPC_ADDR or 127.0.0.1:8765)
+  --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
+                       needed only when several are paired
+  --addr host:port     connect to this address instead of looking for the phone
+                       ($PHONETOPC_ADDR)
+  --insecure-dev       plaintext ws:// to a phone in developer mode (or the mock
+                       without --state); no pairing involved. Default address
+                       127.0.0.1:8765 ($PHONETOPC_INSECURE_DEV=1)
+  --no-mdns            don't look for the phone with mDNS ($PHONETOPC_NO_MDNS=1)
   --json               print raw JSON instead of human-readable output
+
+pair flags:
+  --yes                accept without asking (for scripts and tests)
+  --png FILE           also write the QR code to a PNG file
+  --timeout D          give up after D (default 5m)
+  --listen ADDR        listen address (default ":0", all interfaces, random port)
+  --host H[,H...]      addresses to put in the QR code (default: all LAN addresses)
 
 tail flags:
   --type T             only events of type T
@@ -60,17 +80,25 @@ Sequence gaps (dropped events) are reported on stderr.
 
 // cli holds the shared state of one invocation.
 type cli struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
+	getenv         func(string) string
 	addr           string
+	device         string
+	dev            bool // --insecure-dev
+	noMDNS         bool
 	json           bool
 }
 
 // run is main without process globals, for testing. It returns the exit
 // code: 0 success, 1 runtime error, 2 usage error.
-func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	c := &cli{stdout: stdout, stderr: stderr, addr: getenv("PHONETOPC_ADDR")}
-	if c.addr == "" {
-		c.addr = fmt.Sprintf("127.0.0.1:%d", protocol.DefaultPort)
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
+	c := &cli{
+		stdin: stdin, stdout: stdout, stderr: stderr, getenv: getenv,
+		addr:   getenv("PHONETOPC_ADDR"),
+		device: getenv("PHONETOPC_DEVICE"),
+		dev:    envBool(getenv("PHONETOPC_INSECURE_DEV")),
+		noMDNS: envBool(getenv("PHONETOPC_NO_MDNS")),
 	}
 
 	global := c.flagSet("phonetopc")
@@ -98,6 +126,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		err = c.get(ctx, rest)
 	case "tail":
 		err = c.tail(ctx, rest)
+	case "pair":
+		err = c.pair(ctx, rest)
+	case "devices":
+		err = c.devices(rest)
+	case "unpair":
+		err = c.unpair(rest)
+	case "pc":
+		err = c.pc(rest)
 	case "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -113,9 +149,33 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	case errors.As(err, &ue):
 		return c.usageError(err)
 	default:
-		fmt.Fprintln(stderr, "phonetopc:", strings.TrimPrefix(err.Error(), "phonetopc: "))
+		fmt.Fprintln(stderr, "phonetopc:", explain(err))
 		return 1
 	}
+}
+
+func envBool(s string) bool {
+	b, err := strconv.ParseBool(s)
+	return err == nil && b
+}
+
+// explain turns an error into a message that says what to do.
+func explain(err error) string {
+	var pm *client.PinMismatchError
+	var amb *client.AmbiguousError
+	switch {
+	case errors.As(err, &pm):
+		return fmt.Sprintf("phone identity changed — re-pair with `phonetopc pair`.\n"+
+			"  The phone presented key %s, but %s was paired.\n"+
+			"  If you didn't reinstall or reset the phone app, something may be impersonating it.", pm.Got, pm.Want)
+	case client.IsUnauthorized(err):
+		return "this PC was revoked on the phone — run `phonetopc pair` to pair it again"
+	case errors.Is(err, client.ErrNoDevices):
+		return "no paired phone — run `phonetopc pair`, or use --insecure-dev --addr HOST:PORT for a phone in developer mode"
+	case errors.As(err, &amb):
+		return amb.Error()
+	}
+	return strings.TrimPrefix(err.Error(), "phonetopc: ")
 }
 
 type usageErr struct{ error }
@@ -133,6 +193,9 @@ func (c *cli) flagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we print our own usage
 	fs.StringVar(&c.addr, "addr", c.addr, "")
+	fs.StringVar(&c.device, "device", c.device, "")
+	fs.BoolVar(&c.dev, "insecure-dev", c.dev, "")
+	fs.BoolVar(&c.noMDNS, "no-mdns", c.noMDNS, "")
 	fs.BoolVar(&c.json, "json", c.json, "")
 	return fs
 }
@@ -162,9 +225,25 @@ func parse(fs *flag.FlagSet, args []string, wantPos int, posName string) ([]stri
 }
 
 func (c *cli) dial(ctx context.Context) (*client.Client, error) {
-	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return client.Dial(dctx, client.URL(c.addr), client.WithClientInfo("phonetopc-cli", version))
+	info := client.WithClientInfo("phonetopc-cli", version)
+	if c.dev {
+		addr := c.addr
+		if addr == "" {
+			addr = fmt.Sprintf("127.0.0.1:%d", protocol.DefaultPort)
+		}
+		return client.Dial(dctx, client.URL(addr), info)
+	}
+	dir, err := c.storeDir()
+	if err != nil {
+		return nil, err
+	}
+	opts := []client.Option{info, client.WithConfigDir(dir), client.WithDiscovery(!c.noMDNS, 0)}
+	if c.addr != "" {
+		opts = append(opts, client.WithAddress(c.addr))
+	}
+	return client.DialPaired(dctx, c.device, opts...)
 }
 
 func (c *cli) printJSON(v any) error {
@@ -202,6 +281,11 @@ func (c *cli) info(ctx context.Context, args []string) error {
 	row("model", h.Device.Model)
 	row("platform", strings.TrimSpace(h.Device.Platform+" "+h.Device.PlatformVersion))
 	row("capabilities", strings.Join(h.Capabilities, ", "))
+	if h.PC != nil {
+		row("paired as", fmt.Sprintf("%s (id %s)", h.PC.Name, h.PC.ID))
+	} else {
+		row("mode", "dev (plaintext, unauthenticated)")
+	}
 	return tw.Flush()
 }
 

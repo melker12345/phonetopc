@@ -183,7 +183,7 @@ func PairSAS(ctx context.Context, hostport string, phone PhoneInfo, token string
 	}
 	if err := c.call(ctx, MethodSASConfirm, SASConfirmParams{Match: &ok}, nil); err != nil {
 		if code, _ := protocol.ErrorCodeOf(err); code == protocol.CodeSASMismatch {
-			return PairedPC{}, fmt.Errorf("%w (%v)", ErrCodesDiffer, err)
+			return PairedPC{}, fmt.Errorf("%w (%w)", ErrCodesDiffer, err)
 		}
 		return PairedPC{}, err
 	}
