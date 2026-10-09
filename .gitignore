@@ -28,3 +28,6 @@ dist/
 # Editors / OS
 .vscode/
 .DS_Store
+
+# Claude Code agent worktrees
+.claude/worktrees/
