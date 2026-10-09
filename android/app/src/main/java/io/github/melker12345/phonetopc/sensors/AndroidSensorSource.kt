@@ -47,6 +47,9 @@ class AndroidSensorSource(context: Context) : SensorSource {
 
     private val latest = ConcurrentHashMap<String, Reading>()
     private val listeners = HashMap<String, SensorEventListener>() // guarded by `this`
+
+    /** Sources whose listener is registered, so `latest` reflects the present (read lock-free). */
+    private val liveSources: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private var batteryReceiver: BroadcastReceiver? = null // guarded by `this`
     @Volatile private var lastBattery: JsonElement? = null
 
@@ -107,15 +110,30 @@ class AndroidSensorSource(context: Context) : SensorSource {
             SensorCatalog.BATTERY -> if (demand != null) startBattery() else stopBattery()
             SensorCatalog.UI -> Unit // tile taps are pushed by the tile service
             else -> {
+                liveSources.remove(source)
                 listeners.remove(source)?.let { sensorManager?.unregisterListener(it) }
                 val sensor = hardware[source] ?: return
                 if (demand == null) return
                 val periodUs = demand.rateHz?.let { (1_000_000.0 / it).toInt() } ?: SensorManager.SENSOR_DELAY_NORMAL
                 val listener = Listener(source)
+                // A value cached while the listener was off may be stale. Forget it: Android
+                // delivers the current state of an on_change sensor right after registering,
+                // and that reading becomes the subscription's initial event.
+                if (SensorCatalog[source]?.stateful == true) latest.remove(source)
                 if (sensorManager?.registerListener(listener, sensor, periodUs, handler) == true) {
                     listeners[source] = listener
+                    liveSources += source
                 }
             }
+        }
+    }
+
+    override fun currentReading(source: String): Reading? {
+        if (source in disabledSources) return null
+        return when (source) {
+            SensorCatalog.BATTERY -> readBatterySticky()
+            SensorCatalog.UI -> null // event-like: no state to report
+            else -> if (source in liveSources) latest[source] else null
         }
     }
 
