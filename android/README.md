@@ -94,6 +94,11 @@ Don't rely on that: many networks block multicast.
 - If a client can't keep up, continuous events are dropped (visible as `seq` gaps). If
   on_change events back up, the connection is closed with 1008 (spec §5).
 - `ts_mono_ns` is `SensorEvent.timestamp`; `ts` is that converted to wall-clock time.
+- If the server was running when the app is updated (`adb install -r`), it starts again on
+  its own. **Settings → Start on boot** (off by default) does the same after a reboot, once
+  you unlock the phone. Stopping the server (in the app, from the notification, or by turning
+  developer mode off) means it stays stopped; Pause doesn't count as stopping. If Android
+  refuses the background start, you get a "Tap to start phonetopc" notification instead.
 - Phone makers' battery managers can still kill the service. **Settings → Keep running in
   the background** asks for the battery optimization exemption and shows steps for your
   brand (Samsung, Xiaomi, OnePlus/OPPO/realme, Huawei), based on

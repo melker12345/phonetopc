@@ -46,6 +46,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.settings.setPort(port) }
     }
 
+    fun setStartOnBoot(enabled: Boolean) {
+        viewModelScope.launch { graph.settings.setStartOnBoot(enabled) }
+    }
+
     fun setSourceEnabled(source: String, enabled: Boolean) {
         viewModelScope.launch { graph.settings.setSourceEnabled(source, enabled) }
     }

@@ -114,6 +114,8 @@
     <string name="settings_dev_mode_dialog_confirm">Turn on</string>
     <string name="settings_port">Port</string>
     <string name="settings_port_summary">%1$d · applies the next time the server starts</string>
+    <string name="settings_start_on_boot">Start on boot</string>
+    <string name="settings_start_on_boot_summary">If the server was running when the phone turned off, start it again after you unlock. After an app update it always comes back if it was running.</string>
     <string name="settings_port_range" tools:ignore="PluralsCandidate">Between %1$d and %2$d</string>
     <string name="settings_section_sensors">Sensors</string>
     <string name="settings_sensors_hint">Turned-off sensors are reported to PCs as unavailable.</string>

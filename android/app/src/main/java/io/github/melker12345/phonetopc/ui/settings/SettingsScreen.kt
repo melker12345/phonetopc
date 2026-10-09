@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Numbers
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -99,7 +100,7 @@ fun SettingsScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { SectionHeader(stringResource(R.string.settings_section_server)) }
-            item { ServerGroup(s, onDevMode = vm::setDevMode, onPort = vm::setPort) }
+            item { ServerGroup(s, onDevMode = vm::setDevMode, onPort = vm::setPort, onStartOnBoot = vm::setStartOnBoot) }
 
             item { SectionHeader(stringResource(R.string.settings_section_sensors), Modifier.padding(top = 16.dp)) }
             item {
@@ -137,7 +138,12 @@ private val transparentItem @Composable get() = ListItemDefaults.colors(containe
 // ---- server ----
 
 @Composable
-private fun ServerGroup(s: AppSettings, onDevMode: (Boolean) -> Unit, onPort: (Int) -> Unit) {
+private fun ServerGroup(
+    s: AppSettings,
+    onDevMode: (Boolean) -> Unit,
+    onPort: (Int) -> Unit,
+    onStartOnBoot: (Boolean) -> Unit,
+) {
     var confirmDevMode by rememberSaveable { mutableStateOf(false) }
     var editPort by rememberSaveable { mutableStateOf(false) }
 
@@ -176,6 +182,14 @@ private fun ServerGroup(s: AppSettings, onDevMode: (Boolean) -> Unit, onPort: (I
             leadingContent = { IconBadge(Icons.Rounded.Numbers, size = 36.dp) },
             headlineContent = { Text(stringResource(R.string.settings_port)) },
             supportingContent = { Text(stringResource(R.string.settings_port_summary, s.port)) },
+        )
+        ListItem(
+            colors = transparentItem,
+            modifier = Modifier.toggleable(value = s.startOnBoot, role = Role.Switch, onValueChange = onStartOnBoot),
+            leadingContent = { IconBadge(Icons.Rounded.PowerSettingsNew, size = 36.dp) },
+            headlineContent = { Text(stringResource(R.string.settings_start_on_boot)) },
+            supportingContent = { Text(stringResource(R.string.settings_start_on_boot_summary)) },
+            trailingContent = { Switch(checked = s.startOnBoot, onCheckedChange = null) },
         )
     }
 
