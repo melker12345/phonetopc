@@ -649,3 +649,77 @@ func TestMinDeltaDoesNotSuppressTaps(t *testing.T) {
 		}
 	}
 }
+
+// min_delta doesn't apply to object values either: battery changes by 1%
+// per step, which a number-like distance would suppress at min_delta 1000.
+func TestMinDeltaIgnoredForObjects(t *testing.T) {
+	opts := quietOptions()
+	opts.BatteryEvery = 5 * time.Millisecond
+	_, url := start(t, opts)
+	c := dial(t, url)
+	sub, err := c.Subscribe(testCtx(t), "battery", client.SubscribeOptions{MinDelta: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 4 {
+		if ev := nextEvent(t, sub); ev.Seq != uint64(i) {
+			t.Errorf("seq %d, want %d", ev.Seq, i)
+		}
+	}
+}
+
+// Spec §4.3, checked on the wire: the subscribe response comes before the
+// subscription's first event, on_change sources with state start with their
+// current value as seq 0, and ui sends nothing until a tap.
+func TestSubscribeResponsePrecedesEvents(t *testing.T) {
+	srv, url := start(t, quietOptions())
+	r := dialRaw(t, url, nil)
+	r.hello()
+	for _, c := range []struct {
+		params  map[string]any
+		initial bool // an event follows the response right away
+	}{
+		{map[string]any{"source": "light"}, true},
+		{map[string]any{"source": "proximity", "min_delta": 100}, true},
+		{map[string]any{"source": "battery"}, true},
+		{map[string]any{"source": "gyro", "rate_hz": 200}, true},
+		{map[string]any{"source": "ui"}, false},
+	} {
+		r.nextID++
+		b, _ := json.Marshal(protocol.NewRequest(protocol.IntID(int64(r.nextID)), "subscribe", c.params))
+		r.sendRaw(string(b))
+		// No other subscription is active, so the next frame must be the
+		// response.
+		m := r.mustRead()
+		if m.Kind() != protocol.KindResponse || m.Error != nil {
+			t.Fatalf("subscribe %v: first frame %+v, want the response", c.params, m)
+		}
+		var res protocol.SubscribeResult
+		if err := json.Unmarshal(m.Result, &res); err != nil {
+			t.Fatal(err)
+		}
+		if c.initial {
+			m = r.mustRead()
+			var ev protocol.Event
+			if err := json.Unmarshal(m.Params, &ev); m.Method != protocol.MethodEvent || err != nil ||
+				ev.Subscription != res.Subscription || ev.Seq != 0 {
+				t.Errorf("subscribe %v: first event %+v (%v)", c.params, m, err)
+			}
+		} else {
+			// (A read with a timeout would close the connection, so probe
+			// with a request instead: its response must come next.)
+			time.Sleep(50 * time.Millisecond)
+			r.sendRaw(`{"jsonrpc":"2.0","id":"probe","method":"get","params":{"source":"battery"}}`)
+			if m := r.mustRead(); string(m.ID) != `"probe"` {
+				t.Errorf("subscribe %v: unexpected frame %+v", c.params, m)
+			}
+			srv.Tap()
+			if m := r.mustRead(); m.Method != protocol.MethodEvent {
+				t.Errorf("after tap: %+v", m)
+			}
+		}
+		if m := r.call("unsubscribe", map[string]any{"subscription": res.Subscription}); m.Error != nil {
+			t.Fatal(m.Error)
+		}
+	}
+}
