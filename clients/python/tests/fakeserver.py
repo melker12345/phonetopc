@@ -706,11 +706,16 @@ def _approval_params_problem(params: dict[str, Any]) -> str | None:
     reason = params.get("reason")
     if not isinstance(reason, str):
         return "reason must be a string"
-    trimmed = reason.strip()
-    if not 1 <= len(trimmed) <= 200:
-        return "reason must be 1-200 characters"
-    if any(unicodedata.category(c) == "Cc" for c in trimmed):
+    # The phone never trims: it checks and hashes the reason exactly as received.
+    if not 1 <= len(reason) <= 200:
+        return "reason must be 1-200 code points"
+    if reason != reason.strip():
+        return "reason must not start or end with whitespace"
+    if any(unicodedata.category(c) == "Cc" for c in reason):
         return "reason must not contain control characters"
+    bidi = "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+    if any(c in bidi for c in reason):
+        return "reason must not contain bidirectional controls"
     nonce = params.get("nonce")
     try:
         raw = base64.urlsafe_b64decode(nonce + "=" * (-len(nonce) % 4))  # type: ignore[operator]

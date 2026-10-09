@@ -111,24 +111,31 @@ def new_nonce() -> str:
 
 
 def check_reason(reason: str) -> str:
-    """Validate ``reason`` (APPROVAL.md section 4) and return it trimmed.
+    """Validate ``reason`` (APPROVAL.md section 4) and return it unchanged.
 
-    1-200 characters after trimming, no control characters. The trimmed text
-    is what gets sent and signed, so both sides hash the same bytes. The limit
-    is checked in code points and in UTF-16 units (what Kotlin counts), so a
-    reason accepted here is never too long for the phone.
+    1-200 code points, no leading or trailing whitespace, no control characters
+    and no bidirectional controls. Nothing is trimmed: the phone hashes the
+    reason exactly as received, so the client must send and sign the same text.
     """
     if not isinstance(reason, str):
         raise TypeError(f"reason must be a str, not {type(reason).__name__}")
-    text = reason.strip()
-    if not text:
+    if not reason:
         raise ValueError("reason must not be empty")
-    utf16_units = len(text.encode("utf-16-le")) // 2
-    if max(len(text), utf16_units) > MAX_REASON_LENGTH:
+    if reason != reason.strip():
+        raise ValueError("reason must not start or end with whitespace")
+    if len(reason) > MAX_REASON_LENGTH:
         raise ValueError(f"reason is longer than {MAX_REASON_LENGTH} characters")
-    if any(unicodedata.category(c) == "Cc" for c in text):
+    if any(unicodedata.category(c) == "Cc" for c in reason):
         raise ValueError("reason must not contain control characters (newlines, tabs, ...)")
-    return text
+    if any(c in _BIDI_CONTROLS for c in reason):
+        raise ValueError("reason must not contain bidirectional control characters")
+    return reason
+
+
+#: Characters that can make shown text read differently from its bytes.
+_BIDI_CONTROLS = frozenset(
+    "؜‎‏" + "".join(map(chr, range(0x202A, 0x202F))) + "".join(map(chr, range(0x2066, 0x206A)))
+)
 
 
 def approval_message(phone_id: str, pc_id: str, nonce: str, reason: str) -> bytes:

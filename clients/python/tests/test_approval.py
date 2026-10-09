@@ -143,10 +143,27 @@ def test_nonce_is_fresh_32_bytes() -> None:
 
 
 def test_check_reason() -> None:
-    assert check_reason("  Run deploy?  ") == "Run deploy?"
+    assert check_reason("Run deploy?") == "Run deploy?"
     assert check_reason("x" * 200) == "x" * 200
+    assert check_reason("🚀" * 200) == "🚀" * 200  # code points, not UTF-16 units
     assert check_reason("Deploy 🚀?") == "Deploy 🚀?"
-    for bad in ("", "   ", "x" * 201, "a\nb", "a\tb", "bell\x07", "x\x85x", "🚀" * 101):
+    bad_inputs = (
+        "",
+        "   ",
+        " Run deploy?",
+        "Run deploy? ",
+        "x" * 201,
+        "a\nb",
+        "a\tb",
+        "bell\x07",
+        "x\x85x",
+        "🚀" * 201,
+        "pay \u202eevil",
+        "a\u2066b",
+        "a\u200fb",
+        "a\u061cb",
+    )
+    for bad in bad_inputs:
         with pytest.raises(ValueError):
             check_reason(bad)
     with pytest.raises(TypeError):
@@ -175,13 +192,13 @@ async def test_approved(secure_server: FakeServer, approving: Path) -> None:
     async with phonetopc.connect() as phone:
         assert "approval" in phone.capabilities
         assert phone.approval_key == secure_server.approval_info["pin"]
-        result = await phone.request_approval("  Run deploy.sh on arch-desktop?  ")
+        result = await phone.request_approval("Run deploy.sh on arch-desktop?")
         assert result and result.approved and result.why is None
         assert isinstance(result, phonetopc.ApprovalResult)
         again = await phone.request_approval("Run deploy.sh on arch-desktop?", timeout=60)
         assert again
     first, second = secure_server.requests("request_approval")
-    assert first["params"]["reason"] == "Run deploy.sh on arch-desktop?"  # sent trimmed
+    assert first["params"]["reason"] == "Run deploy.sh on arch-desktop?"  # sent unchanged
     assert first["params"]["timeout_ms"] == 30000 and second["params"]["timeout_ms"] == 60000
     assert len(first["params"]["nonce"]) == 43
     assert first["params"]["nonce"] != second["params"]["nonce"]  # fresh every time

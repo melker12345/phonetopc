@@ -27,14 +27,16 @@ Pair the phone once with the Go CLI (see [`pcd/`](../../pcd)): run `phonetopc pa
 import asyncio
 import phonetopc
 
+
 async def main():
     async with phonetopc.connect(client_name="demo") as phone:  # the paired phone
-        print(phone.device)                       # from the hello handshake
+        print(phone.device)  # from the hello handshake
         battery = await phone.get("battery")
-        print(battery.value)                      # {'level': 82, 'charging': True}
+        print(battery.value)  # {'level': 82, 'charging': True}
         async with phone.subscribe("gyro", rate_hz=100) as events:
             async for ev in events:
                 print(ev.seq, ev.value, ev.unit)  # 17 [0.01, -0.32, 0.05] rad/s
+
 
 asyncio.run(main())
 ```
@@ -109,9 +111,11 @@ The file holds secret tokens, so it should be mode `0600`. If other users can re
 ```python
 import phonetopc.sync
 
+
 def approved(reason: str) -> bool:
-    with phonetopc.sync.connect() as phone:   # the paired phone
+    with phonetopc.sync.connect() as phone:  # the paired phone
         return bool(phone.request_approval(reason))
+
 
 if approved("Run deploy.sh on arch-desktop?"):
     ...
@@ -211,7 +215,7 @@ For scripts that don't want asyncio, `phonetopc.sync` runs the same client on a 
 ```python
 import phonetopc.sync
 
-with phonetopc.sync.connect() as phone:   # same arguments as phonetopc.connect
+with phonetopc.sync.connect() as phone:  # same arguments as phonetopc.connect
     print(phone.get("battery").value)
     if phone.request_approval("Print gyro readings?"):
         print("approved")

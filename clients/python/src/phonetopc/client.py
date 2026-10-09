@@ -501,8 +501,9 @@ class Phone:
         (``"denied"``, ``"cancelled"``, ``"timeout"``, ``"busy"``,
         ``"lockout"``, ``"unavailable"``).
 
-        ``reason`` is shown on the phone (1-200 characters after trimming, no
-        control characters; it is sent trimmed). ``timeout`` is how long the
+        ``reason`` is shown on the phone exactly as given: 1-200 characters,
+        no leading or trailing whitespace, no control or bidirectional
+        control characters (``ValueError`` otherwise). ``timeout`` is how long the
         phone waits for the user, 5-120 seconds; the client waits 5 s longer.
 
         Raises :class:`~phonetopc.errors.ApprovalDependencyMissing` (an
