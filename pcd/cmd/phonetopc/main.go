@@ -290,8 +290,8 @@ func (c *cli) tail(ctx context.Context, args []string) error {
 	if sub.RateHz > 0 {
 		rate = " at " + num(sub.RateHz) + " Hz"
 	}
-	fmt.Fprintf(c.stderr, "phonetopc: subscribed to %s (%s)%s as %s; Ctrl-C to stop\n",
-		sub.Source, strings.Join(sub.Types, ","), rate, sub.ID)
+	fmt.Fprintf(c.stderr, "phonetopc: subscribed to %s (%s, %s)%s as %s; Ctrl-C to stop\n",
+		sub.Source, strings.Join(sub.Types, ","), sub.Mode, rate, sub.ID)
 
 	var (
 		next  uint64

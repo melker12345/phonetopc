@@ -186,7 +186,7 @@ func TestSubscribeGyro(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sub.RateHz != 100 || sub.Source != "gyro" || len(sub.Types) != 1 || sub.Types[0] != "rotation" {
+	if sub.RateHz != 100 || sub.Mode != client.ModeContinuous || sub.Source != "gyro" || len(sub.Types) != 1 || sub.Types[0] != "rotation" {
 		t.Errorf("subscription %+v", sub)
 	}
 	begin := time.Now()
@@ -344,6 +344,9 @@ func TestOnChangeSources(t *testing.T) {
 		sub, err := c.Subscribe(testCtx(t), src, client.SubscribeOptions{})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if sub.Mode != client.ModeOnChange || sub.RateHz != 0 {
+			t.Errorf("%s subscription %+v", src, sub)
 		}
 		ev := nextEvent(t, sub)
 		if ev.Seq != 0 || ev.Source != src {

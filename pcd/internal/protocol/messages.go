@@ -97,6 +97,8 @@ type SubscribeResult struct {
 	Subscription string   `json:"subscription"`
 	Source       string   `json:"source"`
 	Types        []string `json:"types"`
+	// Mode is copied from the source's list_sensors entry.
+	Mode Mode `json:"mode"`
 	// RateHz is the effective rate; omitted for on_change sources.
 	RateHz float64 `json:"rate_hz,omitempty"`
 }

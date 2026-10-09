@@ -40,6 +40,13 @@ type (
 	Battery     = protocol.Battery
 	Error       = protocol.Error
 	ErrorCode   = protocol.ErrorCode
+	Mode        = protocol.Mode
+)
+
+// Sensor modes, as in SensorInfo.Mode and Subscription.Mode.
+const (
+	ModeContinuous = protocol.ModeContinuous
+	ModeOnChange   = protocol.ModeOnChange
 )
 
 // ErrClosed is returned by calls on a client that has been closed with Close.

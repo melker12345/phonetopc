@@ -223,7 +223,7 @@ func TestSubscribeNoEarlyEventLoss(t *testing.T) {
 			switch m.Method {
 			case protocol.MethodSubscribe:
 				f.send(ctx, protocol.NewResult(m.ID, protocol.SubscribeResult{
-					Subscription: "s-1", Source: "gyro", Types: []string{"rotation"}, RateHz: 50}))
+					Subscription: "s-1", Source: "gyro", Types: []string{"rotation"}, Mode: protocol.ModeContinuous, RateHz: 50}))
 				for i := range 5 {
 					f.send(ctx, protocol.NewEventNotification(event("s-1", uint64(i))))
 				}
@@ -243,7 +243,7 @@ func TestSubscribeNoEarlyEventLoss(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sub.ID != "s-1" || sub.RateHz != 50 || sub.Source != "gyro" {
+		if sub.ID != "s-1" || sub.RateHz != 50 || sub.Source != "gyro" || sub.Mode != ModeContinuous {
 			t.Errorf("sub = %+v", sub)
 		}
 		for i := range 5 {

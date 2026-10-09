@@ -64,8 +64,8 @@ func TestResponseEncoding(t *testing.T) {
 	}{
 		{NewResult(IntID(4), UnsubscribeResult{}), `{"jsonrpc":"2.0","id":4,"result":{}}`},
 		{NewErrorResponse(nil, NewError(CodeParseError, "bad")), `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"bad","data":{"name":"parse_error"}}}`},
-		{NewResult(json.RawMessage(`"abc"`), SubscribeResult{Subscription: "s-1", Source: "ui", Types: []string{"tile_tap"}}),
-			`{"jsonrpc":"2.0","id":"abc","result":{"subscription":"s-1","source":"ui","types":["tile_tap"]}}`},
+		{NewResult(json.RawMessage(`"abc"`), SubscribeResult{Subscription: "s-1", Source: "ui", Types: []string{"tile_tap"}, Mode: ModeOnChange}),
+			`{"jsonrpc":"2.0","id":"abc","result":{"subscription":"s-1","source":"ui","types":["tile_tap"],"mode":"on_change"}}`},
 	}
 	for _, c := range cases {
 		b, err := json.Marshal(c.resp)

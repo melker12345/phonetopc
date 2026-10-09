@@ -30,6 +30,10 @@ type Subscription struct {
 	// Source and Types are what the server subscribed to.
 	Source string
 	Types  []string
+	// Mode is the source's mode as reported by the server. Continuous
+	// sources are sampled at RateHz; on_change sources emit when their value
+	// changes, starting with the current value if the source has one.
+	Mode Mode
 	// RateHz is the effective rate (0 for on_change sources).
 	RateHz float64
 
@@ -79,7 +83,7 @@ func (c *Client) Subscribe(ctx context.Context, source string, opts SubscribeOpt
 				return err
 			}
 			sub = &Subscription{
-				ID: res.Subscription, Source: res.Source, Types: res.Types, RateHz: res.RateHz,
+				ID: res.Subscription, Source: res.Source, Types: res.Types, Mode: res.Mode, RateHz: res.RateHz,
 				c: c, ch: make(chan Event, c.opts.eventBuffer),
 			}
 			c.mu.Lock()
