@@ -1,6 +1,6 @@
 # phonetopc for Python
 
-The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md)).
+The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md), draft 1; draft 0 servers work too).
 
 - asyncio API with typed events, plus a small blocking wrapper
 - One dependency: [`websockets`](https://websockets.readthedocs.io/)
@@ -82,6 +82,8 @@ Requests can run concurrently: one reader task matches responses to requests by 
 ### `Subscription`
 
 An async context manager and async iterator of `Event`. Leaving the `async with` block sends `unsubscribe`.
+
+For an `on_change` source with state (battery, light, proximity) the server sends the current value first, as `seq` 0, so you learn the state without waiting for a change. `ui` sends nothing until the tile is tapped.
 
 - `id`, `mode` (`"continuous"` or `"on_change"`), `rate_hz` (effective rate reported by the server, continuous sensors only), `info` (`SubscribeResult`)
 - `dropped`: total events lost. That's `dropped_remote` (gaps in `seq`, meaning the server dropped them) plus `dropped_local` (discarded because the local queue was full)

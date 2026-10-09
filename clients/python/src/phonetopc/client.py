@@ -1,4 +1,4 @@
-"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md).
+"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md, draft 1).
 
 One :class:`Phone` owns one WebSocket and one reader task. The reader
 correlates responses with pending requests by ``id`` and routes ``event``
