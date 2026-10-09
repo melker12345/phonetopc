@@ -265,6 +265,9 @@ class PairingClient(
             throw e
         } catch (e: IOException) {
             _state.value = PairingState.Failed(PairingFailure.ConnectionLost(e.message), pcName)
+        } catch (e: Exception) {
+            // e.g. the phone's own key or settings couldn't be read: report, don't crash.
+            _state.value = PairingState.Failed(PairingFailure.Protocol(e.message ?: e.javaClass.simpleName), pcName)
         } finally {
             codeAnswer = null
         }
