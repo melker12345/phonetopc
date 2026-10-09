@@ -3,10 +3,11 @@
 {"dir":"c2s","msg":[{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1"}}]}
 {"dir":"s2c","msg":{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"batch requests are not supported","data":{"name":"invalid_request"}}}}
 {"dir":"c2s","msg":{"jsonrpc":"2.0","method":"hello","params":{"protocol":"phonetopc/1"}}}
-{"dir":"s2c","msg":{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"missing id (client notifications are not supported)","data":{"name":"invalid_request"}}}}
-{"dir":"c2s","msg":{"jsonrpc":"1.0","id":2,"method":"hello","params":{"protocol":"phonetopc/1"}}}
-{"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"jsonrpc must be \"2.0\"","data":{"name":"invalid_request"}}}}
-{"dir":"c2s","msg":{"jsonrpc":"2.0","id":3,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
-{"dir":"s2c","msg":{"jsonrpc":"2.0","id":3,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":2,"method":"list_sensors"}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32003,"message":"send hello first","data":{"name":"hello_required"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"1.0","id":3,"method":"hello","params":{"protocol":"phonetopc/1"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"jsonrpc must be \"2.0\"","data":{"name":"invalid_request"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":4,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":4,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}
 {"dir":"c2s","binary":"AQID"}
 {"dir":"s2c","close":{"code":1003,"reason":"binary frames are not supported"}}

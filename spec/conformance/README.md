@@ -49,10 +49,10 @@ informative.
 | `rate_and_min_delta.jsonl` | `rate_hz` clamping (0.5 → 1, 1000 → 200); a `min_delta` that only lets the first event through |
 | `error_hello.jsonl` | `-32003 hello_required`, `-32004 unsupported_protocol` with `data.supported` |
 | `error_methods.jsonl` | `-32601`, `-32001`, `-32002` (proximity is unavailable in this session), `-32602`, `-32005`, `-32006` |
-| `error_framing.jsonl` | `-32700` parse error, `-32600` for a batch array, a missing id and a wrong `jsonrpc`; close 1003 for a binary frame |
+| `error_framing.jsonl` | `-32700` parse error, `-32600` for a batch array and a wrong `jsonrpc`; a client notification (no `id`) that gets no reply; close 1003 for a binary frame |
 
 Some `c2s` messages in the error transcripts are deliberately invalid, and they don't validate
-against the schema. Examples are an unknown method, `rate_hz: 0`, a batch array, and a missing id.
+against the schema. Examples are an unknown method, `rate_hz: 0`, a batch array, and a notification without `id`.
 Every `s2c` message validates against [`../schemas/phonetopc-1.schema.json`](../schemas/phonetopc-1.schema.json).
 
 ## Mock behaviour beyond the spec text
@@ -67,8 +67,8 @@ The transcripts show some choices the spec leaves open. The mock makes them as f
 - `rate_hz` is accepted for `on_change` sources but has no effect, and the result leaves `rate_hz`
   out.
 - Hello gating comes before method lookup. An unknown method sent before `hello` gets `-32003`.
-- A request with no `id` gets `-32600` with `id: null`, because draft 0 doesn't support
-  notifications from the client.
+- A client message without `id` is ignored even if it would be malformed as a request (wrong
+  `jsonrpc`, no `method`): there is no reply at all, not even an error.
 
 ## Regenerating
 

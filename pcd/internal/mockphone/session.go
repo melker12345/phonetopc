@@ -107,6 +107,9 @@ func (s *session) readLoop() error {
 			t(ClientToServer, data)
 		}
 		resp, after := s.handle(data)
+		if resp == nil {
+			continue // a client notification: no reply
+		}
 		if !s.send(resp) {
 			return s.ctx.Err()
 		}
@@ -213,7 +216,8 @@ func (s *session) stopAll() {
 }
 
 // handle processes one text frame and returns the response to send, plus an
-// optional function to run after the response has been queued.
+// optional function to run after the response has been queued. resp is nil
+// for a client notification, which gets no reply.
 func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	fail := func(id json.RawMessage, code protocol.ErrorCode, format string, args ...any) (*protocol.Response, func()) {
 		return protocol.NewErrorResponse(id, protocol.NewError(code, format, args...)), nil
@@ -235,14 +239,13 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	}
 
 	id, hasID := fields["id"]
-	if hasID && !protocol.ValidRequestID(id) {
-		return fail(nil, protocol.CodeInvalidRequest, "id must be an integer or a string")
-	}
-	// Spec §2 says requests have an id; draft 0 defines no client-to-server
-	// notifications. Rather than silently ignoring an id-less message (which
-	// JSON-RPC would do and leaves the client hanging), we answer it.
+	// Spec §2: an object without id is a client notification. None are
+	// defined, so it is ignored without a reply, whatever else it contains.
 	if !hasID {
-		return fail(nil, protocol.CodeInvalidRequest, "missing id (client notifications are not supported)")
+		return nil, nil
+	}
+	if !protocol.ValidRequestID(id) {
+		return fail(nil, protocol.CodeInvalidRequest, "id must be an integer or a string")
 	}
 	var version string
 	if json.Unmarshal(fields["jsonrpc"], &version) != nil || version != protocol.JSONRPCVersion {
@@ -268,8 +271,11 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	case protocol.MethodHello:
 		result, rpcErr = s.hello(params)
 	case protocol.MethodListSensors:
-		// Params, if any, are ignored (servers ignore unknown params members).
-		result = protocol.ListSensorsResult{Sensors: s.srv.sensors()}
+		// list_sensors takes no params, but if present they must still be an
+		// object (spec §2); its members are ignored.
+		if rpcErr = decodeParams(params, &struct{}{}); rpcErr == nil {
+			result = protocol.ListSensorsResult{Sensors: s.srv.sensors()}
+		}
 	case protocol.MethodSubscribe:
 		result, after, rpcErr = s.subscribe(params)
 	case protocol.MethodUnsubscribe:

@@ -49,6 +49,7 @@ type closeInfo struct {
 type step struct {
 	send    string // text frame; the runner then waits for a response
 	invalid bool   // send is deliberately not schema-valid
+	notify  string // text frame without id; no response is expected
 	events  int    // wait until this many events have arrived
 	tap     bool   // trigger a ui/tile_tap on the mock
 	binary  []byte // send a binary frame; the runner then waits for the close
@@ -140,13 +141,14 @@ var scenarios = []scenario{
 	},
 	{
 		name:  "error_framing",
-		about: "parse error (-32700), batch and malformed requests (-32600), binary frame (close 1003)",
+		about: "parse error (-32700), batch and malformed requests (-32600), an ignored client notification, binary frame (close 1003)",
 		steps: []step{
 			{send: `{"jsonrpc":"2.0","id":1,"method":`, invalid: true},
 			{send: `[{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1"}}]`, invalid: true},
-			{send: `{"jsonrpc":"2.0","method":"hello","params":{"protocol":"phonetopc/1"}}`, invalid: true},
-			{send: `{"jsonrpc":"1.0","id":2,"method":"hello","params":{"protocol":"phonetopc/1"}}`, invalid: true},
-			{send: req(3, "hello", helloParams)},
+			{notify: `{"jsonrpc":"2.0","method":"hello","params":{"protocol":"phonetopc/1"}}`},
+			{send: req(2, "list_sensors", "")}, // no hello yet: the notification was ignored
+			{send: `{"jsonrpc":"1.0","id":3,"method":"hello","params":{"protocol":"phonetopc/1"}}`, invalid: true},
+			{send: req(4, "hello", helloParams)},
 			{binary: []byte{0x01, 0x02, 0x03}},
 		},
 	},
@@ -169,6 +171,9 @@ func runScenario(t *testing.T, sc scenario) []transcriptLine {
 	for _, s := range sc.steps {
 		if s.invalid {
 			invalid[s.send] = true
+		}
+		if s.notify != "" { // no client notifications are defined
+			invalid[s.notify] = true
 		}
 	}
 	v := newFrameValidator(t)
@@ -217,6 +222,9 @@ func runScenario(t *testing.T, sc scenario) []transcriptLine {
 					break
 				}
 			}
+		case s.notify != "":
+			// Nothing comes back; the next request's response shows that.
+			r.sendRaw(s.notify)
 		case s.events > 0:
 			for events < s.events {
 				if _, err := readOne(); err != nil {
@@ -375,9 +383,16 @@ func TestTranscriptFilesMatchSchema(t *testing.T) {
 	for _, sc := range scenarios {
 		invalid := map[string]bool{}
 		for _, s := range sc.steps {
+			frames := []string{s.notify}
 			if s.invalid {
+				frames = append(frames, s.send)
+			}
+			for _, frame := range frames {
+				if frame == "" {
+					continue
+				}
 				var buf bytes.Buffer
-				if json.Compact(&buf, []byte(s.send)) == nil {
+				if json.Compact(&buf, []byte(frame)) == nil {
 					invalid[buf.String()] = true
 				}
 			}

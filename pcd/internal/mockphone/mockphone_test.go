@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,7 +108,6 @@ func TestFramingErrors(t *testing.T) {
 		{`[{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1"}}]`, protocol.CodeInvalidRequest, "null"},
 		{`[]`, protocol.CodeInvalidRequest, "null"},
 		{`42`, protocol.CodeInvalidRequest, "null"},
-		{`{"jsonrpc":"2.0","method":"hello","params":{"protocol":"phonetopc/1"}}`, protocol.CodeInvalidRequest, "null"},
 		{`{"jsonrpc":"1.0","id":7,"method":"hello","params":{"protocol":"phonetopc/1"}}`, protocol.CodeInvalidRequest, "7"},
 		{`{"id":8,"method":"hello","params":{"protocol":"phonetopc/1"}}`, protocol.CodeInvalidRequest, "8"},
 		{`{"jsonrpc":"2.0","id":{"a":1},"method":"hello"}`, protocol.CodeInvalidRequest, "null"},
@@ -129,6 +129,72 @@ func TestFramingErrors(t *testing.T) {
 	if m := r.response(); string(m.ID) != `"req-é"` || m.Error != nil {
 		t.Errorf("string id response %+v", m)
 	}
+}
+
+// Messages without id are client notifications (spec §2): none are defined,
+// so the server ignores them and sends nothing back, even when they would be
+// invalid as requests.
+func TestClientNotificationsAreIgnored(t *testing.T) {
+	_, url := start(t, quietOptions())
+	r := dialRaw(t, url, nil)
+	for _, frame := range []string{
+		`{"jsonrpc":"2.0","method":"hello","params":{"protocol":"phonetopc/1"}}`,
+		`{"jsonrpc":"2.0","method":"no_such_method"}`,
+		`{"jsonrpc":"2.0","method":"event","params":5}`,
+		`{"jsonrpc":"1.0","method":"hello"}`,
+		`{"jsonrpc":"2.0","result":{}}`,
+		`{}`,
+	} {
+		r.sendRaw(frame)
+	}
+	// The next frame is the answer to this request, and the hello
+	// notification did not count as a hello.
+	r.sendRaw(`{"jsonrpc":"2.0","id":1,"method":"list_sensors"}`)
+	wantError(t, r.mustRead(), protocol.CodeHelloRequired, "1")
+	r.nextID = 1
+	r.hello()
+	r.sendRaw(`{"jsonrpc":"2.0","method":"subscribe","params":{"source":"gyro"}}`)
+	r.sendRaw(`{"jsonrpc":"2.0","id":3,"method":"get","params":{"source":"battery"}}`)
+	if m := r.mustRead(); m.Kind() != protocol.KindResponse || string(m.ID) != "3" || m.Error != nil {
+		t.Errorf("got %+v, want the get response", m)
+	}
+	// The subscribe notification created no subscription, so no events.
+	ctx, cancel := context.WithTimeout(testCtx(t), 200*time.Millisecond)
+	defer cancel()
+	if m, err := r.read(ctx); err == nil {
+		t.Errorf("unexpected frame %+v", m)
+	}
+}
+
+// params: an explicit null is the same as absent; any non-object is -32602,
+// also for methods that take no params.
+func TestParamsMustBeObjectOrNull(t *testing.T) {
+	_, url := start(t, quietOptions())
+	r := dialRaw(t, url, nil)
+	r.sendRaw(`{"jsonrpc":"2.0","id":1,"method":"hello","params":null}`)
+	wantError(t, r.response(), protocol.CodeInvalidParams, "1")
+	r.nextID = 1
+	r.hello()
+	for i, params := range []string{`5`, `"x"`, `true`, `[]`, `[{"source":"gyro"}]`} {
+		for _, method := range []string{"list_sensors", "subscribe", "get", "unsubscribe"} {
+			id := 100 + i*10 + len(method)
+			r.sendRaw(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":%s}`, id, method, params))
+			m := r.response()
+			t.Run(method+" "+params, func(t *testing.T) { wantError(t, m, protocol.CodeInvalidParams, strconv.Itoa(id)) })
+		}
+	}
+	for _, frame := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"list_sensors","params":null}`,
+		`{"jsonrpc":"2.0","id":2,"method":"list_sensors","params":{"ignored":true}}`,
+	} {
+		r.sendRaw(frame)
+		if m := r.response(); m.Error != nil || m.Result == nil {
+			t.Errorf("%s: %+v", frame, m.Error)
+		}
+	}
+	// Null params for a method with a required param is "missing param".
+	r.sendRaw(`{"jsonrpc":"2.0","id":3,"method":"get","params":null}`)
+	wantError(t, r.response(), protocol.CodeInvalidParams, "3")
 }
 
 func TestMethodAndParamErrors(t *testing.T) {
