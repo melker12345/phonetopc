@@ -20,6 +20,12 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/store"
 )
 
+// defaultPairPort is the pairing listener's default port (SECURITY.md
+// §4.1); defaultPairListen is replaced in tests.
+const defaultPairPort = pairing.DefaultPort
+
+var defaultPairListen = fmt.Sprintf(":%d", defaultPairPort)
+
 func (c *cli) storeDir() (string, error) { return store.DefaultDir(c.getenv) }
 
 func (c *cli) store() (*store.Store, error) {
@@ -48,7 +54,7 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	yes := fs.Bool("yes", false, "")
 	png := fs.String("png", "", "")
 	timeout := fs.Duration("timeout", 5*time.Minute, "")
-	listen := fs.String("listen", ":0", "")
+	listen := fs.String("listen", "", "")
 	var hosts hostList
 	fs.Var(&hosts, "host", "")
 	if _, err := parse(fs, args, 0, ""); err != nil {
@@ -66,12 +72,15 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		return fmt.Errorf("loading this PC's identity: %w", err)
 	}
 
-	ln, err := net.Listen("tcp", *listen)
+	ln, randomPort, err := listenPair(*listen)
 	if err != nil {
 		return err
 	}
 	defer ln.Close()
 	port := ln.Addr().(*net.TCPAddr).Port
+	if randomPort {
+		fmt.Fprintf(c.stderr, "phonetopc: port %d is busy; listening on random port %d instead\n", defaultPairPort, port)
+	}
 	if len(hosts) == 0 {
 		hosts = qrHosts(ln.Addr().(*net.TCPAddr).IP)
 	}
@@ -128,6 +137,7 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		defer adv.Stop()
 		fmt.Fprintf(c.stdout, "  • Or tap Find on network → %q, and compare the 6-digit codes.\n\n", pc.Name)
 	}
+	writeFirewallHint(c.stdout, detectFirewalls(), port, discovery.LANPrefixes(), randomPort)
 	fmt.Fprintf(c.stdout, "This PC's pin: %s\nWaiting for the phone (listening on port %d, for %v; Ctrl-C to cancel)…\n", pc.Pin, port, *timeout)
 
 	res, err := l.Serve(ctx, ln)
@@ -143,6 +153,25 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintf(c.stdout, "\nPaired with %q (id %s) by %s.\nTry: phonetopc info\n", res.Phone.Name, res.Phone.ID, how)
 	return nil
+}
+
+// listenPair opens the pairing listener's socket: on addr if given,
+// otherwise on the default port 8766, falling back to a random port if that
+// is busy (randomPort true).
+func listenPair(addr string) (ln net.Listener, randomPort bool, err error) {
+	if addr != "" {
+		ln, err = net.Listen("tcp", addr)
+		return ln, false, err
+	}
+	if ln, err = net.Listen("tcp", defaultPairListen); err == nil {
+		return ln, false, nil
+	}
+	host, _, _ := net.SplitHostPort(defaultPairListen)
+	ln, err2 := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err2 != nil {
+		return nil, false, err
+	}
+	return ln, true, nil
 }
 
 // qrHosts picks the addresses to put in the QR code for a listener on ip.

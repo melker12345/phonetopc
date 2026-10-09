@@ -66,7 +66,8 @@ pair flags:
   --yes                accept without asking (for scripts and tests)
   --png FILE           also write the QR code to a PNG file
   --timeout D          give up after D (default 5m)
-  --listen ADDR        listen address (default ":0", all interfaces, random port)
+  --listen ADDR        listen address (default ":8766", all interfaces; a random
+                       port if 8766 is busy)
   --host H[,H...]      addresses to put in the QR code (default: all LAN addresses)
 
 tail flags:

@@ -206,6 +206,47 @@ func LANAddresses() []string {
 	return slices.Compact(append(v4, v6...))
 }
 
+// LANPrefixes lists the IPv4 networks of the PC's LAN addresses, such as
+// "192.168.1.0/24", for firewall rules. The same interfaces are skipped as
+// in LANAddresses.
+func LANPrefixes() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || skippedInterface(ifc.Name) {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip, ok := netip.AddrFromSlice(ipn.IP)
+			if !ok || !ip.Unmap().Is4() || !usable(ip.Unmap()) {
+				continue
+			}
+			ones, bits := ipn.Mask.Size()
+			if bits == 128 {
+				ones -= 96
+			}
+			if ones < 0 || ones > 32 {
+				continue
+			}
+			if s := netip.PrefixFrom(ip.Unmap(), ones).Masked().String(); !slices.Contains(out, s) {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
 func usable(ip netip.Addr) bool {
 	return ip.IsValid() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && !ip.IsUnspecified()
 }

@@ -22,6 +22,9 @@ const Protocol = "phonetopc-pair/1"
 // SupportedProtocols lists the pairing protocols this implementation speaks.
 var SupportedProtocols = []string{Protocol}
 
+// DefaultPort is the default port of the pairing listener (§4.1).
+const DefaultPort = 8766
+
 // Path is the HTTP path of the pairing listener.
 const Path = "/v1/pair"
 

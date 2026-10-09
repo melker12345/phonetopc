@@ -19,6 +19,15 @@ func TestLANAddresses(t *testing.T) {
 	}
 }
 
+func TestLANPrefixes(t *testing.T) {
+	for _, s := range LANPrefixes() {
+		p, err := netip.ParsePrefix(s)
+		if err != nil || !p.Addr().Is4() || p.Masked() != p {
+			t.Errorf("bad prefix %q", s)
+		}
+	}
+}
+
 func TestInstanceName(t *testing.T) {
 	if got := instanceName(strings.Repeat("ä", 40)); len(got) != 62 {
 		t.Errorf("len %d", len(got))
