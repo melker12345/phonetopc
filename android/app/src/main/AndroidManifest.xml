@@ -22,6 +22,8 @@
     <!-- The bridge must keep serving with the screen off; the user is asked from onboarding
          and Settings, never automatically. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Only acted on if the user turned on Settings > Start on boot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".PhonetopcApp"
@@ -48,6 +50,18 @@
             android:name=".service.BridgeService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Both actions are protected broadcasts sent by the system, which may deliver to a
+             non-exported receiver. No LOCKED_BOOT_COMPLETED: settings live in
+             credential-encrypted storage (see AutoStart). -->
+        <receiver
+            android:name=".service.AutoStartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".tile.TapTileService"

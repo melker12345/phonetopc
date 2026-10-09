@@ -14,6 +14,9 @@ internal object BridgeNotifications {
     const val CHANNEL_ID = "bridge"
     const val NOTIFICATION_ID = 1
 
+    private const val AUTO_START_CHANNEL_ID = "auto_start"
+    private const val TAP_TO_START_ID = 2
+
     fun ensureChannel(context: Context) {
         val channel = NotificationChannelCompat.Builder(CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
             .setName(context.getString(R.string.notification_channel_name))
@@ -69,6 +72,46 @@ internal object BridgeNotifications {
             .addAction(stopAction)
             .build()
     }
+
+    /**
+     * Plain (non-FGS) notification for when Android refused to start the service on its own.
+     * Tapping opens the app, which then starts the server from the foreground.
+     */
+    fun postTapToStart(context: Context) {
+        val nm = NotificationManagerCompat.from(context)
+        // Without POST_NOTIFICATIONS (13+) there's nothing we can show.
+        if (!nm.areNotificationsEnabled()) return
+        nm.createNotificationChannel(
+            NotificationChannelCompat.Builder(AUTO_START_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+                .setName(context.getString(R.string.auto_start_channel_name))
+                .setDescription(context.getString(R.string.auto_start_channel_description))
+                .setShowBadge(false)
+                .build(),
+        )
+        val start = PendingIntent.getActivity(
+            context, 3,
+            Intent(context, MainActivity::class.java)
+                .setAction(MainActivity.ACTION_START_SERVER)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, AUTO_START_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_phonetopc)
+            .setContentTitle(context.getString(R.string.auto_start_title))
+            .setContentText(context.getString(R.string.auto_start_text))
+            .setContentIntent(start)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        try {
+            nm.notify(TAP_TO_START_ID, notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS revoked between the check and the call.
+        }
+    }
+
+    fun cancelTapToStart(context: Context) = NotificationManagerCompat.from(context).cancel(TAP_TO_START_ID)
 
     private fun servicePending(context: Context, action: String, requestCode: Int): PendingIntent =
         PendingIntent.getService(

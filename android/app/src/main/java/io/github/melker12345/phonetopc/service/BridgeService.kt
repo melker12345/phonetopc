@@ -69,10 +69,11 @@ class BridgeService : Service() {
             ACTION_PAUSE -> hub?.setPaused(true) // paused is still "running" as far as intent goes
             ACTION_RESUME -> hub?.setPaused(false)
             ACTION_START -> {
-                if (!intent.getBooleanExtra(EXTRA_AUTO_START, false)) setDesiredRunning(true)
-                startBridge()
+                val auto = intent.getBooleanExtra(EXTRA_AUTO_START, false)
+                if (!auto) setDesiredRunning(true)
+                startBridge(auto)
             }
-            else -> startBridge() // a sticky restart with a null intent
+            else -> startBridge(auto = true) // a sticky restart with a null intent
         }
         return START_STICKY
     }
@@ -94,13 +95,16 @@ class BridgeService : Service() {
         }
     }
 
-    private fun startBridge() {
+    private fun startBridge(auto: Boolean) {
         if (startJob != null) return
         if (!goForeground()) {
             controller.update { BridgeStatus(error = getString(R.string.error_foreground_not_allowed)) }
+            // Nobody is looking at the app, so leave a way back in (see AutoStartReceiver).
+            if (auto) BridgeNotifications.postTapToStart(this)
             stopSelf()
             return
         }
+        BridgeNotifications.cancelTapToStart(this)
         controller.update { it.copy(state = RunState.STARTING, error = null) }
         startJob = scope.launch {
             val graph = appGraph

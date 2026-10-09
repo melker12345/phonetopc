@@ -16,6 +16,12 @@
     <string name="action_resume">Resume</string>
     <string name="action_stop">Stop</string>
 
+    <!-- Auto-start fallback -->
+    <string name="auto_start_channel_name">Couldn\'t start automatically</string>
+    <string name="auto_start_channel_description">Shown when Android doesn\'t let phonetopc restart the server after an update or reboot.</string>
+    <string name="auto_start_title">Tap to start phonetopc</string>
+    <string name="auto_start_text">Android didn\'t let the server restart on its own.</string>
+
     <!-- Service errors -->
     <string name="error_dev_mode_off">Developer mode is off. Turn it on in Settings to start the server.</string>
     <string name="error_port_in_use">Couldn\'t open port %1$d. Is another app using it?</string>

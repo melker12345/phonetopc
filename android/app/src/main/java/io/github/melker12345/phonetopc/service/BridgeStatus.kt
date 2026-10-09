@@ -2,6 +2,7 @@ package io.github.melker12345.phonetopc.service
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.content.ContextCompat
 import io.github.melker12345.phonetopc.protocol.ClientSnapshot
 import io.github.melker12345.phonetopc.protocol.Demand
@@ -41,6 +42,22 @@ class BridgeController(private val context: Context) {
         ContextCompat.startForegroundService(context, intent(BridgeService.ACTION_START))
     }
 
+    /**
+     * Start from a system broadcast (update or boot) rather than the UI. If Android refuses the
+     * background FGS start, log it and leave a "Tap to start" notification instead.
+     */
+    fun autoStart() {
+        val intent = intent(BridgeService.ACTION_START).putExtra(BridgeService.EXTRA_AUTO_START, true)
+        try {
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException (API 31+) extends IllegalStateException;
+            // before 31 an IllegalStateException here means the background-start limit (API 26+).
+            Log.w(TAG, "background FGS start refused", e)
+            BridgeNotifications.postTapToStart(context)
+        }
+    }
+
     fun stop() = send(BridgeService.ACTION_STOP)
 
     fun setPaused(paused: Boolean) = send(if (paused) BridgeService.ACTION_PAUSE else BridgeService.ACTION_RESUME)
@@ -52,4 +69,8 @@ class BridgeController(private val context: Context) {
     }
 
     private fun intent(action: String) = Intent(context, BridgeService::class.java).setAction(action)
+
+    private companion object {
+        const val TAG = "BridgeController"
+    }
 }
