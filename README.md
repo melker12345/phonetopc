@@ -44,7 +44,7 @@ bin/phonetopc-mock &                 # fake phone on 127.0.0.1:8765
 bin/phonetopc tail gyro --rate 10    # stream from the Go CLI
 
 pip install -e clients/python
-python examples/print_gyro.py        # same stream from Python
+python examples/print_gyro.py ws://127.0.0.1:8765   # same stream from Python (ws:// = dev mode, no pairing)
 ```
 
 With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb forward tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
