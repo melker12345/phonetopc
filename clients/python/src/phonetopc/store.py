@@ -3,13 +3,18 @@
 ``phonetopc pair`` (the Go CLI) writes one entry per paired phone to
 ``$XDG_CONFIG_HOME/phonetopc/devices.json`` (default
 ``~/.config/phonetopc/devices.json``). This module reads it, picks a device,
-and updates a device's ``addresses`` when the phone turns up somewhere new.
-It never creates pairings.
+updates a device's ``addresses`` when the phone turns up somewhere new, and
+records its approval key (APPROVAL.md section 3). It never creates pairings.
 
 Permissions: the file holds secrets and must be mode ``0600``. A file that
 group or others can read still works (refusing would lock users out), but a
-:class:`InsecurePermissionsWarning` is issued. Updates are written atomically
-(temp file + rename) and always with mode ``0600``.
+:class:`InsecurePermissionsWarning` is issued.
+
+Writing (SECURITY.md section 6, draft 3): take an exclusive ``flock`` on
+``.lock`` in the same directory, re-read ``devices.json``, change it, write a
+temp file (mode ``0600``) in the same directory, rename it over
+``devices.json``, release the lock. Where :mod:`fcntl` doesn't exist (Windows)
+the lock is skipped. Unknown fields are kept.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ import os
 import stat
 import tempfile
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,21 +34,31 @@ from typing import Any
 from .errors import AmbiguousDevice, CredentialStoreError, NotPaired
 from .pin import check_pin_format
 
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
+
 __all__ = [
+    "LOCK_NAME",
     "STORE_VERSION",
     "InsecurePermissionsWarning",
     "PairedDevice",
+    "accept_approval_key",
     "config_dir",
     "devices_path",
     "find_by_address",
     "load_devices",
     "normalize_host",
+    "pin_approval_key",
     "remember_address",
     "select_device",
 ]
 
 STORE_VERSION = 1
 DEFAULT_PORT = 8765
+#: Name of the lock file next to ``devices.json``.
+LOCK_NAME = ".lock"
 
 _PAIR_HINT = "run `phonetopc pair` to pair a phone"
 
@@ -63,6 +78,8 @@ class PairedDevice:
     port: int = DEFAULT_PORT
     addresses: tuple[str, ...] = ()
     paired_at: str | None = None
+    #: The accepted pin of the phone's approval key (APPROVAL.md section 3), if any.
+    approval_key: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -88,6 +105,12 @@ class PairedDevice:
         if not isinstance(addresses, list) or not all(isinstance(a, str) and a for a in addresses):
             raise CredentialStoreError(f"{where}: 'addresses' must be a list of strings")
         paired_at = data.get("paired_at")
+        approval_key = data.get("approval_key")
+        if approval_key is not None:
+            try:
+                check_pin_format(approval_key)
+            except ValueError as exc:
+                raise CredentialStoreError(f"{where}: 'approval_key': {exc}") from None
         return cls(
             id=string("id"),
             name=string("name"),
@@ -96,6 +119,7 @@ class PairedDevice:
             port=port,
             addresses=tuple(addresses),
             paired_at=paired_at if isinstance(paired_at, str) else None,
+            approval_key=approval_key,
             raw=data,
         )
 
@@ -247,35 +271,129 @@ def _write_atomic(path: Path, doc: dict[str, Any]) -> None:
                 os.close(dfd)
 
 
+@contextlib.contextmanager
+def _locked(directory: Path) -> Iterator[None]:
+    """Hold an exclusive ``flock`` on ``directory/.lock`` (no-op without fcntl)."""
+    if _fcntl is None:  # pragma: no cover - Windows
+        yield
+        return
+    fd = os.open(directory / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # releases the lock
+
+
+def _update_device(
+    path: Path, device_id: str, change: Callable[[dict[str, Any]], bool]
+) -> bool | None:
+    """Locked read-modify-write of one device entry.
+
+    ``change`` edits the entry in place and returns whether it changed
+    anything; the file is rewritten only then. Returns ``None`` if there is no
+    file or no device ``device_id``, else what ``change`` returned.
+    """
+    if not path.parent.is_dir():
+        return None
+    with _locked(path.parent):
+        doc = _read_raw(path)
+        if doc is None:
+            return None
+        entry = next(
+            (d for d in doc.get("devices", []) if isinstance(d, dict) and d.get("id") == device_id),
+            None,
+        )
+        if entry is None:
+            return None
+        changed = change(entry)
+        if changed:
+            _write_atomic(path, doc)
+        return changed
+
+
 def remember_address(
     device_id: str, host: str, *, port: int | None = None, path: Path | None = None
 ) -> bool:
     """Record that ``device_id`` was reached at ``host`` (SECURITY.md section 6).
 
     Moves (or adds) ``host`` to the front of the device's ``addresses``, and
-    sets ``port`` if given. The file is re-read first and every other field is
-    kept as is. Returns ``True`` if the file was rewritten.
+    sets ``port`` if given (callers pass it only when mDNS reported it). The
+    file is re-read under the lock and every other field is kept as is.
+    Returns ``True`` if the file was rewritten. Callers must not pass loopback
+    addresses (they are never stored).
+    """
+
+    def change(entry: dict[str, Any]) -> bool:
+        old = entry.get("addresses")
+        old_list = [a for a in old if isinstance(a, str)] if isinstance(old, list) else []
+        h = normalize_host(host)
+        new_list = [host] + [a for a in old_list if normalize_host(a) != h]
+        changed = new_list != old
+        if port is not None and entry.get("port", DEFAULT_PORT) != port:
+            entry["port"] = port
+            changed = True
+        if changed:
+            entry["addresses"] = new_list
+        return changed
+
+    return bool(_update_device(path or devices_path(), device_id, change))
+
+
+def _stored_approval_key(entry: dict[str, Any], where: str) -> str | None:
+    stored = entry.get("approval_key")
+    if stored is None:
+        return None
+    try:
+        check_pin_format(stored)
+    except ValueError as exc:
+        raise CredentialStoreError(f"{where}: 'approval_key': {exc}") from None
+    assert isinstance(stored, str)
+    return stored
+
+
+def pin_approval_key(device_id: str, pin: str, *, path: Path | None = None) -> str:
+    """Trust on first sight (APPROVAL.md section 3): the accepted approval key of a device.
+
+    If the device has no ``approval_key`` yet, ``pin`` is stored and returned.
+    Otherwise the stored key is returned unchanged, so the caller can see
+    whether ``pin`` differs from it. Raises :class:`NotPaired` if the device
+    isn't in the store (any more).
     """
     path = path or devices_path()
-    doc = _read_raw(path)
-    if doc is None:
-        return False
-    entry = next(
-        (d for d in doc.get("devices", []) if isinstance(d, dict) and d.get("id") == device_id),
-        None,
-    )
-    if entry is None:
-        return False
-    old = entry.get("addresses")
-    old_list = [a for a in old if isinstance(a, str)] if isinstance(old, list) else []
-    h = normalize_host(host)
-    new_list = [host] + [a for a in old_list if normalize_host(a) != h]
-    changed = new_list != old
-    if port is not None and entry.get("port", DEFAULT_PORT) != port:
-        entry["port"] = port
-        changed = True
-    if not changed:
-        return False
-    entry["addresses"] = new_list
-    _write_atomic(path, doc)
-    return True
+    check_pin_format(pin)
+    accepted: list[str] = []
+
+    def change(entry: dict[str, Any]) -> bool:
+        stored = _stored_approval_key(entry, str(path))
+        if stored is not None:
+            accepted.append(stored)
+            return False
+        entry["approval_key"] = pin
+        accepted.append(pin)
+        return True
+
+    if _update_device(path, device_id, change) is None:
+        raise NotPaired(f"device {device_id} is no longer paired: {_PAIR_HINT}")
+    return accepted[0]
+
+
+def accept_approval_key(device_id: str, pin: str, *, path: Path | None = None) -> bool:
+    """Store ``pin`` as the accepted approval key, replacing any other (explicit acceptance).
+
+    Returns ``True`` if the stored key changed. Raises :class:`NotPaired` if
+    the device isn't in the store.
+    """
+    path = path or devices_path()
+    check_pin_format(pin)
+
+    def change(entry: dict[str, Any]) -> bool:
+        if entry.get("approval_key") == pin:
+            return False
+        entry["approval_key"] = pin
+        return True
+
+    changed = _update_device(path, device_id, change)
+    if changed is None:
+        raise NotPaired(f"device {device_id} is not paired: {_PAIR_HINT}")
+    return changed
