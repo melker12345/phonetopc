@@ -23,3 +23,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
+
+// ServerCasesTest reads the shared suite in spec/conformance (outside this Gradle build).
+tasks.named<Test>("test") {
+    val conformance = rootProject.layout.projectDirectory.dir("../spec/conformance")
+    inputs.dir(conformance).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("conformance")
+    systemProperty("phonetopc.conformanceDir", conformance.asFile.absolutePath)
+}

@@ -27,3 +27,10 @@ dependencies {
     testImplementation(libs.ktor.client.websockets)
     testRuntimeOnly(libs.slf4j.nop)
 }
+
+// ServerCasesCloseTest reads the shared suite in spec/conformance (outside this Gradle build).
+tasks.named<Test>("test") {
+    val conformance = rootProject.layout.projectDirectory.dir("../spec/conformance")
+    inputs.dir(conformance).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("conformance")
+    systemProperty("phonetopc.conformanceDir", conformance.asFile.absolutePath)
+}

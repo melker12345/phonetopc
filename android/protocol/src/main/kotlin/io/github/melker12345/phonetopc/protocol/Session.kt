@@ -137,6 +137,10 @@ class Session internal constructor(
     /** A response to queue, plus the subscription it created, which may start once it's queued. */
     internal class Reply(val text: String, val newSubscription: Subscription? = null)
 
+    /**
+     * Checks a frame in the order of spec §2: strict JSON, object, id present (else ignored),
+     * id/jsonrpc/method valid, hello done, method known, params valid, then the method itself.
+     */
     internal suspend fun respond(text: String): Reply? {
         fun error(id: JsonElement?, e: RpcException) = Reply(Rpc.error(id, e))
 
@@ -154,11 +158,12 @@ class Session internal constructor(
             return error(null, RpcException(RpcError.INVALID_REQUEST, "Request must be a JSON object"))
         }
 
-        val id = element["id"]
-        if (id != null && !isValidId(id)) {
-            return error(null, RpcException(RpcError.INVALID_REQUEST, "id must be an integer or a string"))
+        // Spec §2: an object without id is a notification, even if otherwise malformed. The
+        // protocol defines none from the client, so it is ignored without a reply.
+        val replyId = element["id"] ?: return null
+        if (!isValidId(replyId)) {
+            return error(null, RpcException(RpcError.INVALID_REQUEST, "id must be a string or an integer within ±(2^53-1)"))
         }
-        val replyId: JsonElement = id ?: JsonNull
 
         val jsonrpc = element["jsonrpc"]
         if (jsonrpc !is JsonPrimitive || !jsonrpc.isString || jsonrpc.content != "2.0") {
@@ -168,10 +173,14 @@ class Session internal constructor(
         if (method !is JsonPrimitive || !method.isString) {
             return error(replyId, RpcException(RpcError.INVALID_REQUEST, "method must be a string"))
         }
-        // Spec §2: a message without id is a notification. The protocol defines none from the
-        // client, so it is ignored without a reply, whatever its method and params.
-        if (id == null) return null
-
+        // Spec §3: *any* request other than hello before a successful hello gets -32003,
+        // including unknown methods and requests with invalid params.
+        if (method.content != "hello" && !helloDone) {
+            return error(replyId, RpcException(RpcError.HELLO_REQUIRED))
+        }
+        if (method.content !in METHODS) {
+            return error(replyId, RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: ${method.content}"))
+        }
         // Spec §2: explicit null params count as absent; any other non-object is -32602.
         val params = when (val p = element["params"]) {
             null, JsonNull -> EMPTY
@@ -191,19 +200,22 @@ class Session internal constructor(
         }
     }
 
-    /** Spec §2: an integer or a string. Fractions, exponents and `null` are rejected. */
+    /**
+     * Spec §2: a string or an integer within ±(2^53-1). Fractions, exponents, out-of-range
+     * integers and `null` are rejected.
+     */
     private fun isValidId(id: JsonElement): Boolean = when (id) {
         is JsonNull -> false
-        is JsonPrimitive -> id.isString || JSON_INTEGER.matches(id.content)
+        is JsonPrimitive -> id.isString || (
+            JSON_INTEGER.matches(id.content) &&
+                id.content.toLongOrNull()?.let { it in -MAX_SAFE_ID..MAX_SAFE_ID } == true
+            )
         else -> false
     }
 
     private class Handled(val result: JsonElement, val newSubscription: Subscription? = null)
 
     private suspend fun dispatch(method: String, params: JsonObject): Handled {
-        // Spec §3: *any* request other than hello before a successful hello gets -32003,
-        // including unknown methods.
-        if (method != "hello" && !helloDone) throw RpcException(RpcError.HELLO_REQUIRED)
         return when (method) {
             "hello" -> Handled(hello(params))
             "list_sensors" -> Handled(
@@ -240,13 +252,9 @@ class Session internal constructor(
     }
 
     private fun subscribe(params: JsonObject): Handled {
+        // Spec §2 step 7: params that can be checked without the catalog, for any source.
         val sourceName = params.requireString("source")
-        val spec = SensorCatalog[sourceName]
-            ?: throw RpcException(RpcError.UNKNOWN_SOURCE, "Unknown source: $sourceName")
         val type = params.optString("type")
-        if (type != null && type !in spec.types) {
-            throw RpcException(RpcError.INVALID_PARAMS, "Unknown type \"$type\" for source $sourceName")
-        }
         val requestedRate = params.optNumber("rate_hz")
         if (requestedRate != null && requestedRate <= 0.0) {
             throw RpcException(RpcError.INVALID_PARAMS, "rate_hz must be > 0")
@@ -255,8 +263,8 @@ class Session internal constructor(
         if (minDelta != null && minDelta < 0.0) {
             throw RpcException(RpcError.INVALID_PARAMS, "min_delta must be >= 0")
         }
+        val spec = lookup(sourceName, type)
         val info = hub.info(sourceName)
-        if (!info.available) throw RpcException(RpcError.SOURCE_UNAVAILABLE, "Source unavailable: $sourceName")
 
         val rate = if (spec.mode == SensorMode.CONTINUOUS) {
             effectiveRate(requestedRate, info)
@@ -283,18 +291,27 @@ class Session internal constructor(
 
     private suspend fun get(params: JsonObject): JsonElement {
         val sourceName = params.requireString("source")
+        val type = params.optString("type")
+        lookup(sourceName, type)
+        val reading = hub.read(sourceName)?.takeIf { type == null || it.type == type }
+            ?: throw RpcException(RpcError.NO_VALUE, "No value yet for $sourceName")
+        return reading.toJson(hub.deviceId)
+    }
+
+    /**
+     * Spec §2 step 8 for a source and optional type: unknown source, then a type the source
+     * doesn't have, then availability.
+     */
+    private fun lookup(sourceName: String, type: String?): SensorSpec {
         val spec = SensorCatalog[sourceName]
             ?: throw RpcException(RpcError.UNKNOWN_SOURCE, "Unknown source: $sourceName")
-        val type = params.optString("type")
         if (type != null && type !in spec.types) {
             throw RpcException(RpcError.INVALID_PARAMS, "Unknown type \"$type\" for source $sourceName")
         }
         if (!hub.info(sourceName).available) {
             throw RpcException(RpcError.SOURCE_UNAVAILABLE, "Source unavailable: $sourceName")
         }
-        val reading = hub.read(sourceName)?.takeIf { type == null || it.type == type }
-            ?: throw RpcException(RpcError.NO_VALUE, "No value yet for $sourceName")
-        return reading.toJson(hub.deviceId)
+        return spec
     }
 
     internal fun snapshot() = ClientSnapshot(
@@ -313,6 +330,10 @@ class Session internal constructor(
         const val KIND_CONTINUOUS = 1
         const val KIND_ON_CHANGE = 2
         val EMPTY = JsonObject(emptyMap())
+        val METHODS = setOf("hello", "list_sensors", "subscribe", "unsubscribe", "get")
+
+        /** Largest magnitude of an integer id (2^53-1), so every JSON library keeps it exact. */
+        const val MAX_SAFE_ID = (1L shl 53) - 1
 
         val JSON_NUMBER = Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
         val JSON_INTEGER = Regex("-?(0|[1-9][0-9]*)")
