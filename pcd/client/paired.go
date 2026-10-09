@@ -157,11 +157,10 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 				// SECURITY.md §6: warn; the pin already proved the key.
 				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s", dev.Name, dev.ID, got))
 			}
-			// APPROVAL.md §3: the first sight of the approval key stores it;
-			// a changed key is reported now, and approvals are refused.
-			if _, err := cl.CheckApprovalKey(); errors.Is(err, ErrApprovalKeyChanged) {
-				cl.warn(err.Error() + " — check with `phonetopc approval-key`")
-			}
+			// APPROVAL.md §3: the first sight of the approval key stores it.
+			// A changed key is reported by RequestApproval and
+			// CheckApprovalKey.
+			_, _ = cl.CheckApprovalKey()
 			return cl, nil
 		}
 		if ctx.Err() != nil {

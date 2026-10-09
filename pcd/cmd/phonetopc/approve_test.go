@@ -160,7 +160,7 @@ func TestApprovalKeyChange(t *testing.T) {
 		t.Error("the changed key was stored without acceptance")
 	}
 	code, out, errs := runCLI(t, tctx(t), env, "info")
-	if code != 0 || !strings.Contains(out, "CHANGED") || !strings.Contains(errs, "warning: the approval key") {
+	if code != 0 || !strings.Contains(out, "CHANGED") {
 		t.Errorf("info: %d\n%s\n%s", code, out, errs)
 	}
 	code, out, _ = runCLI(t, tctx(t), env, "approval-key")

@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/melker12345/phonetopc/pcd/client"
+	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
@@ -38,6 +39,10 @@ func (c *cli) approve(ctx context.Context, args []string) error {
 	}
 	if *timeout < client.MinApprovalTimeout || *timeout > client.MaxApprovalTimeout {
 		return usageErr{fmt.Errorf("--timeout must be between %v and %v", client.MinApprovalTimeout, client.MaxApprovalTimeout)}
+	}
+	// The reason is sent exactly as given; refuse what the phone would.
+	if err := protocol.CheckReason(pos[0]); err != nil {
+		return exitError{2, err}
 	}
 	fail := func(err error) error {
 		if ctx.Err() != nil {
