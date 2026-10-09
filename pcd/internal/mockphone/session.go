@@ -85,7 +85,11 @@ func (s *session) run() {
 		<-s.closeDone // let the close frame go out before tearing down
 	}
 	s.conn.CloseNow()
-	s.srv.logf("mock: %s disconnected: %v", s.remote, err)
+	if code := websocket.CloseStatus(err); code != -1 {
+		s.srv.logf("mock: %s disconnected (close code %d)", s.remote, code)
+	} else {
+		s.srv.logf("mock: %s disconnected: %v", s.remote, err)
+	}
 }
 
 func (s *session) readLoop() error {
