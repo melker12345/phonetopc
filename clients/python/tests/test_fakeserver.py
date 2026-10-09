@@ -110,20 +110,23 @@ async def test_subscribe_results(ws: ClientConnection) -> None:
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("raw", "expected", "resp_id"),
     [
-        ("hello", -32700),
-        ('{"jsonrpc":"2.0","id":1,"method":"hello"} x', -32700),
-        ('{"jsonrpc":"2.0","id":NaN,"method":"hello"}', -32700),
-        ("[]", -32600),
-        ("42", -32600),
-        ('{"jsonrpc":"2.0","id":1.5,"method":"hello"}', -32600),
-        ('{"jsonrpc":"2.0","id":1e3,"method":"hello"}', -32600),
-        ('{"jsonrpc":"2.0","id":null,"method":"hello"}', -32600),
-        ('{"jsonrpc":"1.0","id":1,"method":"hello"}', -32600),
+        ("hello", -32700, None),
+        ('{"jsonrpc":"2.0","id":1,"method":"hello"} x', -32700, None),
+        ('{"jsonrpc":"2.0","id":NaN,"method":"hello"}', -32700, None),
+        ("[]", -32600, None),
+        ("42", -32600, None),
+        ('{"jsonrpc":"2.0","id":1.5,"method":"hello"}', -32600, None),
+        ('{"jsonrpc":"2.0","id":1e3,"method":"hello"}', -32600, None),
+        ('{"jsonrpc":"2.0","id":null,"method":"hello"}', -32600, None),
+        ('{"jsonrpc":"1.0","id":1,"method":"hello"}', -32600, 1),
     ],
 )
-async def test_framing_errors(ws: ClientConnection, raw: str, expected: int) -> None:
+async def test_framing_errors(
+    ws: ClientConnection, raw: str, expected: int, resp_id: int | None
+) -> None:
     resp = await call(ws, raw)
     assert code(resp) == expected
-    assert resp["id"] is None
+    # A valid id is echoed even if the rest of the request is invalid.
+    assert resp["id"] == resp_id

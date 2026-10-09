@@ -62,7 +62,7 @@ SENSORS: list[dict[str, Any]] = [
      "available": True},
     {"source": "game_rotation_vector", "types": ["orientation"], "unit": "", "shape": "quat",
      "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 200, "default_rate_hz": 50,
-     "available": False},
+     "available": True},
     {"source": "proximity", "types": ["distance"], "unit": "cm", "shape": "number",
      "mode": "on_change", "available": True},
     {"source": "light", "types": ["illuminance"], "unit": "lx", "shape": "number",
@@ -157,9 +157,18 @@ def _id_key(req_id: Any) -> tuple[str, Any]:
     return (type(req_id).__name__, req_id)
 
 
+#: Largest magnitude of an integer request id (2^53 - 1, PROTOCOL.md section 2).
+MAX_SAFE_ID = 2**53 - 1
+
+
 def _valid_id(req_id: Any) -> bool:
-    """PROTOCOL.md section 2: an integer or a string (not a bool, float or null)."""
-    return isinstance(req_id, str) or (isinstance(req_id, int) and not isinstance(req_id, bool))
+    """PROTOCOL.md section 2: a string or an integer within +-(2^53 - 1).
+
+    Not a bool, float (``1.0``, ``1e3``) or null.
+    """
+    if isinstance(req_id, str):
+        return True
+    return isinstance(req_id, int) and not isinstance(req_id, bool) and abs(req_id) <= MAX_SAFE_ID
 
 
 class Session:
@@ -181,6 +190,8 @@ class Session:
 class FakeServer:
     def __init__(self) -> None:
         self.supported_protocols = ["phonetopc/1"]
+        #: Catalog sources reported as available: false (-> source_unavailable).
+        self.unavailable: set[str] = {"game_rotation_vector"}
         #: Seconds to wait before answering, per method.
         self.delays: dict[str, float] = {}
         #: Seconds to wait before answering, per "get" source (overrides delays).
@@ -341,12 +352,13 @@ class FakeServer:
                 if not isinstance(msg, dict):
                     await self._error(session, None, "invalid_request", "not a JSON object")
                     continue
+                # The order of checks of PROTOCOL.md section 2 from here on.
                 if "id" not in msg:
                     continue  # client notification: ignored, never answered
-                if not _valid_id(msg["id"]) or msg.get("jsonrpc") != "2.0":
-                    await self._error(session, None, "invalid_request", "invalid request")
+                if not _valid_id(msg["id"]):
+                    await self._error(session, None, "invalid_request", "invalid id")
                     continue
-                if not isinstance(msg.get("method"), str):
+                if msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
                     await self._error(session, msg["id"], "invalid_request", "invalid request")
                     continue
                 session.methods[_id_key(msg["id"])] = msg["method"]
@@ -409,7 +421,10 @@ class FakeServer:
             )
             return
         if method == "list_sensors":
-            await self._result(session, req_id, {"sensors": copy.deepcopy(SENSORS)})
+            sensors = copy.deepcopy(SENSORS)
+            for s in sensors:
+                s["available"] = s["source"] not in self.unavailable
+            await self._result(session, req_id, {"sensors": sensors})
         elif method == "subscribe":
             await self._subscribe(session, req_id, params)
         elif method == "unsubscribe":
@@ -425,25 +440,27 @@ class FakeServer:
     def _sensor(self, source: Any) -> dict[str, Any] | None:
         return next((s for s in SENSORS if s["source"] == source), None)
 
-    async def _check_source(self, session: Session, req_id: Any, source: Any) -> bool:
+    async def _check_source(self, session: Session, req_id: Any, params: dict[str, Any]) -> bool:
+        """Catalog checks (step 8): unknown source, then unknown type, then availability."""
+        source = params["source"]
         info = self._sensor(source)
         if info is None:
             await self._error(session, req_id, "unknown_source", f"unknown source {source!r}")
             return False
-        if not info["available"]:
+        if "type" in params and params["type"] not in info["types"]:
+            await self._error(session, req_id, "invalid_params", "unknown type")
+            return False
+        if source in self.unavailable:
             await self._error(session, req_id, "source_unavailable", f"{source} unavailable")
             return False
         return True
 
     async def _subscribe(self, session: Session, req_id: Any, params: dict[str, Any]) -> None:
-        source = params.get("source")
-        if not await self._check_source(session, req_id, source):
+        if not await self._check_source(session, req_id, params):
             return
+        source = params["source"]
         info = self._sensor(source)
         assert info is not None
-        if "type" in params and params["type"] not in info["types"]:
-            await self._error(session, req_id, "invalid_params", "unknown type")
-            return
         sub_id = f"s-{next(self._sub_ids)}"
         result: dict[str, Any] = {
             "subscription": sub_id,
@@ -476,14 +493,11 @@ class FakeServer:
             await self._send_event(session, sub_id, sub, self.values[source])
 
     async def _get(self, session: Session, req_id: Any, params: dict[str, Any]) -> None:
-        source = params.get("source")
-        if not await self._check_source(session, req_id, source):
+        if not await self._check_source(session, req_id, params):
             return
+        source = params["source"]
         info = self._sensor(source)
         assert info is not None
-        if "type" in params and params["type"] not in info["types"]:
-            await self._error(session, req_id, "invalid_params", "unknown type")
-            return
         if info["mode"] == "continuous":
             value = sample_value(source, 0)
         elif source in self.values:
