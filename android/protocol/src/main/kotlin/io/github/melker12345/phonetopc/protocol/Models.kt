@@ -1,5 +1,6 @@
 package io.github.melker12345.phonetopc.protocol
 
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalKeyInfo
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -47,6 +48,8 @@ internal data class HelloResult(
     val capabilities: List<String>,
     /** Secure mode only: which pairing the token belongs to. */
     val pc: PcInfo? = null,
+    /** With capability `approval`: the approval key (APPROVAL.md §1). */
+    val approval: ApprovalKeyInfo? = null,
 )
 
 @Serializable

@@ -1,5 +1,6 @@
 package io.github.melker12345.phonetopc.protocol
 
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
 import io.github.melker12345.phonetopc.protocol.security.HelloRateLimiter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +54,11 @@ class BridgeHub(
     val onChangeQueueCapacity: Int = 1024,
     /** `null` is dev mode: no authentication, draft-1 behaviour. */
     val security: SecureAccess? = null,
+    /**
+     * Fingerprint approval (APPROVAL.md); only used in secure mode. `null`: the phone can't do
+     * approvals, and `request_approval` answers `unavailable`.
+     */
+    val approvals: ApprovalService? = null,
 ) : ReadingSink {
     private val lock = Any()
     private val sessions = LinkedHashMap<Long, Session>()
@@ -148,6 +154,7 @@ class BridgeHub(
 
     /** Stop every source and detach. Sessions are closed by the transport. */
     fun shutdown() {
+        approvals?.cancelAll()
         synchronized(lock) {
             for (src in appliedDemand.keys) source.setDemand(src, null)
             appliedDemand = emptyMap()

@@ -1,6 +1,12 @@
 package io.github.melker12345.phonetopc.protocol
 
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalKeyInfo
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalOutcome
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalParams
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalWhy
 import io.github.melker12345.phonetopc.protocol.security.TokenHash
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.channels.Channel
@@ -75,6 +81,13 @@ class Session internal constructor(
      */
     @Volatile var tokenHash: String? = null
         private set
+
+    /** The approval key this session's `hello` announced (APPROVAL.md §1), if any. */
+    @Volatile var approvalKey: ApprovalKeyInfo? = null
+        private set
+
+    /** Pending `request_approval`s; cancelled when the session closes (APPROVAL.md §4). */
+    private val approvals: MutableSet<Job> = ConcurrentHashMap.newKeySet()
 
     /**
      * Set when the session must end (failed auth, revoked): later frames are ignored and the
@@ -154,6 +167,8 @@ class Session internal constructor(
     fun close() {
         if (closed) return
         closed = true
+        approvals.forEach { it.cancel() }
+        approvals.clear()
         subscriptions.values.forEach { it.deactivate() }
         hub.removeSubscriptions(subscriptions.values.toList())
         subscriptions.clear()
@@ -234,7 +249,8 @@ class Session internal constructor(
         if (method.content != "hello" && !helloDone) {
             return error(replyId, RpcException(RpcError.HELLO_REQUIRED))
         }
-        if (method.content !in METHODS) {
+        // request_approval exists only in secure mode (APPROVAL.md §1).
+        if (method.content !in METHODS && !(method.content == APPROVAL_METHOD && hub.security != null)) {
             return error(replyId, RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: ${method.content}"))
         }
         // Spec §2: explicit null params count as absent; any other non-object is -32602.
@@ -247,8 +263,9 @@ class Session internal constructor(
         val isHello = method.content == "hello"
         val rehello = isHello && helloDone
         return try {
-            val handled = dispatch(method.content, params)
-            Reply(Rpc.result(replyId, handled.result), handled.newSubscription)
+            val handled = dispatch(method.content, params, replyId)
+            val result = handled.result ?: return null // answered later (request_approval)
+            Reply(Rpc.result(replyId, result), handled.newSubscription)
         } catch (e: RateLimited) {
             // SECURITY.md §5: a limited address is closed with 1013, even with a valid token.
             Reply(null, closeAfter = CloseRequest(CloseCodes.TRY_AGAIN_LATER, "too many failed hellos; try again later"))
@@ -281,9 +298,10 @@ class Session internal constructor(
         else -> false
     }
 
-    private class Handled(val result: JsonElement, val newSubscription: Subscription? = null)
+    /** [result] `null`: the response is sent later. */
+    private class Handled(val result: JsonElement?, val newSubscription: Subscription? = null)
 
-    private suspend fun dispatch(method: String, params: JsonObject): Handled {
+    private suspend fun dispatch(method: String, params: JsonObject, replyId: JsonElement): Handled {
         return when (method) {
             "hello" -> Handled(hello(params))
             "list_sensors" -> Handled(
@@ -292,6 +310,7 @@ class Session internal constructor(
             "subscribe" -> subscribe(params)
             "unsubscribe" -> Handled(unsubscribe(params))
             "get" -> Handled(get(params))
+            APPROVAL_METHOD -> requestApproval(params, replyId)
             else -> throw RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: $method")
         }
     }
@@ -321,6 +340,9 @@ class Session internal constructor(
             pc = auth.first
             tokenHash = auth.second
         }
+        // APPROVAL.md §1: secure mode only, and only while the phone can do approvals.
+        val approval = if (auth != null) hub.approvals?.keyInfo() else null
+        approvalKey = approval
         helloDone = true
         hub.sessionChanged()
         pcInfo?.let { hub.security?.onAuthenticated?.invoke(it) }
@@ -328,8 +350,9 @@ class Session internal constructor(
             protocol = PROTOCOL_VERSION,
             server = hub.serverInfo,
             device = hub.deviceInfo(),
-            capabilities = listOf("events", "get"),
+            capabilities = if (approval != null) listOf("events", "get", "approval") else listOf("events", "get"),
             pc = pcInfo,
+            approval = approval,
         )
         return ProtocolJson.encodeToJsonElement(HelloResult.serializer(), result)
     }
@@ -354,6 +377,34 @@ class Session internal constructor(
 
     /** The address is over the failed-hello limit: close with 1013 without answering. */
     private class RateLimited : Exception()
+
+    /**
+     * APPROVAL.md §4. Params are checked first (-32602); everything else is a result. The
+     * answer comes when the user acted or the request timed out; other requests and events
+     * carry on meanwhile.
+     */
+    private fun requestApproval(params: JsonObject, replyId: JsonElement): Handled {
+        val parsed = ApprovalParams.parse(params)
+        val service = hub.approvals
+        val pcInfo = pc
+        if (service == null || pcInfo == null) {
+            return Handled(ApprovalOutcome.Refused(ApprovalWhy.UNAVAILABLE).toJson())
+        }
+        val start = service.start(hub.deviceId, pcInfo, approvalKey, parsed) { outcome ->
+            if (!closed && !ending) queue.trySend(Out(Rpc.result(replyId, outcome.toJson()), KIND_RESPONSE))
+        }
+        return when (start) {
+            is ApprovalService.Start.Answered -> Handled(start.outcome.toJson())
+            is ApprovalService.Start.Pending -> {
+                val job = start.job
+                approvals += job
+                job.invokeOnCompletion { approvals.remove(job) }
+                // Closed while starting: close() may have missed it.
+                if (closed) job.cancel()
+                Handled(null)
+            }
+        }
+    }
 
     private fun subscribe(params: JsonObject): Handled {
         // Spec §2 step 7: params that can be checked without the catalog, for any source.
@@ -436,6 +487,7 @@ class Session internal constructor(
         const val KIND_ON_CHANGE = 2
         val EMPTY = JsonObject(emptyMap())
         val METHODS = setOf("hello", "list_sensors", "subscribe", "unsubscribe", "get")
+        const val APPROVAL_METHOD = "request_approval"
 
         /** Largest magnitude of an integer id (2^53-1), so every JSON library keeps it exact. */
         const val MAX_SAFE_ID = (1L shl 53) - 1
