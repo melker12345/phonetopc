@@ -11,7 +11,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -146,10 +145,9 @@ class Session internal constructor(
             return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "Request must be a JSON object"))
         }
 
-        val hasId = "id" in element
         val id = element["id"]
         if (id != null && !isValidId(id)) {
-            return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "id must be a string or a number"))
+            return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "id must be an integer or a string"))
         }
         val replyId: JsonElement = id ?: JsonNull
 
@@ -161,22 +159,19 @@ class Session internal constructor(
         if (method !is JsonPrimitive || !method.isString) {
             return Rpc.error(replyId, RpcException(RpcError.INVALID_REQUEST, "method must be a string"))
         }
+        // Spec §2: a message without id is a notification. The protocol defines none from the
+        // client, so it is ignored without a reply, whatever its method and params.
+        if (id == null) return null
+
+        // Spec §2: explicit null params count as absent; any other non-object is -32602.
         val params = when (val p = element["params"]) {
-            null -> null
+            null, JsonNull -> EMPTY
             is JsonObject -> p
-            is JsonArray -> return Rpc.error(
-                replyId, RpcException(RpcError.INVALID_PARAMS, "params must be an object"),
-            )
-            else -> return Rpc.error(
-                replyId, RpcException(RpcError.INVALID_REQUEST, "params must be an object"),
-            )
+            else -> return Rpc.error(replyId, RpcException(RpcError.INVALID_PARAMS, "params must be an object"))
         }
-        // A request without id is a JSON-RPC notification, which must not be answered.
-        // The protocol defines no client-to-server notifications, so it is ignored.
-        if (!hasId) return null
 
         return try {
-            Rpc.result(replyId, dispatch(method.content, params ?: EMPTY))
+            Rpc.result(replyId, dispatch(method.content, params))
         } catch (e: RpcException) {
             Rpc.error(replyId, e)
         } catch (e: CancellationException) {
@@ -186,9 +181,10 @@ class Session internal constructor(
         }
     }
 
+    /** Spec §2: an integer or a string. Fractions, exponents and `null` are rejected. */
     private fun isValidId(id: JsonElement): Boolean = when (id) {
-        is JsonNull -> true // allowed by JSON-RPC 2.0 (discouraged); echoed back as null
-        is JsonPrimitive -> id.isString || id.longOrNull != null || id.doubleOrNull != null
+        is JsonNull -> false
+        is JsonPrimitive -> id.isString || JSON_INTEGER.matches(id.content)
         else -> false
     }
 
@@ -303,6 +299,7 @@ class Session internal constructor(
         val EMPTY = JsonObject(emptyMap())
 
         val JSON_NUMBER = Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
+        val JSON_INTEGER = Regex("-?(0|[1-9][0-9]*)")
 
         /**
          * kotlinx.serialization's tree parser accepts unquoted words (`nope`, `{"a":b}`) as

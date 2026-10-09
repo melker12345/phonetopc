@@ -97,11 +97,56 @@ class SessionTest {
     @Test fun notificationsGetNoResponse() {
         val s = helloSession()
         assertTrue(s.send("""{"jsonrpc":"2.0","method":"list_sensors"}""").isEmpty())
+        // Ignored whatever the method or params, and without side effects.
+        assertTrue(s.send("""{"jsonrpc":"2.0","method":"no_such_method"}""").isEmpty())
+        assertTrue(s.send("""{"jsonrpc":"2.0","method":"subscribe","params":"gyro"}""").isEmpty())
+        assertTrue(s.send("""{"jsonrpc":"2.0","method":"subscribe","params":{"source":"gyro"}}""").isEmpty())
+        assertTrue(src.current.isEmpty())
+        // Also before hello.
+        assertTrue(hub.openSession("t").send("""{"jsonrpc":"2.0","method":"list_sensors"}""").isEmpty())
     }
 
     @Test fun paramsMustBeObject() {
         val s = helloSession()
-        assertEquals(-32602, s.rpc("subscribe", """["gyro"]""").errorCode())
+        for (p in listOf("""["gyro"]""", "[]", "\"gyro\"", "42", "true")) {
+            val r = s.rpc("subscribe", p)
+            assertEquals(p, -32602, r.errorCode())
+            assertEquals("invalid_params", r.errorName())
+            assertEquals(JsonPrimitive(1), r["id"])
+        }
+        // A non-object params is -32602 even for methods that take none.
+        assertEquals(-32602, s.rpc("list_sensors", "7").errorCode())
+    }
+
+    @Test fun nullParamsAreAbsent() {
+        val s = helloSession()
+        assertNotNull(s.rpc("list_sensors", "null")["result"])
+        // subscribe with params:null is the same as no params: source is missing.
+        val r = s.rpc("subscribe", "null")
+        assertEquals(-32602, r.errorCode())
+        assertTrue(r["error"]!!.jsonObject["message"]!!.jsonPrimitive.content.contains("source"))
+        assertEquals(-32602, hub.openSession("t").rpc("hello", "null").errorCode())
+    }
+
+    @Test fun idMustBeIntegerOrString() {
+        val s = helloSession()
+        assertEquals(JsonPrimitive(0), s.rpc("list_sensors", id = 0)["id"])
+        assertEquals(JsonPrimitive(-5), s.rpc("list_sensors", id = -5)["id"])
+        for (bad in listOf("1.5", "1e3", "1.0", "null", "[1]", "{}")) {
+            val r = s.send("""{"jsonrpc":"2.0","id":$bad,"method":"list_sensors"}""").single()
+            assertEquals(bad, -32600, r.errorCode())
+            assertEquals("invalid_request", r.errorName())
+            assertEquals(JsonNull, r["id"])
+        }
+    }
+
+    @Test fun standardErrorNames() {
+        val s = helloSession()
+        assertEquals("parse_error", s.send("{").single().errorName())
+        assertEquals("invalid_request", s.send("[]").single().errorName())
+        assertEquals("method_not_found", s.rpc("nope").errorName())
+        assertEquals("invalid_params", s.rpc("get", "{}").errorName())
+        assertEquals("internal_error", RpcException(RpcError.INTERNAL_ERROR).toErrorJson()["data"]!!.jsonObject["name"]!!.jsonPrimitive.content)
     }
 
     @Test fun stringIdIsEchoed() {
