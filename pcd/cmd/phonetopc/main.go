@@ -4,6 +4,7 @@
 //	phonetopc pair [--yes] [--png FILE]
 //	phonetopc devices | unpair <device> | pc
 //	phonetopc [--device D] info | list | get <source> | tail <source> ...
+//	phonetopc [--device D] approve "reason" [--timeout 30s] | approval-key [--accept]
 //	phonetopc --insecure-dev --addr host:port info ...
 //
 // Without --insecure-dev every connection is secure (wss:// with the phone's
@@ -50,6 +51,11 @@ Commands:
   list                 list the phone's sensors
   get <source>         read the latest value of a source
   tail <source>        stream events of a source until Ctrl-C
+  approve "reason"     ask for approval with a fingerprint on the phone; exit 0
+                       approved, 1 not approved (denied, cancelled, timeout,
+                       busy, lockout, unavailable), 2 error:
+                         phonetopc approve "Deploy?" && ./deploy.sh
+  approval-key         show the phone's accepted and current approval key
 
 Flags (accepted before or after the command):
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
@@ -69,6 +75,14 @@ pair flags:
   --listen ADDR        listen address (default ":8766", all interfaces; a random
                        port if 8766 is busy)
   --host H[,H...]      addresses to put in the QR code (default: all LAN addresses)
+
+approve flags:
+  --timeout D          how long the phone waits for the user (default 30s,
+                       5s to 2m)
+
+approval-key flags:
+  --accept             accept a changed approval key (after fingerprints were
+                       added or removed on the phone)
 
 tail flags:
   --type T             only events of type T
@@ -135,16 +149,28 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		err = c.unpair(rest)
 	case "pc":
 		err = c.pc(rest)
+	case "approve":
+		err = c.approve(ctx, rest)
+	case "approval-key":
+		err = c.approvalKey(ctx, rest)
 	case "help":
 		fmt.Fprint(stdout, usage)
 		return 0
 	default:
 		return c.usageError(fmt.Errorf("unknown command %q", cmd))
 	}
-	var ue usageErr
+	var (
+		ue usageErr
+		ee exitError
+	)
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &ee):
+		if ee.err != nil {
+			fmt.Fprintln(stderr, "phonetopc:", explain(ee.err))
+		}
+		return ee.code
 	case ctx.Err() != nil && errors.Is(err, context.Canceled):
 		return 0 // interrupted (Ctrl-C) while connecting or waiting
 	case errors.As(err, &ue):
@@ -175,6 +201,13 @@ func explain(err error) string {
 		return "no paired phone — run `phonetopc pair`, or use --insecure-dev --addr HOST:PORT for a phone in developer mode"
 	case errors.As(err, &amb):
 		return amb.Error()
+	case errors.Is(err, client.ErrApprovalKeyChanged):
+		return strings.TrimPrefix(err.Error(), "phonetopc: ") + ".\n" +
+			"  Typical cause: fingerprints were added or removed on the phone. If so, accept the new key with\n" +
+			"  `phonetopc approval-key --accept`; otherwise someone may be tampering with the phone app. Nothing was sent."
+	case errors.Is(err, client.ErrApprovalInvalid):
+		return strings.TrimPrefix(err.Error(), "phonetopc: ") + ".\n" +
+			"  This is NOT an approval. The phone app may be broken, or someone may be tampering with it."
 	}
 	return strings.TrimPrefix(err.Error(), "phonetopc: ")
 }
@@ -291,6 +324,7 @@ func (c *cli) info(ctx context.Context, args []string) error {
 	row("capabilities", strings.Join(h.Capabilities, ", "))
 	if h.PC != nil {
 		row("paired as", fmt.Sprintf("%s (id %s)", h.PC.Name, h.PC.ID))
+		row("approval", approvalRow(cl))
 	} else {
 		row("mode", "dev (plaintext, unauthenticated)")
 	}

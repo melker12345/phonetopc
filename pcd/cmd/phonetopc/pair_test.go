@@ -55,8 +55,9 @@ type phone struct {
 
 func startPhone(t *testing.T) *phone { return startPhoneOn(t, "") }
 
-// startPhoneOn starts a phone listening on addr ("" for loopback).
-func startPhoneOn(t *testing.T, addr string) *phone {
+// startPhoneOn starts a phone listening on addr ("" for loopback). tweaks
+// adjust its options; they may use the phone's state.
+func startPhoneOn(t *testing.T, addr string, tweaks ...func(*mockphone.Options, *mockphone.State)) *phone {
 	t.Helper()
 	st, err := mockphone.OpenState(t.TempDir())
 	if err != nil {
@@ -66,10 +67,14 @@ func startPhoneOn(t *testing.T, addr string) *phone {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := mockphone.New(mockphone.Options{
+	opts := mockphone.Options{
 		Device: protocol.DeviceInfo{ID: id.ID, Name: id.Name}, Authenticate: st.Authenticate,
 		TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1,
-	})
+	}
+	for _, f := range tweaks {
+		f(&opts, st)
+	}
+	srv := mockphone.New(opts)
 	hs := httptest.NewUnstartedServer(srv.Handler())
 	hs.TLS = security.ServerTLSConfig(id.Cert)
 	hs.Config.ErrorLog = log.New(io.Discard, "", 0) // pin-mismatch tests abort handshakes
