@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestCheckReason(t *testing.T) {
+	for _, ok := range []string{"Deploy?", "  padded  ", strings.Repeat("ä", 200), " " + strings.Repeat("x", 200) + " "} {
+		if err := CheckReason(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "   ", strings.Repeat("x", 201), "line\nbreak", "tab\there", "bell\a", "\xff"} {
+		if err := CheckReason(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
 func TestErrorCodeNames(t *testing.T) {
 	want := map[ErrorCode]string{
 		CodeUnknownSource:       "unknown_source",

@@ -55,6 +55,18 @@ type HelloResult struct {
 	Capabilities []string   `json:"capabilities"`
 	// PC is set in secure mode: the pairing the server recognised.
 	PC *PCInfo `json:"pc,omitempty"`
+	// Approval is set when the phone can do approvals (APPROVAL.md §1).
+	Approval *ApprovalInfo `json:"approval,omitempty"`
+}
+
+// HasCapability reports whether the server listed capability c.
+func (h *HelloResult) HasCapability(c string) bool {
+	for _, x := range h.Capabilities {
+		if x == c {
+			return true
+		}
+	}
+	return false
 }
 
 // SensorInfo describes one source in list_sensors.
