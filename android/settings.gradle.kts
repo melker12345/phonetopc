@@ -22,4 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "phonetopc"
 
-include(":app")
+include(":app", ":protocol")
