@@ -1,6 +1,7 @@
 """Replay spec/conformance/*.jsonl transcripts through the client's parsers.
 
-Transcript format: one ``{"dir": "c2s" | "s2c", "msg": {...}}`` per line.
+Transcript format: see spec/conformance/README.md. Only ``msg`` entries are
+replayed; ``raw``, ``binary`` and ``close`` entries are skipped.
 Server-to-client messages are fed to :meth:`Phone._handle_message` exactly as
 the reader task would; results are parsed with the typed model matching the
 request method (looked up via the c2s request with the same id). Skips when
@@ -47,7 +48,12 @@ def _load(path: Path) -> list[dict[str, Any]]:
             continue
         entry = json.loads(line)
         assert entry.get("dir") in ("c2s", "s2c"), f"{path.name}:{n}: bad dir"
-        assert isinstance(entry.get("msg"), (dict, list)), f"{path.name}:{n}: bad msg"
+        if "msg" not in entry:
+            # raw (non-JSON text), binary and close frames never reach the client's
+            # message parser, so there is nothing to replay for them.
+            assert {"raw", "binary", "close"} & entry.keys(), f"{path.name}:{n}: bad entry"
+            continue
+        assert isinstance(entry["msg"], (dict, list)), f"{path.name}:{n}: bad msg"
         lines.append(entry)
     return lines
 
@@ -70,7 +76,7 @@ async def test_replay_transcript(path: Path) -> None:
                 fut = loop.create_future()
                 futures[msg["id"]] = fut
                 on_result = None
-                if msg["method"] == "subscribe":
+                if msg["method"] == "subscribe" and "source" in msg.get("params", {}):
                     # Mimic Subscription.start() without sending anything.
                     sub = phone.subscribe(msg["params"]["source"], queue_size=100_000)
                     sub._started = True
