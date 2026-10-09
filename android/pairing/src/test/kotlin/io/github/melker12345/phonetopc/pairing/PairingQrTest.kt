@@ -33,6 +33,22 @@ class PairingQrTest {
         assertEquals(pin, qr.pin)
     }
 
+    @Test fun followsTheDraft3EncodingRules() {
+        // SECURITY.md §4.2: n is UTF-8 percent-encoded, commas in h literal, IPv6 without brackets.
+        val qr = PairingQr.parse(
+            "phonetopc://pair?v=1&id=x&n=Melkers%20B%C3%A4rbar%20%26%20Co&h=192.168.1.10,fd00::10,10.0.0.5&p=8766&pin=$pin&s=$secret",
+        )
+        assertEquals("Melkers Bärbar & Co", qr.pcName)
+        assertEquals(listOf("192.168.1.10", "fd00::10", "10.0.0.5"), qr.hosts)
+        assertEquals(8766, qr.port)
+        // Consumers also accept '+', %2C and bracketed IPv6, also percent-encoded and mixed.
+        val lenient = PairingQr.parse(
+            "phonetopc://pair?v=1&id=x&n=arch+desktop&h=%5Bfd00%3A%3A10%5D%2C192.168.1.10,[fd00::11]&p=8766&pin=$pin&s=$secret",
+        )
+        assertEquals("arch desktop", lenient.pcName)
+        assertEquals(listOf("fd00::10", "192.168.1.10", "fd00::11"), lenient.hosts)
+    }
+
     @Test fun bracketedIpv6IsUnwrapped() {
         val qr = PairingQr.parse("phonetopc://pair?v=1&id=x&h=[fd00::1]&p=1&pin=$pin&s=$secret")
         assertEquals(listOf("fd00::1"), qr.hosts)

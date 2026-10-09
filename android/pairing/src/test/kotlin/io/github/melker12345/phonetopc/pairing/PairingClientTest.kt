@@ -67,6 +67,26 @@ class PairingClientTest {
         assertTrue(stored.isEmpty())
     }
 
+    @Test fun qrSkipsAHostWithAnotherPin() = runTest {
+        // SECURITY.md §4.2: a host with a different pin is skipped like an unreachable one.
+        val pc = FakePc(reachable = setOf("10.0.0.1", "10.0.0.2"), pinByHost = mapOf("10.0.0.1" to FakePc.MITM_PIN))
+        val c = client(pc)
+        c.pairWithQr(pc.qr(hosts = listOf("10.0.0.1", "10.0.0.2")))
+        assertEquals(PairingState.Paired(pc.id, pc.name), c.state.value)
+        assertEquals(listOf("10.0.0.1", "10.0.0.2"), pc.connects.map { it.first })
+        assertEquals(pc.pin, stored.single().pin)
+    }
+
+    @Test fun qrWaitsAtLeastFiveMinutesForThePcUser() = runTest {
+        // SECURITY.md §4.1: long answers get at least 5 minutes by default.
+        val pc = FakePc().apply { neverAnswerApproval = true }
+        val job = launch { client(pc).pairWithQr(pc.qr()) }
+        advanceTimeBy(5.minutes)
+        runCurrent()
+        assertTrue("gave up before 5 minutes", job.isActive)
+        job.cancel()
+    }
+
     @Test fun qrUnreachable() = runTest {
         val pc = FakePc(reachable = emptySet())
         val c = client(pc)
@@ -186,6 +206,17 @@ class PairingClientTest {
         // The code is never shown, and the PC is told to discard.
         assertEquals(false, pc.sasConfirmFromPhone)
         assertTrue("pair_finish" !in pc.calls)
+        assertTrue(stored.isEmpty())
+    }
+
+    @Test fun sasMalformedNonceIsACommitmentFailure() = runTest {
+        val pc = FakePc().apply { badNonce = true }
+        val c = client(pc)
+        startSas(pc, c).join()
+        assertEquals(PairingFailure.CommitmentMismatch, failure(c))
+        // match:false first, then abort (SECURITY.md §4.3).
+        assertEquals(false, pc.sasConfirmFromPhone)
+        assertEquals("pair_sas_confirm", pc.calls.last())
         assertTrue(stored.isEmpty())
     }
 

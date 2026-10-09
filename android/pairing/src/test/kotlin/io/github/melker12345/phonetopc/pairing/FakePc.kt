@@ -29,7 +29,10 @@ class FakePc(
     val reachable: Set<String> = setOf("192.168.1.10"),
     /** What the pairing listener presents (a MITM would show another pin). */
     var presentedPin: String = pin,
+    /** Per-host override of [presentedPin], e.g. a stale address that is now another machine. */
+    val pinByHost: Map<String, String> = emptyMap(),
 ) : PairingConnector {
+    var badNonce = false
     var userApproves = true
     var userConfirmsCode = true
     var cheatCommitment = false
@@ -52,7 +55,8 @@ class FakePc(
     override suspend fun connect(host: String, port: Int, expectedPin: String?): PairingChannel {
         connects += host to expectedPin
         if (host !in reachable) throw IOException("connect to $host:$port failed")
-        if (expectedPin != null && expectedPin != presentedPin) throw PinMismatchException(expectedPin, presentedPin)
+        val shown = pinByHost[host] ?: presentedPin
+        if (expectedPin != null && expectedPin != shown) throw PinMismatchException(expectedPin, shown)
         return Channel()
     }
 
@@ -93,7 +97,7 @@ class FakePc(
                     // The PC computes the code with its own pin and the phone's claimed pin.
                     pcCode = Sas.code(pin, phoneSeen!!["pin"]!!.jsonPrimitive.content, npc, nphone)
                     step = "revealed"
-                    buildJsonObject { put("nonce", Base64Url.encode(npc)) }
+                    buildJsonObject { put("nonce", if (badNonce) "not base64url!" else Base64Url.encode(npc)) }
                 }
                 "pair_sas_confirm" -> {
                     val match = params["match"]!!.jsonPrimitive.boolean

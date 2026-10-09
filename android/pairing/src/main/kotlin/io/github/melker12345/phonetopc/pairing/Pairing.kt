@@ -123,8 +123,12 @@ class PairingClient(
     private val phone: suspend () -> PhoneInfo,
     private val store: suspend (NewPairing) -> Unit,
     private val requestTimeout: Duration = 15.seconds,
-    /** How long the PC's user may take to answer a prompt; the listener lives 5 minutes. */
-    private val userTimeout: Duration = 5.minutes,
+    /**
+     * How long the PC's user may take to answer `pair_qr` and `pair_sas_confirm`. SECURITY.md
+     * §4.1 asks for at least 5 minutes; a little more, so the PC's own 5-minute expiry
+     * (`-32024` or close 1001) is what ends a forgotten pairing, not a race with ours.
+     */
+    private val userTimeout: Duration = USER_TIMEOUT,
 ) {
     private val _state = MutableStateFlow<PairingState>(PairingState.Idle)
     val state: StateFlow<PairingState> = _state.asStateFlow()
@@ -184,9 +188,9 @@ class PairingClient(
                 val nphone = Secrets.newNonce()
                 val reveal = ch.call("pair_sas_nonce", buildJsonObject { put("nonce", Base64Url.encode(nphone)) }, requestTimeout)
                 val npc = reveal.string("nonce")?.let(Base64Url::decode)
-                    ?: throw ProtocolError("pair_sas_nonce result has no valid nonce")
-                if (npc.size != Secrets.NONCE_BYTES || !Sas.verifyCommitment(commitment, npc)) {
-                    // Tell the PC to discard everything, then stop (§4.3: abort).
+                if (npc == null || npc.size != Secrets.NONCE_BYTES || !Sas.verifyCommitment(commitment, npc)) {
+                    // §4.3: a failed commitment check (including a missing or malformed nonce)
+                    // sends match:false, so the PC discards everything, then aborts.
                     runCatching { ch.call("pair_sas_confirm", buildJsonObject { put("match", false) }, SHORT) }
                     throw Failure(PairingFailure.CommitmentMismatch)
                 }
@@ -278,6 +282,9 @@ class PairingClient(
 
     companion object {
         private val SHORT = 3.seconds
+
+        /** Default for the PC user's answers: at least 5 minutes (SECURITY.md §4.1). */
+        val USER_TIMEOUT: Duration = 5.minutes + 30.seconds
 
         fun failureFor(e: PairingRpcException): PairingFailure = when (e.code) {
             PairingErrors.BAD_SECRET -> PairingFailure.BadSecret
