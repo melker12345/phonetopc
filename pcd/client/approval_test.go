@@ -144,7 +144,11 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	res, err := c.RequestApproval(ctxT(t), "  Deploy?  ", 7*time.Second)
+	// Reasons are never trimmed: padded ones are refused before sending.
+	if _, err := c.RequestApproval(ctxT(t), "  Deploy?  ", 7*time.Second); err == nil || ap.requests.Load() != 0 {
+		t.Fatalf("padded reason: %v", err)
+	}
+	res, err := c.RequestApproval(ctxT(t), "Deploy?", 7*time.Second)
 	if err != nil || !res.Approved() || res.Reason != "Deploy?" || res.KeyPin != pin {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -181,6 +185,29 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 		if err != nil || res.Approved() || res.Why != why || !strings.Contains(res.String(), string(why)) {
 			t.Errorf("%s: %+v %v", why, res, err)
 		}
+	}
+}
+
+// TestApprovalNoAnswer: when our own wait runs out, that's an error, not a
+// why (APPROVAL.md §4).
+func TestApprovalNoAnswer(t *testing.T) {
+	old := approvalWaitSlack
+	approvalWaitSlack = -(MinApprovalTimeout + 5*time.Second - 200*time.Millisecond)
+	defer func() { approvalWaitSlack = old }()
+	key, _ := security.GenerateKey()
+	keyB64, pin, _ := security.EncodeApprovalKey(&key.PublicKey)
+	block := make(chan struct{})
+	defer close(block)
+	ap := &approvalPhone{phoneID: "p", pcID: "pc", key: keyB64,
+		answer: func(protocol.RequestApprovalParams) any { <-block; return nil }}
+	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	res, err := c.RequestApproval(ctxT(t), "Deploy?", MinApprovalTimeout)
+	if !errors.Is(err, ErrApprovalNoAnswer) || res.Approved() || res.Why != "" {
+		t.Errorf("%+v %v", res, err)
 	}
 }
 
@@ -257,6 +284,20 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 		if _, err := c.RequestApproval(ctxT(t), bad.reason, bad.timeout); err == nil {
 			t.Errorf("accepted %q / %v", bad.reason, bad.timeout)
 		}
+	}
+
+	// The capability without hello.approval: unavailable too.
+	ap2 := &approvalPhone{phoneID: "p", pcID: "pc", answer: ap.answer}
+	c2, err := Dial(ctxT(t), ap2.serve(t), WithApprovalKey(pin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	if res, err := c2.RequestApproval(ctxT(t), "Deploy?", 0); err != nil || res.Why != WhyUnavailable || ap2.requests.Load() != 0 {
+		t.Errorf("capability without key: %+v %v", res, err)
+	}
+	if offered, err := c2.CheckApprovalKey(); offered || err != nil {
+		t.Errorf("CheckApprovalKey: %v %v", offered, err)
 	}
 
 	// Dev mode (no pc in hello): approvals don't exist.

@@ -2,10 +2,10 @@ package client
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
@@ -42,8 +42,8 @@ type ApprovalResult struct {
 	approved bool
 	// Why says why the approval was not given; empty when approved.
 	Why Why
-	// Reason is the reason as sent (trimmed), Nonce the nonce generated for
-	// this request.
+	// Reason is the reason as sent, Nonce the nonce generated for this
+	// request.
 	Reason, Nonce string
 	// Signature is the verified signature (base64url DER) when approved.
 	Signature string
@@ -116,6 +116,14 @@ func (e *ApprovalInvalidError) Is(target error) bool { return target == ErrAppro
 // compare with. Use DialPaired, WithApprovalKey or WithApprovalTrust.
 var ErrNoApprovalTrust = errors.New("phonetopc: no trusted approval key for this connection; use DialPaired, or Dial with WithApprovalKey")
 
+// approvalWaitSlack is how much longer than timeout_ms + 5 s RequestApproval
+// waits for the answer; only tests change it.
+var approvalWaitSlack = 5 * time.Second
+
+// ErrApprovalNoAnswer: the phone didn't answer request_approval, not even
+// with "timeout", within timeout + 10 s (RequestApproval wraps it).
+var ErrApprovalNoAnswer = errors.New("phonetopc: approval request timed out")
+
 // ErrApprovalNeedsSecureMode: approvals don't exist in dev mode.
 var ErrApprovalNeedsSecureMode = errors.New("phonetopc: approvals need secure mode (a paired phone); dev mode has none")
 
@@ -156,15 +164,45 @@ func storeApprovalTrust(st *store.Store, dev store.Device) func(string) error {
 // nil if so (storing it on first sight with DialPaired), an
 // *ApprovalKeyChangedError if it changed, ErrNoApprovalTrust without a way
 // to tell. It returns nil, false if the phone offers no approvals.
+//
+// The pin compared is computed here from hello.approval.key; a hello whose
+// claimed pin differs is an *ApprovalInvalidError (APPROVAL.md §5 step 2).
+// A phone that lists capability approval without hello.approval, or the
+// reverse, offers no approvals.
 func (c *Client) CheckApprovalKey() (offered bool, err error) {
-	h := c.Server()
-	if h.Approval == nil {
+	_, _, err = c.approvalKey()
+	if err == errNoApprovalOffered {
 		return false, nil
 	}
-	if c.opts.approvalTrust == nil {
-		return true, ErrNoApprovalTrust
+	return true, err
+}
+
+var errNoApprovalOffered = errors.New("no approvals offered")
+
+// approvalKey returns this session's trusted approval key and its pin.
+func (c *Client) approvalKey() (*ecdsa.PublicKey, string, error) {
+	h := c.Server()
+	if !h.HasCapability(protocol.CapabilityApproval) || h.Approval == nil {
+		return nil, "", errNoApprovalOffered
 	}
-	return true, c.opts.approvalTrust(h.Approval.Pin)
+	key, err := security.ParseApprovalKey(h.Approval.Key)
+	if err != nil {
+		return nil, "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
+	}
+	pin, err := security.ApprovalKeyPin(h.Approval.Key)
+	if err != nil {
+		return nil, "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
+	}
+	if pin != h.Approval.Pin {
+		return nil, "", &ApprovalInvalidError{Problem: fmt.Sprintf("the phone's approval key has pin %s, not the %s it claims", pin, h.Approval.Pin)}
+	}
+	if c.opts.approvalTrust == nil {
+		return nil, "", ErrNoApprovalTrust
+	}
+	if err := c.opts.approvalTrust(pin); err != nil {
+		return nil, "", err
+	}
+	return key, pin, nil
 }
 
 // RequestApproval asks the phone's user to approve reason with a
@@ -179,7 +217,8 @@ func (c *Client) CheckApprovalKey() (offered bool, err error) {
 // *ApprovalInvalidError for an approval that failed verification; and
 // connection problems.
 func (c *Client) RequestApproval(ctx context.Context, reason string, timeout time.Duration) (ApprovalResult, error) {
-	reason = strings.TrimSpace(reason)
+	// APPROVAL.md §4: the reason is sent and signed exactly as given, never
+	// trimmed; check it before sending, as the phone would.
 	if err := protocol.CheckReason(reason); err != nil {
 		return ApprovalResult{}, fmt.Errorf("phonetopc: %w", err)
 	}
@@ -196,21 +235,17 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 	if h.PC == nil {
 		return res, ErrApprovalNeedsSecureMode
 	}
-	if !h.HasCapability(protocol.CapabilityApproval) || h.Approval == nil {
+	key, pin, err := c.approvalKey()
+	switch {
+	case err == errNoApprovalOffered:
+		// §4: no capability, or capability without hello.approval (or the
+		// reverse): unavailable, and nothing is sent.
 		res.Why = WhyUnavailable
 		return res, nil
-	}
-	key, err := security.ParseApprovalKey(h.Approval.Key)
-	if err != nil {
-		return res, &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
-	}
-	if pin, _ := security.ApprovalKeyPin(h.Approval.Key); pin != h.Approval.Pin {
-		return res, &ApprovalInvalidError{Problem: fmt.Sprintf("the phone's approval key has pin %s, not the %s it claims", pin, h.Approval.Pin)}
-	}
-	if _, err := c.CheckApprovalKey(); err != nil {
+	case err != nil:
 		return res, err
 	}
-	res.KeyPin = h.Approval.Pin
+	res.KeyPin = pin
 
 	res.Nonce = security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
 	if c.opts.testNonce != "" {
@@ -219,16 +254,16 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 	ms := timeout.Milliseconds()
 	params := protocol.RequestApprovalParams{Reason: reason, Nonce: res.Nonce, TimeoutMS: &ms}
 	// §4: never give up before timeout_ms + 5 s; allow a little more.
-	cctx, cancel := context.WithTimeout(ctx, timeout+protocol.ApprovalResponseLeeway+5*time.Second)
+	wait := timeout + protocol.ApprovalResponseLeeway + approvalWaitSlack
+	cctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	var raw json.RawMessage
 	err = c.Call(cctx, protocol.MethodRequestApproval, params, &raw)
 	switch {
 	case err == nil:
 	case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
-		// The phone never answered, not even with "timeout".
-		res.Why = WhyTimeout
-		return res, nil
+		// §4: our own wait running out is an error, not a why.
+		return res, fmt.Errorf("%w: no answer from the phone within %v", ErrApprovalNoAnswer, wait)
 	default:
 		return res, err
 	}
