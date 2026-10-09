@@ -53,7 +53,10 @@ type phone struct {
 	port  int
 }
 
-func startPhone(t *testing.T) *phone {
+func startPhone(t *testing.T) *phone { return startPhoneOn(t, "") }
+
+// startPhoneOn starts a phone listening on addr ("" for loopback).
+func startPhoneOn(t *testing.T, addr string) *phone {
 	t.Helper()
 	st, err := mockphone.OpenState(t.TempDir())
 	if err != nil {
@@ -70,6 +73,12 @@ func startPhone(t *testing.T) *phone {
 	hs := httptest.NewUnstartedServer(srv.Handler())
 	hs.TLS = security.ServerTLSConfig(id.Cert)
 	hs.Config.ErrorLog = log.New(io.Discard, "", 0) // pin-mismatch tests abort handshakes
+	if addr != "" {
+		hs.Listener.Close()
+		if hs.Listener, err = net.Listen("tcp", addr); err != nil {
+			t.Fatal(err)
+		}
+	}
 	hs.StartTLS()
 	t.Cleanup(func() { srv.Close(); hs.Close() })
 	host, ps, _ := net.SplitHostPort(strings.TrimPrefix(hs.URL, "https://"))
