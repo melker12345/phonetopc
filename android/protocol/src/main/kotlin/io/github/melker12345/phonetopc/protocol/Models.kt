@@ -51,6 +51,9 @@ internal data class SubscribeResult(
     val subscription: String,
     val source: String,
     val types: List<String>,
+    /** Copied from `list_sensors` (spec §4.3, draft 1). */
+    val mode: SensorMode,
+    /** Effective rate; continuous sources only. */
     @SerialName("rate_hz") val rateHz: Double? = null,
 )
 

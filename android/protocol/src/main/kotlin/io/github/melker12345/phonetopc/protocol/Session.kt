@@ -252,7 +252,7 @@ class Session internal constructor(
         val sub = Subscription(hub.newSubscriptionId(), this, spec, type, rate, minDelta)
         subscriptions[sub.id] = sub
         hub.addSubscription(sub)
-        val result = SubscribeResult(sub.id, spec.source, type?.let { listOf(it) } ?: spec.types, rate)
+        val result = SubscribeResult(sub.id, spec.source, type?.let { listOf(it) } ?: spec.types, spec.mode, rate)
         return ProtocolJson.encodeToJsonElement(SubscribeResult.serializer(), result)
     }
 

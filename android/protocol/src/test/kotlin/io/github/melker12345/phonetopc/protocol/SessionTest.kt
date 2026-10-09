@@ -248,6 +248,7 @@ class SessionTest {
         assertEquals(50.0, def["rate_hz"]!!.jsonPrimitive.double, 0.0)
         assertEquals(listOf("rotation"), def["types"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals("gyro", def["source"]!!.jsonPrimitive.content)
+        assertEquals("continuous", def["mode"]!!.jsonPrimitive.content)
         assertTrue(def["subscription"]!!.jsonPrimitive.content.startsWith("s-"))
         assertEquals(200.0, s.rpc("subscribe", """{"source":"gyro","rate_hz":5000}""").result()["rate_hz"]!!.jsonPrimitive.double, 0.0)
         assertEquals(1.0, s.rpc("subscribe", """{"source":"gyro","rate_hz":0.1}""").result()["rate_hz"]!!.jsonPrimitive.double, 0.0)
@@ -258,6 +259,8 @@ class SessionTest {
         val s = helloSession()
         val r = s.rpc("subscribe", """{"source":"battery","rate_hz":10}""").result()
         assertFalse("rate_hz" in r)
+        assertEquals("on_change", r["mode"]!!.jsonPrimitive.content)
+        assertEquals(listOf("subscription", "source", "types", "mode"), r.keys.toList())
         assertEquals(Demand(null), src.current["battery"])
     }
 
