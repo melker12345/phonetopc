@@ -174,6 +174,9 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// DeviceID returns the device id reported in hello.
+func (s *Server) DeviceID() string { return s.opts.Device.ID }
+
 // Secure reports whether the server is in secure mode.
 func (s *Server) Secure() bool { return s.opts.Authenticate != nil }
 
