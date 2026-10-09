@@ -47,6 +47,6 @@ pip install -e clients/python
 python examples/print_gyro.py        # same stream from Python
 ```
 
-With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb reverse tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
+With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb forward tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
 
 Any language with a WebSocket library can talk to the phone: send JSON-RPC 2.0 to `ws://<phone>:8765/v1/ws`, starting with `hello`. See [`spec/PROTOCOL.md`](spec/PROTOCOL.md).

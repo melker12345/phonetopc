@@ -177,7 +177,7 @@ This makes unlock replay-proof, and safe even if the transport token leaks.
 
 - **mDNS** advertises `_phonetopc._tcp` with TXT records `id=<device id>` and `proto=1`. Because the cert is pinned, a spoofed advertisement fails to authenticate.
 - **Fallbacks are mandatory:** many networks (café, hotel, corporate, some mesh routers) block multicast or isolate clients from each other. Fallback order: mDNS → last known IP → QR re-scan (§4.1 path B) → manual `host:port` in the CLI.
-- **USB:** `adb reverse tcp:PORT tcp:PORT` gives TCP over USB for free, with no protocol change. It's good for low-latency air-mouse use and for networks with client isolation. The trade-off is that USB debugging must be enabled.
+- **USB:** `adb forward tcp:PORT tcp:PORT` gives TCP over USB for free, with no protocol change. It's good for low-latency air-mouse use and for networks with client isolation. The trade-off is that USB debugging must be enabled.
 - **Bluetooth: deferred.** RFCOMM and BLE aren't IP, so they would need their own framing of the same JSON-RPC messages. The README's "transport agnostic" claim applies to the message layer, not the WebSocket. That's true but costly to deliver, so it's post-v1.
 
 ## 6. Use-case recipes (`examples/`), as proof that the API is sufficient
@@ -193,10 +193,16 @@ This makes unlock replay-proof, and safe even if the transport token leaks.
 ## 7. Milestones
 
 **M0. Spikes (de-risk before building)**
+
+First results, 2026-10-09, Galaxy S25 Ultra (SM-S938B, Android 16 / API 36), screen on, charging:
+- Accelerometer and gyro reach about 480 Hz (`HIGH_SAMPLING_RATE_SENSORS` works); game rotation vector caps at 200 Hz. Delivered: 47 Hz at 50 requested, 200 at 200, 471 at 480, with no dropped events over USB.
+- Request round trip (`get`): USB via `adb forward` median 1.3 ms / max 2.4 ms; Wi-Fi median 4.8 ms / max 9.4 ms.
+- mDNS: `avahi-browse` sees `_phonetopc._tcp` with the right TXT records.
+- Still open: screen-off behaviour over an hour or more, battery cost, and BiometricPrompt from a notification.
 - On the target Samsung phone: does an FGS with type `connectedDevice` keep gyro events flowing with the screen off for over 1 hour, and what is the battery cost per hour at 50/100/200 Hz?
 - Can BiometricPrompt be launched from a notification or full-screen intent while the phone is locked or idle?
 - Does `NsdManager` advertise reliably after Wi-Fi reconnects?
-- Measured gyro → PC latency and jitter over Wi-Fi vs `adb reverse`.
+- Measured gyro → PC latency and jitter over Wi-Fi vs `adb forward`.
 
 **M1. Protocol v0 and walking skeleton**
 - Draft `spec/` (envelope, `hello`, `list_sensors`, `subscribe`).
@@ -215,7 +221,7 @@ This makes unlock replay-proof, and safe even if the transport token leaks.
 - Conformance transcripts, plus the same example in five languages.
 
 **M4. Discovery and commands**
-- mDNS on both sides, manual fallback, USB via `adb reverse`.
+- mDNS on both sides, manual fallback, USB via `adb forward`.
 - `command`: vibrate, notify, ring, Quick Settings tile events.
 
 **M5. Biometric challenge-response and unlock**

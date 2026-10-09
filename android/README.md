@@ -53,7 +53,7 @@ sensors stop) and **Stop**. Add the **PC button** Quick Settings tile to send
 Over **USB** (works on networks that isolate clients; needs USB debugging):
 
 ```sh
-adb reverse tcp:8765 tcp:8765    # PC's 127.0.0.1:8765 now reaches the phone
+adb forward tcp:8765 tcp:8765    # PC's 127.0.0.1:8765 now reaches the phone
 websocat ws://127.0.0.1:8765/v1/ws
 ```
 

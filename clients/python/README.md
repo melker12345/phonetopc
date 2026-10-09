@@ -58,7 +58,7 @@ More complete scripts are in [`examples/`](../../examples).
 | `[fe80::1]:8765` or `fe80::1` | `ws://[fe80::1]:8765/v1/ws` |
 | `ws://host:port/path` | used as is (an empty path becomes `/v1/ws`) |
 
-Over USB: `adb reverse tcp:8765 tcp:8765`, then connect to `127.0.0.1`.
+Over USB: `adb forward tcp:8765 tcp:8765`, then connect to `127.0.0.1`.
 
 ## API overview
 

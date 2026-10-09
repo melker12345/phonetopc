@@ -35,7 +35,7 @@ Usage::
 
 Tune ``--scale`` (pixels per radian of rotation) for speed and ``--deadzone``
 (rad/s) until the pointer rests when you hold the phone still. Use USB
-(``adb reverse tcp:8765 tcp:8765`` and ``--addr 127.0.0.1``) for the lowest
+(``adb forward tcp:8765 tcp:8765`` and ``--addr 127.0.0.1``) for the lowest
 latency.
 """
 

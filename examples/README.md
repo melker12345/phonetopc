@@ -7,7 +7,7 @@ pip install -e clients/python
 export PHONETOPC_ADDR=192.168.1.20      # your phone's IP (port defaults to 8765)
 ```
 
-Every script also takes `--addr host[:port]` (`print_gyro.py` takes the address as its only argument). Over USB, run `adb reverse tcp:8765 tcp:8765` and use `127.0.0.1`.
+Every script also takes `--addr host[:port]` (`print_gyro.py` takes the address as its only argument). Over USB, run `adb forward tcp:8765 tcp:8765` and use `127.0.0.1`.
 
 | Script | What it does | Extra requirements |
 |---|---|---|

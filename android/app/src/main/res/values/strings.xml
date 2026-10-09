@@ -55,7 +55,7 @@
     <string name="home_copy_address">Copy address</string>
     <string name="home_also_reachable">Also reachable at %1$s</string>
     <string name="home_usb_title">Over USB</string>
-    <string name="home_usb_body">adb reverse tcp:%1$d tcp:%1$d, then use 127.0.0.1:%1$d</string>
+    <string name="home_usb_body">adb forward tcp:%1$d tcp:%1$d, then use 127.0.0.1:%1$d</string>
     <string name="home_clients_header">Connected clients</string>
     <string name="home_clients_empty">No clients yet. Point a client on your PC at the address above.</string>
     <string name="home_client_connecting">Connecting…</string>
