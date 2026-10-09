@@ -357,7 +357,7 @@ func (c *Client) handleEvent(params json.RawMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, ok := c.subs[ev.Subscription]
-	if !ok {
+	if !ok || s.unsubscribing {
 		return
 	}
 	select {

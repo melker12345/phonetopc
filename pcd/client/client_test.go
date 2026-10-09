@@ -263,8 +263,10 @@ func TestSubscribeNoEarlyEventLoss(t *testing.T) {
 		for ev := range sub.Events() {
 			rest = append(rest, ev.Seq)
 		}
-		if len(rest) != 1 || rest[0] != 5 {
-			t.Errorf("events after unsubscribe = %v, want [5]", rest)
+		// Event 5 arrived between the unsubscribe request and its response,
+		// event 6 after the response: both are discarded.
+		if len(rest) != 0 {
+			t.Errorf("events after unsubscribe = %v, want none", rest)
 		}
 		if sub.Err() != nil {
 			t.Errorf("Err() after Unsubscribe = %v", sub.Err())

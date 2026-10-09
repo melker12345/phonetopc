@@ -42,6 +42,10 @@ type Subscription struct {
 	dropped atomic.Uint64
 	err     error // guarded by c.mu; set when ch is closed
 	closed  bool  // guarded by c.mu
+	// unsubscribing is set while an unsubscribe request is in flight;
+	// events that still arrive then are discarded (spec §4.4). Guarded by
+	// c.mu.
+	unsubscribing bool
 }
 
 // Events returns the event channel. It is closed after Unsubscribe or when
@@ -112,8 +116,9 @@ func (c *Client) Subscribe(ctx context.Context, source string, opts SubscribeOpt
 }
 
 // Unsubscribe ends the subscription and closes its Events channel. Events
-// already buffered in the channel can still be read. Calling it again is a
-// no-op.
+// already buffered in the channel can still be read, but events the server
+// sends after the unsubscribe request has gone out are discarded. Calling it
+// again is a no-op.
 func (s *Subscription) Unsubscribe(ctx context.Context) error {
 	c := s.c
 	c.mu.Lock()
@@ -121,6 +126,7 @@ func (s *Subscription) Unsubscribe(ctx context.Context) error {
 		c.mu.Unlock()
 		return nil
 	}
+	s.unsubscribing = true
 	c.mu.Unlock()
 
 	cl := &call{onResult: func(json.RawMessage) error {
@@ -131,6 +137,12 @@ func (s *Subscription) Unsubscribe(ctx context.Context) error {
 	if errors.Is(err, &protocol.Error{Code: protocol.CodeUnknownSubscription}) {
 		s.close(nil) // the server doesn't know it either; we're consistent now
 		return nil
+	}
+	if err != nil {
+		// The subscription may still be active; deliver its events again.
+		c.mu.Lock()
+		s.unsubscribing = false
+		c.mu.Unlock()
 	}
 	return err
 }
