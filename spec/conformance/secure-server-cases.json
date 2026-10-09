@@ -1,0 +1,154 @@
+{
+  "description": "Secure-mode server cases for SECURITY.md §5 (authenticated hello). Format: see README.md, section 'Secure server cases'. Run over wss:// with the fixture's key; the runner verifies the pin.",
+  "fixture": {
+    "key": "vectors/phone-key.pem",
+    "pin": "sha256/tQITurCV6l1Rq9Rk0X_kPrHlWaaKPnkI6CGl03GEaBc",
+    "pcs": [
+      {"id": "conformance-pc-1", "name": "conformance PC", "token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}
+    ],
+    "revoked_tokens": ["YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"],
+    "hello_timeout_s": 10
+  },
+  "cases": [
+    {
+      "name": "hello_valid_token",
+      "description": "A hello with a paired PC's token succeeds, and the result names that PC in pc.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "client": {"name": "conformance"}, "auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}}},
+      "expect": {"result": "any", "id": 1, "result_has": {"pc": {"id": "conformance-pc-1", "name": "conformance PC"}}}
+    },
+    {
+      "name": "authenticated_list_sensors",
+      "description": "After an authenticated hello the session works as in dev mode.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 2, "method": "list_sensors"},
+      "expect": {"result": "any", "id": 2}
+    },
+    {
+      "name": "hello_without_auth",
+      "description": "Secure mode: a hello without auth is -32010, then the server closes with 1008.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1"}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_auth_null",
+      "description": "auth: null counts as absent.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": null}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_auth_not_object",
+      "description": "Choice: a malformed auth member is an authentication failure (-32010 and close), not -32602.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_auth_without_token",
+      "description": "auth without token.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_empty_token",
+      "description": "An empty token.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": ""}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_token_not_string",
+      "description": "Choice: a token of the wrong type is an authentication failure too.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": "a", "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": 12345}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": "a", "close_after": 1008}
+    },
+    {
+      "name": "hello_unknown_token",
+      "description": "A well-formed token that no PC was given.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_revoked_token",
+      "description": "The token of a PC that was revoked.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_token_prefix",
+      "description": "A prefix of a valid token is not valid (the comparison is over the whole token).",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl"}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_unsupported_protocol_valid_token",
+      "description": "An authenticated hello with an unknown protocol is -32004 with data.supported, and the connection stays open.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/9", "auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}}},
+      "expect": {"error": -32004, "name": "unsupported_protocol", "id": 1, "data": {"supported": ["phonetopc/1"]}}
+    },
+    {
+      "name": "hello_unsupported_protocol_without_token",
+      "description": "Choice: auth is checked before the protocol version, so an unauthenticated client learns nothing and is closed.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/9"}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 1, "close_after": 1008}
+    },
+    {
+      "name": "hello_invalid_params_before_auth",
+      "description": "Choice: step 7 (params shape, protocol required) comes before the auth check; -32602 does not close the connection.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": ["phonetopc/1"]},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "hello_missing_protocol_with_token",
+      "description": "protocol is still required.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "request_before_hello",
+      "description": "The -32003 rule of PROTOCOL.md §3 still applies before a successful hello; it does not close the connection.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors"},
+      "expect": {"error": -32003, "name": "hello_required", "id": 1}
+    },
+    {
+      "name": "unknown_method_before_hello",
+      "description": "Unknown methods get -32003 before hello too.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "pair_qr", "params": {}},
+      "expect": {"error": -32003, "name": "hello_required", "id": 1}
+    },
+    {
+      "name": "hello_notification_ignored",
+      "description": "A hello without id is a notification: no reply, no close, and it doesn't authenticate.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "method": "hello", "params": {"protocol": "phonetopc/1"}},
+      "expect": {"no_reply": true}
+    },
+    {
+      "name": "rehello_with_bad_token",
+      "description": "A later hello with a bad token after a successful one is still -32010 and closes the connection.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 5, "method": "hello", "params": {"protocol": "phonetopc/1", "auth": {"token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}},
+      "expect": {"error": -32010, "name": "unauthorized", "id": 5, "close_after": 1008}
+    },
+    {
+      "name": "no_hello_timeout",
+      "description": "SHOULD: a connection that sends nothing is closed with 1008 after the hello timeout.",
+      "hello": false,
+      "send": {"wait": true},
+      "expect": {"close": 1008}
+    }
+  ]
+}

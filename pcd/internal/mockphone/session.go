@@ -33,13 +33,24 @@ type session struct {
 	cancel context.CancelFunc
 	out    chan []byte
 
-	helloed bool // only used by the reader goroutine
+	helloed  bool // only used by the reader goroutine
+	rejected bool // only used by the reader goroutine: unauthorized, closing
+
+	helloDone chan struct{} // closed on the first successful hello
+	helloOnce sync.Once
 
 	mu        sync.Mutex
 	subs      map[string]*subscription
 	nextSub   int
 	closing   bool
 	closeDone chan struct{} // closed when a closeWith handshake has finished
+	pc        *protocol.PCInfo
+	token     string
+
+	// pendingClose is the close the writer performs when it dequeues the
+	// nil frame queued by closeAfterFlush.
+	pendingCode   websocket.StatusCode
+	pendingReason string
 }
 
 func newSession(srv *Server, conn *websocket.Conn, remote string) *session {
@@ -55,6 +66,47 @@ func newSession(srv *Server, conn *websocket.Conn, remote string) *session {
 		out:       make(chan []byte, srv.opts.QueueSize),
 		subs:      make(map[string]*subscription),
 		closeDone: make(chan struct{}),
+		helloDone: make(chan struct{}),
+	}
+}
+
+// auth returns the PC this session authenticated as.
+func (s *session) auth() (protocol.PCInfo, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pc == nil {
+		return protocol.PCInfo{}, "", false
+	}
+	return *s.pc, s.token, true
+}
+
+// closeAfterFlush closes the connection with code once everything queued so
+// far (in particular the response just queued) has been written.
+func (s *session) closeAfterFlush(code websocket.StatusCode, reason string) {
+	s.mu.Lock()
+	s.pendingCode, s.pendingReason = code, reason
+	s.mu.Unlock()
+	select {
+	case s.out <- nil:
+	case <-s.ctx.Done():
+	}
+}
+
+// helloTimeout closes a secure session that hasn't completed hello in time
+// (SECURITY.md §5).
+func (s *session) helloTimeout() {
+	d := s.srv.opts.HelloTimeout
+	if !s.srv.Secure() || d < 0 {
+		return
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		s.srv.logf("mock: %s: no successful hello within %v, closing", s.remote, d)
+		s.closeWith(websocket.StatusPolicyViolation, "no successful hello in time")
+	case <-s.helloDone:
+	case <-s.ctx.Done():
 	}
 }
 
@@ -67,6 +119,7 @@ func (s *session) run() {
 	var wg sync.WaitGroup
 	wg.Go(s.writeLoop)
 	wg.Go(s.pingLoop)
+	wg.Go(s.helloTimeout)
 	wg.Go(func() {
 		select {
 		case <-s.srv.ctx.Done():
@@ -106,6 +159,9 @@ func (s *session) readLoop() error {
 		if t := s.srv.opts.Tap; t != nil {
 			t(ClientToServer, data)
 		}
+		if s.rejected {
+			continue // unauthorized: closing, nothing more is answered
+		}
 		resp, after := s.handle(data)
 		if resp == nil {
 			continue // a client notification: no reply
@@ -143,6 +199,13 @@ func (s *session) writeLoop() {
 		case <-s.ctx.Done():
 			return
 		case frame := <-s.out:
+			if frame == nil {
+				s.mu.Lock()
+				code, reason := s.pendingCode, s.pendingReason
+				s.mu.Unlock()
+				s.closeWith(code, reason)
+				return
+			}
 			if t := s.srv.opts.Tap; t != nil {
 				t(ServerToClient, frame)
 			}
@@ -288,6 +351,12 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	switch method {
 	case protocol.MethodHello:
 		result, rpcErr = s.hello(params)
+		if rpcErr != nil && rpcErr.Code == protocol.CodeUnauthorized {
+			// SECURITY.md §5: -32010, then close with 1008.
+			s.rejected = true
+			s.srv.noteAuthFailure(remoteHost(s.remote))
+			after = func() { s.closeAfterFlush(websocket.StatusPolicyViolation, "unauthorized") }
+		}
 	case protocol.MethodListSensors:
 		// list_sensors takes no params, but if present they must still be an
 		// object (spec §2); its members are ignored.
@@ -304,7 +373,7 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found", method)
 	}
 	if rpcErr != nil {
-		return protocol.NewErrorResponse(id, rpcErr), nil
+		return protocol.NewErrorResponse(id, rpcErr), after // after is only set on error for -32010
 	}
 	return protocol.NewResult(id, result), after
 }
@@ -329,12 +398,35 @@ func decodeParams(params json.RawMessage, v any) *protocol.Error {
 }
 
 func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
-	var p protocol.HelloParams
+	var p struct {
+		Protocol string               `json:"protocol"`
+		Client   *protocol.ClientInfo `json:"client"`
+		Auth     json.RawMessage      `json:"auth"`
+	}
 	if err := decodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if p.Protocol == "" {
 		return nil, protocol.NewError(protocol.CodeInvalidParams, "params.protocol is required")
+	}
+	// Secure mode: every problem with auth (absent, null, not an object, no
+	// or empty or unknown token) is -32010, checked after the params shape
+	// and before the protocol version.
+	var pc *protocol.PCInfo
+	var token string
+	if s.srv.Secure() {
+		var a struct {
+			Token *string `json:"token"`
+		}
+		auth := bytes.TrimSpace(p.Auth)
+		if len(auth) == 0 || auth[0] != '{' || json.Unmarshal(auth, &a) != nil || a.Token == nil || *a.Token == "" {
+			return nil, protocol.NewError(protocol.CodeUnauthorized, "hello needs auth.token in secure mode; pair this PC first")
+		}
+		info, ok := s.srv.opts.Authenticate(*a.Token)
+		if !ok {
+			return nil, protocol.NewError(protocol.CodeUnauthorized, "unknown or revoked token; pair this PC again")
+		}
+		pc, token = &info, *a.Token
 	}
 	if !slices.Contains(protocol.SupportedVersions, p.Protocol) {
 		e := protocol.NewError(protocol.CodeUnsupportedProtocol, "protocol %q is not supported", p.Protocol)
@@ -344,10 +436,17 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	}
 	// A repeated hello is allowed and simply answered again.
 	s.helloed = true
+	s.helloOnce.Do(func() { close(s.helloDone) })
+	if pc != nil {
+		s.mu.Lock()
+		s.pc, s.token = pc, token
+		s.mu.Unlock()
+		s.srv.logf("mock: %s authenticated as PC %q (%s)", s.remote, pc.Name, pc.ID)
+	}
 	if p.Client != nil && p.Client.Name != "" {
 		s.srv.logf("mock: %s is %s %s", s.remote, p.Client.Name, p.Client.Version)
 	}
-	return s.srv.helloResult(), nil
+	return s.srv.helloResult(pc), nil
 }
 
 // lookup resolves source and an optional type against the catalog. This is

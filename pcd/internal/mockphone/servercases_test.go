@@ -95,7 +95,8 @@ func TestServerCases(t *testing.T) {
 	}
 }
 
-func runCaseStep(t *testing.T, r *rawConn, where string, s caseStep) {
+// runCaseStep runs one step and returns the response it checked, if any.
+func runCaseStep(t *testing.T, r *rawConn, where string, s caseStep) *protocol.Message {
 	t.Helper()
 	typ, payload := caseFrame(t, s.Send)
 	if err := r.conn.Write(testCtx(t), typ, payload); err != nil {
@@ -112,7 +113,7 @@ func runCaseStep(t *testing.T, r *rawConn, where string, s caseStep) {
 				if got := websocket.CloseStatus(err); int(got) != *ex.Close {
 					t.Fatalf("%s: want close %d, got %v", where, *ex.Close, err)
 				}
-				return
+				return nil
 			}
 			if bytes.Contains(data, []byte(`"id"`)) {
 				t.Fatalf("%s: want close %d, got response %s", where, *ex.Close, data)
@@ -123,12 +124,14 @@ func runCaseStep(t *testing.T, r *rawConn, where string, s caseStep) {
 		if m := r.response(); string(m.ID) != `"conformance-probe"` {
 			t.Fatalf("%s: want no reply, got %+v (error %+v)", where, m, m.Error)
 		}
+		return nil
 	case ex.Result != "":
 		m := r.response()
 		if m.Error != nil || m.Result == nil {
 			t.Fatalf("%s: want a result, got error %+v", where, m.Error)
 		}
 		wantSameJSON(t, where+": id", m.ID, ex.ID)
+		return m
 	case ex.Error != nil:
 		m := r.response()
 		if m.Error == nil {
@@ -154,9 +157,11 @@ func runCaseStep(t *testing.T, r *rawConn, where string, s caseStep) {
 				wantSameJSON(t, where+": data."+k, got[k], want)
 			}
 		}
+		return m
 	default:
 		t.Fatalf("%s: unknown expect form", where)
 	}
+	return nil
 }
 
 // caseFrame turns a case's send member into a WebSocket frame.

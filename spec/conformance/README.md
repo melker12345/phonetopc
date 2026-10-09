@@ -1,11 +1,16 @@
 # Conformance material
 
-Two kinds of conformance material for `phonetopc/1` (draft 1) live here.
+Conformance material for `phonetopc/1` (draft 2) lives here.
 [`../PROTOCOL.md`](../PROTOCOL.md) is still the normative reference.
 
 - [`server-cases.json`](server-cases.json): a language-neutral suite of single-request cases that
   every **server** implementation runs in its own tests. It pins down how a server answers
   malformed, out-of-order and invalid requests (the order of checks in §2).
+- [`secure-server-cases.json`](secure-server-cases.json): the same kind of suite for **secure
+  mode** ([`../SECURITY.md`](../SECURITY.md) §5): authenticated `hello`, `-32010` followed by close
+  1008, and the hello timeout. See [Secure server cases](#secure-server-cases-secure-server-casesjson).
+- [`vectors/`](vectors/): test vectors for pins, base64url, the SAS commitment and the SAS code
+  (`vectors.json`), with the test certificates and keys they refer to.
 - `*.jsonl` **transcripts**: recorded sessions with the mock phone (`pcd/cmd/phonetopc-mock`),
   for checking a client or server against concrete wire traffic.
 
@@ -63,6 +68,7 @@ The file is a JSON array of cases:
 
 **Server fixture.** The cases assume the server under test is configured like this:
 
+- It runs in dev mode (`ws://`, no authentication). Secure mode has its own cases below.
 - It supports exactly one protocol version, `phonetopc/1`.
 - All catalog sources of §6 are known. `proximity` is unavailable (`available: false`); all
   others are available.
@@ -80,6 +86,50 @@ consistent with the order of checks:
   typed members, `rate_hz > 0`, `min_delta ≥ 0`. Step 8 then checks, in this order: unknown
   `source` (`-32001`), a `type` the source doesn't have (`-32602`), unavailable source (`-32002`),
   then the method's own state (`-32005`, `-32006`).
+
+## Secure server cases (`secure-server-cases.json`)
+
+A JSON object with a `fixture` and a `cases` array. Cases have the format of `server-cases.json`
+above, with these differences:
+
+- **Transport.** The runner connects to `wss://…/v1/ws` and verifies that the server's pin equals
+  `fixture.pin` (the pin of `vectors/phone-cert.pem`). Every case uses a fresh connection.
+- **`"hello": true`** sends the conformance hello with
+  `"auth":{"token":"<fixture.pcs[0].token>"}` added and requires a success response.
+- **`send`** may also be `{"wait": true}`: send nothing. Used with `{"close": 1008}`: the server
+  must close the connection within the hello timeout (plus a few seconds of slack).
+- **`expect`** gains two optional members:
+
+| Member | Meaning |
+|---|---|
+| `"result_has": {...}` | With `"result"`: each listed member of `result` must equal the given JSON value (e.g. `pc`) |
+| `"close_after": <code>` | With `"error"`: right after the error response, the server closes the WebSocket with this code and sends nothing else |
+
+**Server fixture.**
+
+- Secure mode, serving the key `fixture.key` (`vectors/phone-key.pem`), so its pin is `fixture.pin`.
+  The certificate itself may be any self-signed one for that key.
+- Exactly the PCs in `fixture.pcs` are paired, with those ids, names and tokens. The tokens in
+  `fixture.revoked_tokens` belonged to PCs that have been revoked: they must not be accepted.
+- The hello timeout is `fixture.hello_timeout_s` (10 s, the SHOULD of §5). A runner MAY configure a
+  shorter one to keep the suite fast; the `no_hello_timeout` case only needs *some* timeout.
+- The per-address limit on failed hellos (a SHOULD of §5) must be off, or allow at least 20 failures
+  per minute: the cases fail many hellos from one address.
+- Otherwise as for `server-cases.json` (catalog, availability, values).
+
+**Choices the cases make.** §5 doesn't say where the token check sits in the order of checks of
+`PROTOCOL.md` §2. The cases take this order for `hello` in secure mode:
+
+1. Steps 1–6 as usual; before a successful `hello` other requests still get `-32003`, without
+   closing.
+2. Step 7, the params shape: params must be an object and `protocol` a present string, else `-32602`
+   (no close).
+3. Then authentication: `auth` absent, `null`, not an object, without `token`, with a `token` that is
+   not a non-empty string, or with an unknown or revoked token: `-32010`, then close 1008.
+4. Then the protocol version: `-32004` with `data.supported` (no close).
+
+So an unauthenticated client learns nothing but `-32010`. A later failing `hello` after a successful
+one is still `-32010` and closes the connection.
 
 ## Transcripts
 

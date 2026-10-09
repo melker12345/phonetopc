@@ -1,6 +1,7 @@
 // Package mockphone implements a mock phonetopc phone server: the full
-// draft-1 protocol (spec/PROTOCOL.md) over WebSocket, backed by synthetic but
-// plausible sensor data. It is used by the phonetopc-mock command and by
+// protocol (spec/PROTOCOL.md) over WebSocket, in dev mode or in secure mode
+// with tokens (spec/SECURITY.md §5), backed by synthetic but plausible
+// sensor data. It is used by the phonetopc-mock command and by
 // tests, so that clients can be developed without a phone.
 package mockphone
 
@@ -8,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -72,6 +74,18 @@ type Options struct {
 
 	// Seed seeds the simulation's random numbers. Default: random.
 	Seed uint64
+
+	// Authenticate, if set, puts the server in secure mode (SECURITY.md
+	// §5): hello must carry auth.token, which Authenticate maps to the
+	// paired PC. Serving TLS is up to the caller (see SecureListener).
+	Authenticate func(token string) (protocol.PCInfo, bool)
+	// HelloTimeout closes secure sessions without a successful hello after
+	// this long with 1008. Default 10s; negative disables it.
+	HelloTimeout time.Duration
+	// MaxAuthFailures failed hellos per minute from one address make the
+	// server refuse further connections from it (HTTP 429) for the rest of
+	// the minute. Default 5; negative disables the limit.
+	MaxAuthFailures int
 }
 
 func (o *Options) setDefaults() {
@@ -98,6 +112,10 @@ func (o *Options) setDefaults() {
 	def(&o.BatteryEvery, 60*time.Second)
 	def(&o.PingInterval, 15*time.Second)
 	def(&o.PingTimeout, 30*time.Second)
+	def(&o.HelloTimeout, 10*time.Second)
+	if o.MaxAuthFailures == 0 {
+		o.MaxAuthFailures = 5
+	}
 	if o.QueueSize <= 0 {
 		o.QueueSize = 1024
 	}
@@ -117,9 +135,10 @@ type Server struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu       sync.Mutex
-	sessions map[*session]struct{}
-	seedSeq  uint64
+	mu           sync.Mutex
+	sessions     map[*session]struct{}
+	seedSeq      uint64
+	authFailures map[string][]time.Time // by remote host
 }
 
 // New creates a server and starts its simulation.
@@ -132,6 +151,8 @@ func New(opts Options) *Server {
 		ctx:      ctx,
 		cancel:   cancel,
 		sessions: make(map[*session]struct{}),
+
+		authFailures: make(map[string][]time.Time),
 	}
 	s.world = newWorld(s)
 	s.wg.Go(func() { s.world.run(ctx, s.newRand()) })
@@ -153,10 +174,18 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// Secure reports whether the server is in secure mode.
+func (s *Server) Secure() bool { return s.opts.Authenticate != nil }
+
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
+	if s.Secure() && s.authBlocked(remoteHost(r.RemoteAddr)) {
+		http.Error(w, "too many failed hellos, try again later", http.StatusTooManyRequests)
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Draft 1 is unauthenticated dev mode, and the mock serves fake data,
-		// so allow any Origin (browser-based clients).
+		// Clients authenticate with a token in hello, not with cookies, and
+		// the mock serves fake data, so allow any Origin (browser-based
+		// clients).
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
@@ -180,6 +209,64 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		s.wg.Done()
 	}()
 	sess.run()
+}
+
+func remoteHost(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
+}
+
+// authBlocked reports whether host failed too many hellos in the last minute.
+func (s *Server) authBlocked(host string) bool {
+	if s.opts.MaxAuthFailures < 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := time.Now().Add(-time.Minute)
+	f := slices.DeleteFunc(s.authFailures[host], func(t time.Time) bool { return t.Before(cutoff) })
+	if len(f) == 0 {
+		delete(s.authFailures, host)
+	} else {
+		s.authFailures[host] = f
+	}
+	return len(f) >= s.opts.MaxAuthFailures
+}
+
+func (s *Server) noteAuthFailure(host string) {
+	s.mu.Lock()
+	s.authFailures[host] = append(s.authFailures[host], time.Now())
+	s.mu.Unlock()
+}
+
+// Recheck re-validates the token of every authenticated session and closes
+// those whose PC was revoked (or re-paired with a new token) with 1008
+// (SECURITY.md §5). It returns how many sessions it closed.
+func (s *Server) Recheck() int {
+	if !s.Secure() {
+		return 0
+	}
+	s.mu.Lock()
+	sessions := make([]*session, 0, len(s.sessions))
+	for sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+	n := 0
+	for _, sess := range sessions {
+		pc, token, ok := sess.auth()
+		if !ok {
+			continue
+		}
+		if now, valid := s.opts.Authenticate(token); !valid || now.ID != pc.ID {
+			s.logf("mock: %s: PC %q was revoked, closing", sess.remote, pc.Name)
+			sess.closeWith(websocket.StatusPolicyViolation, "this PC was revoked")
+			n++
+		}
+	}
+	return n
 }
 
 func (s *Server) newRand() *rand.Rand {
@@ -216,12 +303,13 @@ func (s *Server) sensor(source string) (protocol.SensorInfo, bool) {
 	return protocol.SensorInfo{}, false
 }
 
-func (s *Server) helloResult() protocol.HelloResult {
+func (s *Server) helloResult(pc *protocol.PCInfo) protocol.HelloResult {
 	return protocol.HelloResult{
 		Protocol:     protocol.Version,
 		Server:       protocol.ServerInfo{Name: ServerName, Version: Version},
 		Device:       s.opts.Device,
 		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet},
+		PC:           pc,
 	}
 }
 
