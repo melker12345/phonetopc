@@ -229,8 +229,8 @@ func TestSecureAuthRateLimit(t *testing.T) {
 		}
 	}
 	_, err := m.dial(t) // even the right token: this address is blocked for now
-	if err == nil || !strings.Contains(err.Error(), "429") {
-		t.Fatalf("want HTTP 429, got %v", err)
+	if websocket.CloseStatus(err) != websocket.StatusTryAgainLater {
+		t.Fatalf("want close 1013, got %v", err)
 	}
 }
 

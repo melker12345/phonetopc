@@ -350,12 +350,20 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	)
 	switch method {
 	case protocol.MethodHello:
+		wasHelloed := s.helloed
 		result, rpcErr = s.hello(params)
-		if rpcErr != nil && rpcErr.Code == protocol.CodeUnauthorized {
+		switch {
+		case rpcErr == nil:
+		case rpcErr.Code == protocol.CodeUnauthorized:
 			// SECURITY.md §5: -32010, then close with 1008.
 			s.rejected = true
 			s.srv.noteAuthFailure(remoteHost(s.remote))
 			after = func() { s.closeAfterFlush(websocket.StatusPolicyViolation, "unauthorized") }
+		case wasHelloed && s.srv.Secure():
+			// SECURITY.md §5: a failed hello after a successful one also
+			// closes the connection with 1008.
+			s.rejected = true
+			after = func() { s.closeAfterFlush(websocket.StatusPolicyViolation, "failed hello") }
 		}
 	case protocol.MethodListSensors:
 		// list_sensors takes no params, but if present they must still be an
@@ -373,7 +381,7 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found", method)
 	}
 	if rpcErr != nil {
-		return protocol.NewErrorResponse(id, rpcErr), after // after is only set on error for -32010
+		return protocol.NewErrorResponse(id, rpcErr), after // after is only set on error for a closing hello
 	}
 	return protocol.NewResult(id, result), after
 }
@@ -431,7 +439,8 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	if !slices.Contains(protocol.SupportedVersions, p.Protocol) {
 		e := protocol.NewError(protocol.CodeUnsupportedProtocol, "protocol %q is not supported", p.Protocol)
 		e.Data.Supported = protocol.SupportedVersions
-		// A failed hello does not undo an earlier successful one.
+		// In dev mode a failed hello does not undo an earlier successful
+		// one; in secure mode the caller closes the connection.
 		return nil, e
 	}
 	// A repeated hello is allowed and simply answered again.

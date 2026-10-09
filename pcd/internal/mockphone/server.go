@@ -83,7 +83,8 @@ type Options struct {
 	// this long with 1008. Default 10s; negative disables it.
 	HelloTimeout time.Duration
 	// MaxAuthFailures failed hellos per minute from one address make the
-	// server refuse further connections from it (HTTP 429) for the rest of
+	// server close further connections from it with 1013 (SECURITY.md §5),
+	// even with a valid token, for the rest of
 	// the minute. Default 5; negative disables the limit.
 	MaxAuthFailures int
 }
@@ -181,10 +182,6 @@ func (s *Server) DeviceID() string { return s.opts.Device.ID }
 func (s *Server) Secure() bool { return s.opts.Authenticate != nil }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
-	if s.Secure() && s.authBlocked(remoteHost(r.RemoteAddr)) {
-		http.Error(w, "too many failed hellos, try again later", http.StatusTooManyRequests)
-		return
-	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// Clients authenticate with a token in hello, not with cookies, and
 		// the mock serves fake data, so allow any Origin (browser-based
@@ -193,6 +190,11 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.logf("mock: accept from %s: %v", r.RemoteAddr, err)
+		return
+	}
+	if s.Secure() && s.authBlocked(remoteHost(r.RemoteAddr)) {
+		s.logf("mock: %s: too many failed hellos, closing with 1013", r.RemoteAddr)
+		conn.Close(websocket.StatusTryAgainLater, "too many failed hellos, try again later")
 		return
 	}
 	sess := newSession(s, conn, r.RemoteAddr)

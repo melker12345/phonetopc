@@ -144,6 +144,20 @@
       "expect": {"error": -32010, "name": "unauthorized", "id": 5, "close_after": 1008}
     },
     {
+      "name": "rehello_unsupported_protocol_closes",
+      "description": "SECURITY.md §5 (draft 3): any failed hello after a successful one closes the connection with 1008, here -32004 with a valid token.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 6, "method": "hello", "params": {"protocol": "phonetopc/9", "auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}}},
+      "expect": {"error": -32004, "name": "unsupported_protocol", "id": 6, "data": {"supported": ["phonetopc/1"]}, "close_after": 1008}
+    },
+    {
+      "name": "rehello_invalid_params_closes",
+      "description": "SECURITY.md §5 (draft 3): a failed hello after a successful one closes the connection with 1008, here -32602.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 7, "method": "hello", "params": {"auth": {"token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 7, "close_after": 1008}
+    },
+    {
       "name": "no_hello_timeout",
       "description": "SHOULD: a connection that sends nothing is closed with 1008 after the hello timeout.",
       "hello": false,

@@ -128,8 +128,9 @@ above, with these differences:
    not a non-empty string, or with an unknown or revoked token: `-32010`, then close 1008.
 4. Then the protocol version: `-32004` with `data.supported` (no close).
 
-So an unauthenticated client learns nothing but `-32010`. A later failing `hello` after a successful
-one is still `-32010` and closes the connection.
+So an unauthenticated client learns nothing but `-32010`. SECURITY.md draft 3 settled this order
+and adds: any failing `hello` after a successful one (`-32010`, `-32602` or `-32004`) closes the
+connection with 1008 after the error response (`rehello_*` cases).
 
 ## Transcripts
 
