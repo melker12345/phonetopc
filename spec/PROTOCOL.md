@@ -1,10 +1,13 @@
-# phonetopc protocol — version `phonetopc/1` (draft 1)
+# phonetopc protocol — version `phonetopc/1` (draft 2)
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 JSON Schemas for every message live in [`schemas/`](schemas/).
 
-Draft 1 covers milestone M1 from [`plan.md`](../plan.md): plaintext dev mode, discovery by manual address,
-sensor events. Pairing, TLS, tokens and commands are added in later drafts without breaking these messages.
+This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
+tokens (milestone M2). Commands and fingerprint approval come in later drafts without breaking these messages.
+
+**Changes in draft 2:** secure mode (`wss://` with a pinned certificate) is the default; `hello` gains `auth`
+and its result gains `pc`; new error `-32010`; mDNS TXT gains `tls=1`. See `SECURITY.md`.
 
 **Changes in draft 1** (clarifications found while building the Go mock, the Android app and the Python client):
 `subscribe` result gains `mode`; ordering guarantee between a `subscribe` response and its events; `on_change`
@@ -14,8 +17,8 @@ are ignored; `get` documents `type`; `unsubscribe` result and per-method results
 ## 1. Transport
 
 - The phone daemon is the **server**. Clients connect to it.
-- Endpoint: `ws://<phone-ip>:<port>/v1/ws`. Default port: **8765**.
-- Draft 1 is **plaintext dev mode only**: no TLS, no authentication. The phone app MUST make dev mode an explicit, off-by-default setting.
+- Endpoint: `wss://<phone-ip>:<port>/v1/ws` in **secure mode** (the default), or `ws://…` in **dev mode**. Default port: **8765**. See `SECURITY.md` §3.
+- Dev mode has no TLS and no authentication. The phone app MUST make dev mode an explicit, off-by-default setting.
 - Each WebSocket text frame carries exactly one UTF-8 JSON object. Batching multiple messages into one frame (JSON-RPC batch arrays) is NOT supported; a server MUST answer a batch array with error `-32600`.
 - Binary frames are reserved. Servers MUST close the connection with code 1003 on receiving one.
 - The PC daemon `phonetopcd` exposes the **same protocol** to local clients (Unix socket / localhost WS) in a later milestone.
@@ -56,13 +59,15 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 // request
 {"jsonrpc":"2.0","id":1,"method":"hello","params":{
   "protocol":"phonetopc/1",
-  "client":{"name":"my-script","version":"0.1.0"}}}
+  "client":{"name":"my-script","version":"0.1.0"},
+  "auth":{"token":"…"}}}            // secure mode only, see SECURITY.md §5
 // response
 {"jsonrpc":"2.0","id":1,"result":{
   "protocol":"phonetopc/1",
   "server":{"name":"phonetopc-android","version":"0.1.0"},
   "device":{"id":"a1b2c3d4","name":"Galaxy S24","manufacturer":"samsung","model":"SM-S921B","platform":"android","platform_version":"34"},
-  "capabilities":["events","get"]}}
+  "capabilities":["events","get"],
+  "pc":{"id":"9d1c…","name":"arch-desktop"}}}   // secure mode only
 ```
 
 - If `protocol` is not supported, the server returns error `-32004` (`unsupported_protocol`) with `data.supported` listing the versions it does support.
@@ -179,14 +184,15 @@ Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `
 | `-32004` | `unsupported_protocol` | `hello.protocol` not supported; `data.supported` lists versions |
 | `-32005` | `unknown_subscription` | `unsubscribe` with an id not in this session |
 | `-32006` | `no_value` | `get` has nothing to return yet |
+| `-32010` | `unauthorized` | Secure mode: missing, unknown or revoked token (`SECURITY.md` §5) |
 
 Every error has `message` (human-readable) and SHOULD have `data.name`: the application names above, or `parse_error`, `invalid_request`, `method_not_found`, `invalid_params`, `internal_error` for the standard codes.
 
 ## 8. Discovery
 
-This draft uses a manual address. Servers SHOULD additionally advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available.
+This draft uses a manual address. Servers SHOULD additionally advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, and `tls=1` (secure mode) or `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available.
 
 ## 9. Known gaps (later drafts)
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
-- Pairing, TLS, tokens, `command` and biometric challenge-response (see `plan.md` §4).
+- `command` and biometric challenge-response (see `plan.md` §4.3).
