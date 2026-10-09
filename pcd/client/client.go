@@ -6,6 +6,16 @@
 // are delivered to per-subscription channels; all methods are safe for
 // concurrent use.
 //
+// Secure mode (SECURITY.md) needs the phone's pin and the token from
+// pairing. DialPaired takes both from the PC's credential store and finds
+// the phone; Dial with WithPin and WithToken connects to a known address:
+//
+//	c, err := client.DialPaired(ctx, "")    // the only paired phone
+//	c, err := client.Dial(ctx, client.SecureURL("192.168.1.153:8765"),
+//		client.WithPin(pin), client.WithToken(token))
+//
+// Dev mode is plain ws:// without either:
+//
 //	c, err := client.Dial(ctx, client.URL("127.0.0.1:8765"))
 //	if err != nil { ... }
 //	defer c.Close()
@@ -21,13 +31,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
 // Re-exported protocol types, so users of this package don't need to import
@@ -41,7 +54,27 @@ type (
 	Error       = protocol.Error
 	ErrorCode   = protocol.ErrorCode
 	Mode        = protocol.Mode
+	PCInfo      = protocol.PCInfo
+	// PinMismatchError is returned (wrapped) by Dial when the server's
+	// certificate doesn't match the pin.
+	PinMismatchError = security.PinMismatchError
 )
+
+// ErrPinMismatch matches (with errors.Is) every pin mismatch: the phone
+// presented a different key than at pairing. The only fix is to re-pair.
+var ErrPinMismatch = security.ErrPinMismatch
+
+// Error codes a caller may want to tell apart.
+const (
+	CodeUnauthorized = protocol.CodeUnauthorized
+)
+
+// IsUnauthorized reports whether err is the server's -32010: the token is
+// missing, unknown or revoked.
+func IsUnauthorized(err error) bool {
+	code, ok := protocol.ErrorCodeOf(err)
+	return ok && code == protocol.CodeUnauthorized
+}
 
 // Sensor modes, as in SensorInfo.Mode and Subscription.Mode.
 const (
@@ -70,6 +103,14 @@ type options struct {
 	eventBuffer int
 	tap         func(Direction, []byte)
 	dialOptions *websocket.DialOptions
+	pin         string
+	token       string
+
+	// DialPaired only.
+	configDir        string
+	discovery        bool
+	discoveryTimeout time.Duration
+	addrOverride     string
 }
 
 // Option configures Dial.
@@ -101,6 +142,23 @@ func WithTap(f func(dir Direction, frame []byte)) Option { return func(o *option
 
 // WithDialOptions sets the options passed to websocket.Dial.
 func WithDialOptions(d *websocket.DialOptions) Option { return func(o *options) { o.dialOptions = d } }
+
+// WithPin makes Dial verify that the server's certificate has this pin
+// (SECURITY.md §2). It is required for wss:// URLs: the connection fails
+// with ErrPinMismatch before anything is sent if the pin differs.
+func WithPin(pin string) Option { return func(o *options) { o.pin = pin } }
+
+// WithToken sends token in hello's auth member (secure mode).
+func WithToken(token string) Option { return func(o *options) { o.token = token } }
+
+// SecureURL turns "host:port" into the phone's secure WebSocket URL
+// ("wss://host:port/v1/ws"). Strings with a scheme are returned unchanged.
+func SecureURL(addr string) string {
+	if strings.HasPrefix(addr, "ws://") || strings.HasPrefix(addr, "wss://") {
+		return addr
+	}
+	return "wss://" + addr + protocol.WSPath
+}
 
 // URL turns "host:port" into the phone's WebSocket URL
 // ("ws://host:port/v1/ws"). Strings that already have a ws:// or wss://
@@ -157,8 +215,17 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	for _, f := range opts {
 		f(&o)
 	}
-	conn, _, err := websocket.Dial(ctx, url, o.dialOptions)
+	dopts, err := o.secureDialOptions(url)
 	if err != nil {
+		return nil, err
+	}
+	conn, _, err := websocket.Dial(ctx, url, dopts)
+	if err != nil {
+		if errors.Is(err, ErrPinMismatch) {
+			var pm *PinMismatchError
+			errors.As(err, &pm)
+			return nil, fmt.Errorf("phonetopc: dial %s: %w", url, pm)
+		}
 		return nil, fmt.Errorf("phonetopc: dial %s: %w", url, err)
 	}
 	conn.SetReadLimit(1 << 20)
@@ -179,11 +246,42 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
+// secureDialOptions checks the pin against the URL scheme and, for wss://,
+// installs the pinned TLS configuration.
+func (o *options) secureDialOptions(url string) (*websocket.DialOptions, error) {
+	secure := strings.HasPrefix(url, "wss://")
+	switch {
+	case secure && o.pin == "":
+		return nil, errors.New("phonetopc: a wss:// URL needs the phone's pin (WithPin); certificates are never trusted otherwise")
+	case !secure && o.pin != "":
+		return nil, fmt.Errorf("phonetopc: a pin was given but %s is not a wss:// URL; refusing to connect in plaintext", url)
+	case !secure:
+		return o.dialOptions, nil
+	}
+	if !security.ValidPin(o.pin) {
+		return nil, fmt.Errorf("phonetopc: %q is not a valid pin", o.pin)
+	}
+	var d websocket.DialOptions
+	if o.dialOptions != nil {
+		d = *o.dialOptions
+	}
+	tr := &http.Transport{
+		TLSClientConfig: security.PinnedClientTLSConfig(o.pin),
+		Proxy:           nil, // never route a phone on the LAN through a proxy
+	}
+	d.HTTPClient = &http.Client{Transport: tr}
+	return &d, nil
+}
+
 // Hello performs the hello handshake. Dial does this automatically.
 func (c *Client) Hello(ctx context.Context) (HelloResult, error) {
 	var res HelloResult
 	ci := c.opts.clientInfo
-	err := c.Call(ctx, protocol.MethodHello, protocol.HelloParams{Protocol: c.opts.protocol, Client: &ci}, &res)
+	params := protocol.HelloParams{Protocol: c.opts.protocol, Client: &ci}
+	if c.opts.token != "" {
+		params.Auth = &protocol.Auth{Token: c.opts.token}
+	}
+	err := c.Call(ctx, protocol.MethodHello, params, &res)
 	if err != nil {
 		return res, err
 	}
