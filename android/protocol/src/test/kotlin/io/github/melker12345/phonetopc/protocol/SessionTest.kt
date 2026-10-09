@@ -70,6 +70,10 @@ class SessionTest {
         assertEquals(-32700, r.errorCode())
         assertEquals(JsonNull, r["id"])
         assertEquals("parse_error", r.errorName())
+        // Unquoted words are not JSON even though kotlinx's tree parser tolerates them.
+        assertEquals(-32700, s.send("nope").single().errorCode())
+        assertEquals(-32700, s.send("""{"jsonrpc":"2.0","id":1,"method":hello}""").single().errorCode())
+        assertEquals(-32700, s.send("").single().errorCode())
     }
 
     @Test fun batchArrayIsInvalidRequest() {

@@ -133,12 +133,12 @@ class Session internal constructor(
 
     internal suspend fun respond(text: String): String? {
         val element = try {
-            ProtocolJson.parseToJsonElement(text)
+            ProtocolJson.parseToJsonElement(text).takeIf { isStrictJson(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            return Rpc.error(null, RpcException(RpcError.PARSE_ERROR))
-        }
+            null
+        } ?: return Rpc.error(null, RpcException(RpcError.PARSE_ERROR))
         if (element is JsonArray) {
             return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "Batch requests are not supported"))
         }
@@ -301,6 +301,20 @@ class Session internal constructor(
         const val KIND_CONTINUOUS = 1
         const val KIND_ON_CHANGE = 2
         val EMPTY = JsonObject(emptyMap())
+
+        val JSON_NUMBER = Regex("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
+
+        /**
+         * kotlinx.serialization's tree parser accepts unquoted words (`nope`, `{"a":b}`) as
+         * literals. Reject anything that isn't strict RFC 8259 so those get -32700.
+         */
+        fun isStrictJson(e: JsonElement): Boolean = when (e) {
+            is JsonObject -> e.values.all { isStrictJson(it) }
+            is JsonArray -> e.all { isStrictJson(it) }
+            is JsonNull -> true
+            is JsonPrimitive -> e.isString || e.content == "true" || e.content == "false" ||
+                JSON_NUMBER.matches(e.content)
+        }
 
         fun effectiveRate(requested: Double?, info: SensorInfo): Double {
             val min = info.minRateHz ?: Double.MIN_VALUE
