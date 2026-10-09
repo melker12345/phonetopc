@@ -109,13 +109,29 @@ class ApprovalMessageTest {
         parse("""{"reason":"x","nonce":"$nonce","extra":1}""")
     }
 
-    @Test fun reasonIsKeptVerbatimButMeasuredTrimmed() {
-        assertEquals("  padded  ", parse("""{"reason":"  padded  ","nonce":"$nonce"}""").reason)
-        val max = "a".repeat(200)
-        parse("""{"reason":"   $max   ","nonce":"$nonce"}""")
-        // 200 characters that are each two UTF-16 units still count as 200.
+    @Test fun reasonIsTakenExactlyAsReceived() {
+        // Never trimmed or normalized: what is shown and signed is the string the PC sent.
+        val decomposed = "Café inner  spaces"
+        assertEquals(decomposed, parse("""{"reason":"$decomposed","nonce":"$nonce"}""").reason)
+        parse("""{"reason":"${"a".repeat(200)}","nonce":"$nonce"}""")
+        // Code points, not UTF-16 units: 200 emoji are 400 units but 200 code points.
         parse("""{"reason":"${"😀".repeat(200)}","nonce":"$nonce"}""")
         assertInvalid("""{"reason":"${"😀".repeat(201)}","nonce":"$nonce"}""")
+        // Ordinary format characters other than the bidi controls are fine (ZWJ in an emoji).
+        parse("""{"reason":"ok 👩‍💻","nonce":"$nonce"}""")
+    }
+
+    @Test fun reasonMustNotStartOrEndWithWhitespace() {
+        for (r in listOf(" x", "x ", " x", "x　", " x", "x ", " x", " ")) {
+            assertInvalid("""{"reason":"$r","nonce":"$nonce"}""")
+        }
+    }
+
+    @Test fun reasonMustNotContainBidiControls() {
+        for (cp in listOf(0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069)) {
+            val r = "Run evil\\u%04x.sh".format(cp)
+            assertInvalid("""{"reason":"$r","nonce":"$nonce"}""")
+        }
     }
 
     @Test fun invalidParams() {

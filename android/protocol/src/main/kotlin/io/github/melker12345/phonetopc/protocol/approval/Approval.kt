@@ -139,12 +139,18 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
 
         /** @throws RpcException `-32602` for anything that breaks the rules of §4. */
         fun parse(params: JsonObject): ApprovalParams {
+            // Accepted or rejected exactly as received: never trimmed or normalized, because the
+            // PC hashes the string it sent.
             val reason = params.string("reason") ?: invalid("reason is required")
-            // Counted in code points, after trimming; shown and signed as sent.
-            val length = reason.trim().let { it.codePointCount(0, it.length) }
+            if (!isDisplayable(reason)) {
+                invalid("reason must not contain control characters, bidirectional controls or unpaired surrogates")
+            }
+            val length = reason.codePointCount(0, reason.length)
             if (length < 1) invalid("reason must not be empty")
-            if (length > MAX_REASON) invalid("reason must be at most $MAX_REASON characters")
-            if (!isDisplayable(reason)) invalid("reason must not contain control characters")
+            if (length > MAX_REASON) invalid("reason must be at most $MAX_REASON code points")
+            if (isSpace(reason.codePointAt(0)) || isSpace(reason.codePointBefore(reason.length))) {
+                invalid("reason must not start or end with whitespace")
+            }
 
             val nonce = params.string("nonce") ?: invalid("nonce is required")
             if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalid("nonce must be $NONCE_BYTES bytes, base64url")
@@ -160,7 +166,8 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
         }
 
         /**
-         * No control characters (Unicode Cc: C0, DEL, C1, so no newlines or tabs either), and no
+         * No control characters (Unicode Cc: C0, DEL, C1, so no newlines or tabs either), no
+         * bidirectional controls, which could make a reason look like another one, and no
          * unpaired surrogates, which have no UTF-8 encoding and so no well-defined signed hash.
          */
         fun isDisplayable(text: String): Boolean {
@@ -173,10 +180,21 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
                     continue
                 }
                 if (Character.isLowSurrogate(c) || Character.getType(c) == Character.CONTROL.toInt()) return false
+                if (isBidiControl(c.code)) return false
                 i++
             }
             return true
         }
+
+        /** U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069 (APPROVAL.md §4). */
+        fun isBidiControl(cp: Int): Boolean =
+            cp == 0x061C || cp == 0x200E || cp == 0x200F || cp in 0x202A..0x202E || cp in 0x2066..0x2069
+
+        /**
+         * Unicode White_Space: Java's whitespace plus the no-break spaces (U+00A0, U+2007,
+         * U+202F). U+0085, the only other one, is a control character and rejected anyway.
+         */
+        private fun isSpace(cp: Int) = Character.isWhitespace(cp) || Character.isSpaceChar(cp)
 
         private fun JsonObject.string(key: String): String? = when (val v = this[key]) {
             null, JsonNull -> null
