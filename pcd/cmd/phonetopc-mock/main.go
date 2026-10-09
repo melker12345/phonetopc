@@ -7,6 +7,7 @@
 //	phonetopc-mock pair --state DIR --pc-addr H:P   the same without mDNS
 //	phonetopc-mock pcs --state DIR                  list paired PCs
 //	phonetopc-mock revoke --state DIR <pc>          revoke a PC
+//	phonetopc-mock approval-key --state DIR [--rotate]  show or replace the approval key
 package main
 
 import (
@@ -42,9 +43,16 @@ const usage = `Usage:
   phonetopc-mock pair --state DIR --pc-addr H:P  the same, with the pairing listener's address
   phonetopc-mock pcs --state DIR                 list paired PCs
   phonetopc-mock revoke --state DIR <pc>         revoke a paired PC (by name or id)
+  phonetopc-mock approval-key --state DIR [--rotate]
+                                                 show the approval key, or replace it
+                                                 (as when fingerprints change)
 
 Serving is plaintext dev mode (ws://) unless --state is given, which
 selects secure mode (wss:// with the mock's own key, tokens checked).
+In secure mode the mock offers fingerprint approval; --approval says how
+its "user" answers: auto (approve), deny, cancel, timeout (never answer),
+lockout, ask (on this terminal), tamper (approve with a corrupted
+signature, to test clients) or off (no approval capability).
 `
 
 func main() {
@@ -60,6 +68,8 @@ func main() {
 			err = pcsCmd(args[1:], os.Stdout)
 		case "revoke":
 			err = revokeCmd(args[1:], os.Stdout)
+		case "approval-key":
+			err = approvalKeyCmd(args[1:], os.Stdout)
 		case "help":
 			fmt.Print(usage)
 			return
@@ -101,6 +111,8 @@ func serve(ctx context.Context, args []string) error {
 		secure      = fs.Bool("secure", false, "secure mode: wss:// and tokens (needs --state; the default with --state)")
 		dev         = fs.Bool("dev", false, "dev mode: plaintext ws://, no authentication (the default without --state)")
 		mdns        = fs.Bool("mdns", false, "advertise _phonetopc._tcp via mDNS")
+		approval    = fs.String("approval", "auto", "secure mode: how approval requests are answered: "+approvalModes)
+		approvalDly = fs.Duration("approval-delay", time.Second, "how long the \"user\" takes to answer for auto, deny, cancel, lockout and tamper")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -159,6 +171,11 @@ func serve(ctx context.Context, args []string) error {
 		}
 		opts.Device = protocol.DeviceInfo{ID: ident.ID, Name: ident.Name}
 		opts.Authenticate = st.Authenticate
+		if err := approvalOptions(&opts, *approval, *approvalDly, st, os.Stdin, os.Stdout); err != nil {
+			return err
+		}
+	} else if explicit["approval"] && *approval != "off" {
+		return errors.New("--approval needs secure mode (--state DIR): approvals don't exist in dev mode")
 	}
 
 	ln, err := net.Listen("tcp", *addr)
@@ -171,8 +188,8 @@ func serve(ctx context.Context, args []string) error {
 	if isSecure {
 		scheme = "wss"
 		ln = tls.NewListener(ln, security.ServerTLSConfig(ident.Cert))
-		log.Printf("phonetopc-mock %s serving %s://%s%s, secure mode (device %s %q, pin %s, state %s)",
-			mockphone.Version, scheme, ln.Addr(), protocol.WSPath, ident.ID, ident.Name, ident.Pin, *stateDir)
+		log.Printf("phonetopc-mock %s serving %s://%s%s, secure mode (device %s %q, pin %s, state %s, approvals: %s)",
+			mockphone.Version, scheme, ln.Addr(), protocol.WSPath, ident.ID, ident.Name, ident.Pin, *stateDir, *approval)
 		// Pairings and revocations may come from other processes
 		// (phonetopc-mock pair/revoke): close sessions of revoked PCs.
 		go func() {

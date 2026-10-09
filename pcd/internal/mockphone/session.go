@@ -3,6 +3,7 @@ package mockphone
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,8 @@ type session struct {
 	closeDone chan struct{} // closed when a closeWith handshake has finished
 	pc        *protocol.PCInfo
 	token     string
+	// approvalKey is the approval key announced in this session's hello.
+	approvalKey *ecdsa.PrivateKey
 
 	// pendingClose is the close the writer performs when it dequeues the
 	// nil frame queued by closeAfterFlush.
@@ -377,6 +380,16 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		result, rpcErr = s.unsubscribe(params)
 	case protocol.MethodGet:
 		result, rpcErr = s.get(params)
+	case protocol.MethodRequestApproval:
+		if !s.srv.Secure() {
+			// APPROVAL.md §1: in dev mode the method doesn't exist.
+			rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found (approvals need secure mode)", method)
+			break
+		}
+		result, rpcErr = s.requestApproval(id, params)
+		if rpcErr == errAsyncResponse {
+			return nil, nil // answered later
+		}
 	default:
 		rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found", method)
 	}
@@ -446,16 +459,19 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	// A repeated hello is allowed and simply answered again.
 	s.helloed = true
 	s.helloOnce.Do(func() { close(s.helloDone) })
+	var approval *protocol.ApprovalInfo
 	if pc != nil {
+		key := s.srv.approvalKey()
+		approval = approvalInfo(key)
 		s.mu.Lock()
-		s.pc, s.token = pc, token
+		s.pc, s.token, s.approvalKey = pc, token, key
 		s.mu.Unlock()
 		s.srv.logf("mock: %s authenticated as PC %q (%s)", s.remote, pc.Name, pc.ID)
 	}
 	if p.Client != nil && p.Client.Name != "" {
 		s.srv.logf("mock: %s is %s %s", s.remote, p.Client.Name, p.Client.Version)
 	}
-	return s.srv.helloResult(pc), nil
+	return s.srv.helloResult(pc, approval), nil
 }
 
 // lookup resolves source and an optional type against the catalog. This is

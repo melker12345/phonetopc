@@ -49,7 +49,7 @@ var loadSchemasOnce = sync.OnceValues(func() (*schemas, error) {
 	}
 	for _, method := range []string{
 		protocol.MethodHello, protocol.MethodListSensors, protocol.MethodSubscribe,
-		protocol.MethodUnsubscribe, protocol.MethodGet,
+		protocol.MethodUnsubscribe, protocol.MethodGet, protocol.MethodRequestApproval,
 	} {
 		if s.results[method], err = c.Compile(id + "#/$defs/resultByMethod/properties/" + method); err != nil {
 			return nil, fmt.Errorf("result schema for %s: %w", method, err)

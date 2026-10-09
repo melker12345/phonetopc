@@ -7,6 +7,7 @@ package mockphone
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/rand/v2"
 	"net"
@@ -82,6 +83,17 @@ type Options struct {
 	// HelloTimeout closes secure sessions without a successful hello after
 	// this long with 1008. Default 10s; negative disables it.
 	HelloTimeout time.Duration
+	// ApprovalKey, if set, returns the phone's approval key (APPROVAL.md
+	// §2), or nil if it can't do approvals now. It is called at every
+	// secure hello, so a rotated key applies to new sessions. Without it, or
+	// in dev mode, the phone has no capability approval.
+	ApprovalKey func() *ecdsa.PrivateKey
+	// Approve plays the user for approval requests. Default: ApproveAll.
+	Approve Approver
+	// TamperApprovals corrupts the signature of every approval it gives: a
+	// test hook for clients, which must report an error, not approval.
+	TamperApprovals bool
+
 	// MaxAuthFailures failed hellos per minute from one address make the
 	// server close further connections from it with 1013 (SECURITY.md §5),
 	// even with a valid token, for the rest of
@@ -140,6 +152,8 @@ type Server struct {
 	sessions     map[*session]struct{}
 	seedSeq      uint64
 	authFailures map[string][]time.Time // by remote host
+
+	approvalPending bool // one approval at a time per phone (APPROVAL.md §4)
 }
 
 // New creates a server and starts its simulation.
@@ -308,14 +322,19 @@ func (s *Server) sensor(source string) (protocol.SensorInfo, bool) {
 	return protocol.SensorInfo{}, false
 }
 
-func (s *Server) helloResult(pc *protocol.PCInfo) protocol.HelloResult {
-	return protocol.HelloResult{
+func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInfo) protocol.HelloResult {
+	h := protocol.HelloResult{
 		Protocol:     protocol.Version,
 		Server:       protocol.ServerInfo{Name: ServerName, Version: Version},
 		Device:       s.opts.Device,
 		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet},
 		PC:           pc,
+		Approval:     approval,
 	}
+	if approval != nil {
+		h.Capabilities = append(h.Capabilities, protocol.CapabilityApproval)
+	}
+	return h
 }
 
 // reading builds a reading of source with the catalog's type and unit,

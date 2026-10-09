@@ -23,9 +23,10 @@ import (
 // State is the mock phone's persistent state in a directory: what a real
 // phone keeps in its app data.
 //
-//	phone.json      {"id": ..., "name": ...}
-//	phone-key.pem   its long-term TLS key (ECDSA P-256)
-//	pcs.json        {"version": 1, "pcs": [{"id","name","pin","token","paired_at"}]}
+//	phone.json       {"id": ..., "name": ...}
+//	phone-key.pem    its long-term TLS key (ECDSA P-256)
+//	approval-key.pem its approval key (ECDSA P-256, APPROVAL.md §2)
+//	pcs.json         {"version": 1, "pcs": [{"id","name","pin","token","paired_at"}]}
 //
 // The layout is the mock's own; only the PC's devices.json is specified.
 type State struct {
@@ -134,6 +135,53 @@ func (st *State) Identity(id, name string) (Identity, error) {
 	}
 	pin, _ := security.CertPin(cert)
 	return Identity{ID: doc.ID, Name: doc.Name, Cert: cert, Pin: pin}, nil
+}
+
+// approvalKeyFile holds the mock's approval key: a software stand-in for
+// the phone's biometric-bound Keystore key (APPROVAL.md §2).
+const approvalKeyFile = "approval-key.pem"
+
+// ApprovalKey loads the mock's approval key, creating it on first use.
+func (st *State) ApprovalKey() (*ecdsa.PrivateKey, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, err := os.ReadFile(st.path(approvalKeyFile))
+	switch {
+	case err == nil:
+		k, err := security.ParseKeyPEM(b)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", approvalKeyFile, err)
+		}
+		return k, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return st.newApprovalKey()
+	default:
+		return nil, err
+	}
+}
+
+// RotateApprovalKey replaces the approval key with a new one, as a phone
+// does when biometric enrollment changed (APPROVAL.md §2). PCs then see a
+// different approval pin and refuse approvals until their user accepts it.
+func (st *State) RotateApprovalKey() (*ecdsa.PrivateKey, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.newApprovalKey()
+}
+
+func (st *State) newApprovalKey() (*ecdsa.PrivateKey, error) {
+	k, err := security.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	pemBytes, err := security.EncodeKeyPEM(k)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.WriteFileAtomic(st.path(approvalKeyFile), pemBytes); err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
 // PCs returns the paired PCs.
