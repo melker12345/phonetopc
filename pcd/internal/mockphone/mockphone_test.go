@@ -563,3 +563,20 @@ func TestServerCloseSendsGoingAway(t *testing.T) {
 		t.Errorf("close status %v (%v), want 1001", s, c.Err())
 	}
 }
+
+// min_delta has no defined distance for bool values; repeated taps (always
+// true) must not be suppressed.
+func TestMinDeltaDoesNotSuppressTaps(t *testing.T) {
+	srv, url := start(t, quietOptions())
+	c := dial(t, url)
+	sub, err := c.Subscribe(testCtx(t), "ui", client.SubscribeOptions{MinDelta: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		srv.Tap()
+		if ev := nextEvent(t, sub); ev.Seq != uint64(i) {
+			t.Errorf("seq %d, want %d", ev.Seq, i)
+		}
+	}
+}

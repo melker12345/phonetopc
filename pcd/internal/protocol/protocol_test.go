@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"testing"
 )
@@ -198,7 +197,6 @@ func TestClampRate(t *testing.T) {
 }
 
 func TestValueDistance(t *testing.T) {
-	inf := math.Inf(1)
 	cases := []struct {
 		shape Shape
 		a, b  string
@@ -207,12 +205,6 @@ func TestValueDistance(t *testing.T) {
 		{ShapeNumber, `3`, `5.5`, 2.5},
 		{ShapeVec3, `[0,0,0]`, `[3,4,0]`, 5},
 		{ShapeQuat, `[0,0,0,1]`, `[0,0,0,1]`, 0},
-		{ShapeBool, `true`, `true`, 0},
-		{ShapeBool, `true`, `false`, inf},
-		{ShapeObject, `{"level":80,"charging":false}`, `{"level":79,"charging":false}`, 1},
-		{ShapeObject, `{"level":80,"charging":false}`, `{"level":80,"charging":true}`, inf},
-		{ShapeObject, `{"a":1}`, `{"a":2}`, inf},
-		{ShapeObject, `{"a":1}`, `{"a":1}`, 0},
 	}
 	for _, c := range cases {
 		got, err := ValueDistance(c.shape, json.RawMessage(c.a), json.RawMessage(c.b))
@@ -222,5 +214,10 @@ func TestValueDistance(t *testing.T) {
 	}
 	if _, err := ValueDistance(ShapeVec3, json.RawMessage(`[1,2]`), json.RawMessage(`[1,2,3]`)); err == nil {
 		t.Error("length mismatch should fail")
+	}
+	for _, sh := range []Shape{ShapeBool, ShapeObject} {
+		if _, err := ValueDistance(sh, json.RawMessage(`true`), json.RawMessage(`true`)); !errors.Is(err, ErrNoDistance) {
+			t.Errorf("%s: err = %v, want ErrNoDistance", sh, err)
+		}
 	}
 }

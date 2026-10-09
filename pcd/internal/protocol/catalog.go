@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 )
@@ -105,15 +106,19 @@ func LookupSensor(source string) (SensorInfo, bool) {
 	return SensorInfo{}, false
 }
 
+// ErrNoDistance is returned by ValueDistance for shapes min_delta doesn't
+// apply to.
+var ErrNoDistance = errors.New("min_delta does not apply to this shape")
+
 // ValueDistance returns the distance between two values of the given shape,
 // as used by the subscribe min_delta filter (spec §4.3): Euclidean distance
-// for vectors and quaternions, absolute difference for numbers.
+// for vec3 and quat, absolute difference for number.
 //
-// The spec does not define a distance for the "bool" and "object" shapes.
-// We use: bool -> 0 if equal, +Inf otherwise (a change is never suppressed);
-// object -> the absolute difference of the "level" members if both values are
-// battery objects with equal "charging", +Inf otherwise. For any other object,
-// 0 if byte-identical, +Inf otherwise.
+// The spec defines no distance for the "bool" and "object" shapes. Taking
+// "differs by less than min_delta" literally would make every repeated
+// ui/tile_tap (always true) a zero-distance duplicate and suppress it, so
+// instead min_delta does not apply to those shapes: ValueDistance returns
+// ErrNoDistance and the event is always sent.
 func ValueDistance(shape Shape, a, b json.RawMessage) (float64, error) {
 	switch shape {
 	case ShapeNumber:
@@ -136,31 +141,8 @@ func ValueDistance(shape Shape, a, b json.RawMessage) (float64, error) {
 			sum += d * d
 		}
 		return math.Sqrt(sum), nil
-	case ShapeBool:
-		var x, y bool
-		if err := unmarshal2(a, b, &x, &y); err != nil {
-			return 0, err
-		}
-		if x == y {
-			return 0, nil
-		}
-		return math.Inf(1), nil
-	default:
-		type battery struct {
-			Level    *float64 `json:"level"`
-			Charging *bool    `json:"charging"`
-		}
-		var x, y battery
-		if unmarshal2(a, b, &x, &y) == nil &&
-			x.Level != nil && y.Level != nil && x.Charging != nil && y.Charging != nil &&
-			*x.Charging == *y.Charging {
-			return math.Abs(*x.Level - *y.Level), nil
-		}
-		if string(a) == string(b) {
-			return 0, nil
-		}
-		return math.Inf(1), nil
 	}
+	return 0, ErrNoDistance
 }
 
 func unmarshal2(a, b json.RawMessage, x, y any) error {
