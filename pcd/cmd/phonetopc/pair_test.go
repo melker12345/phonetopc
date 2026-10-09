@@ -299,11 +299,25 @@ func TestErrorsExplained(t *testing.T) {
 	}
 }
 
+func TestDeviceIDChangedWarns(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	d := pairDirect(t, env, ph, "phone", []string{"127.0.0.1"})
+	st := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc"))
+	st.RemoveDevice(d.ID)
+	d.ID = "0000000000000000"
+	st.PutDevice(d)
+	code, _, errs := runCLI(t, tctx(t), env, "info")
+	if code != 0 || !strings.Contains(errs, "warning: the phone paired as \"phone\" (id 0000000000000000) now reports device id "+ph.id.ID) {
+		t.Errorf("code %d, stderr %s", code, errs)
+	}
+}
+
 func TestDeviceSelectionAndAddresses(t *testing.T) {
 	env := testEnv(t, nil)
 	a, b := startPhone(t), startPhone(t)
 	// 127.0.0.2 refuses (nothing listens there); the phone is found at the
-	// second address, which then moves to the front.
+	// second address.
 	pairDirect(t, env, a, "alpha", []string{"127.0.0.2", "127.0.0.1"})
 	pairDirect(t, env, b, "beta", []string{"127.0.0.1"})
 
@@ -317,8 +331,11 @@ func TestDeviceSelectionAndAddresses(t *testing.T) {
 		t.Fatalf("alpha: %d %s %s", code, out, errs)
 	}
 	st := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc"))
-	if d, _ := st.Find("alpha"); d.Addresses[0] != "127.0.0.1" {
-		t.Errorf("addresses not updated: %v", d.Addresses)
+	// Loopback addresses (as from adb forward) are never recorded as the
+	// working one (SECURITY.md §6), so the order is unchanged here; the
+	// store tests cover LAN addresses.
+	if d, _ := st.Find("alpha"); d.Addresses[0] != "127.0.0.2" {
+		t.Errorf("addresses changed: %v", d.Addresses)
 	}
 	envB := testEnv(t, map[string]string{"XDG_CONFIG_HOME": env["XDG_CONFIG_HOME"], "PHONETOPC_DEVICE": b.id.ID})
 	if code, out, _ := runCLI(t, tctx(t), envB, "info", "--json"); code != 0 || !strings.Contains(out, b.id.ID) {

@@ -99,15 +99,16 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 	type candidate struct {
 		host string
 		port int
+		mdns bool
 	}
 	var cands []candidate
-	add := func(host string, port int) {
+	add := func(host string, port int, mdns bool) {
 		for _, c := range cands {
 			if c.host == host && c.port == port {
 				return
 			}
 		}
-		cands = append(cands, candidate{host, port})
+		cands = append(cands, candidate{host, port, mdns})
 	}
 	if o.addrOverride != "" {
 		host, ps, err := net.SplitHostPort(o.addrOverride)
@@ -115,7 +116,7 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 		if err != nil || perr != nil {
 			return nil, fmt.Errorf("phonetopc: bad address %q: want host:port", o.addrOverride)
 		}
-		add(host, port)
+		add(host, port, false)
 	} else {
 		if o.discovery {
 			dctx, cancel := context.WithTimeout(ctx, o.discoveryTimeout)
@@ -123,12 +124,12 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 			cancel()
 			if ok {
 				for _, a := range e.Addrs {
-					add(a, e.Port)
+					add(a, e.Port, true)
 				}
 			}
 		}
 		for _, a := range dev.Addresses {
-			add(a, dev.Port)
+			add(a, dev.Port, false)
 		}
 	}
 	if len(cands) == 0 {
@@ -149,7 +150,11 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 		cancel()
 		if err == nil {
 			if o.addrOverride == "" {
-				_ = st.NoteAddress(dev.ID, c.host, c.port) // best effort
+				_ = st.NoteAddress(dev.ID, c.host, c.port, c.mdns) // best effort
+			}
+			if got := cl.Server().Device.ID; got != dev.ID {
+				// SECURITY.md §6: warn; the pin already proved the key.
+				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s", dev.Name, dev.ID, got))
 			}
 			return cl, nil
 		}

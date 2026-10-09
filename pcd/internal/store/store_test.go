@@ -142,15 +142,21 @@ func TestDevices(t *testing.T) {
 		t.Errorf("%d devices", len(devs))
 	}
 
-	// Addresses: the working one moves to the front.
-	if err := s.NoteAddress(a.ID, "10.0.0.7", 8766); err != nil {
+	// Addresses: the working one moves to the front; the port changes only
+	// when it came from mDNS; loopback addresses are never stored.
+	if err := s.NoteAddress(a.ID, "10.0.0.7", 9999, false); err != nil {
 		t.Fatal(err)
 	}
-	s.NoteAddress(a.ID, "192.168.1.153", 8766)
+	if d, _ := s.Find(a.ID); !reflect.DeepEqual(d.Addresses, []string{"10.0.0.7", "192.168.1.153"}) || d.Port != 8765 {
+		t.Errorf("addresses %v port %d", d.Addresses, d.Port)
+	}
+	s.NoteAddress(a.ID, "192.168.1.153", 8766, true)
+	s.NoteAddress(a.ID, "127.0.0.1", 8767, true)
+	s.NoteAddress(a.ID, "::1", 8767, false)
 	if d, _ := s.Find(a.ID); !reflect.DeepEqual(d.Addresses, []string{"192.168.1.153", "10.0.0.7"}) || d.Port != 8766 {
 		t.Errorf("addresses %v port %d", d.Addresses, d.Port)
 	}
-	if err := s.NoteAddress("gone", "1.2.3.4", 1); err != nil {
+	if err := s.NoteAddress("gone", "1.2.3.4", 1, true); err != nil {
 		t.Errorf("unknown id: %v", err)
 	}
 
@@ -167,6 +173,67 @@ func TestDevices(t *testing.T) {
 		if strings.Contains(e.Name(), ".tmp-") {
 			t.Errorf("leftover %s", e.Name())
 		}
+	}
+}
+
+// TestDevicesUnknownFieldsAndDefaults: SECURITY.md §6 defaults, unknown
+// members kept when rewriting, and the approval key's life cycle.
+func TestDevicesUnknownFieldsAndDefaults(t *testing.T) {
+	s := Open(t.TempDir())
+	os.WriteFile(s.Path(DevicesFile), []byte(`{"version":1,"x_top":{"a":1},"devices":[
+		{"id":"p1","name":"Phone","pin":"sha256/x","token":"t","x_dev":[1,2],"approval_key":"sha256/ak"}]}`), 0o600)
+	d, err := s.Find("p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Port != 8765 || d.Addresses == nil || len(d.Addresses) != 0 || d.ApprovalKey != "sha256/ak" {
+		t.Errorf("defaults: %+v", d)
+	}
+	if err := s.NoteAddress("p1", "10.1.1.1", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	raw := func() map[string]any {
+		b, _ := os.ReadFile(s.Path(DevicesFile))
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("%v\n%s", err, b)
+		}
+		return m
+	}
+	m := raw()
+	dev := m["devices"].([]any)[0].(map[string]any)
+	if !reflect.DeepEqual(m["x_top"], map[string]any{"a": 1.0}) || !reflect.DeepEqual(dev["x_dev"], []any{1.0, 2.0}) ||
+		dev["approval_key"] != "sha256/ak" || dev["port"] != 8765.0 {
+		t.Errorf("rewritten: %v", m)
+	}
+
+	// First sight keeps an existing key; a changed one needs accepting.
+	if prev, err := s.TrustApprovalKey("p1", "sha256/new"); err != nil || prev != "sha256/ak" {
+		t.Errorf("trust: %q %v", prev, err)
+	}
+	if err := s.AcceptApprovalKey("p1", "sha256/new"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/new" {
+		t.Errorf("accepted: %q", d.ApprovalKey)
+	}
+	// Re-pairing clears the approval key but keeps unknown members.
+	d.Token, d.ApprovalKey, d.Extra = "t2", "", nil
+	if err := s.PutDevice(d); err != nil {
+		t.Fatal(err)
+	}
+	dev = raw()["devices"].([]any)[0].(map[string]any)
+	if _, has := dev["approval_key"]; has || dev["token"] != "t2" || dev["x_dev"] == nil {
+		t.Errorf("re-paired: %v", dev)
+	}
+	if prev, err := s.TrustApprovalKey("p1", "sha256/third"); err != nil || prev != "" {
+		t.Errorf("first sight: %q %v", prev, err)
+	}
+	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/third" {
+		t.Errorf("first sight stored %q", d.ApprovalKey)
+	}
+	if _, err := s.TrustApprovalKey("gone", "sha256/x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown device: %v", err)
 	}
 }
 

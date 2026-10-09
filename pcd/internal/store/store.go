@@ -9,12 +9,15 @@
 package store
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -79,6 +82,9 @@ func (s *Store) ensureDir() error {
 	return os.Chmod(s.dir, 0o700)
 }
 
+// DefaultPhonePort is the port of a device whose entry has none.
+const DefaultPhonePort = 8765
+
 // Device is one paired phone, exactly as in devices.json.
 type Device struct {
 	ID        string   `json:"id"`
@@ -87,13 +93,113 @@ type Device struct {
 	Token     string   `json:"token"`
 	Port      int      `json:"port"`
 	Addresses []string `json:"addresses"`
-	PairedAt  string   `json:"paired_at"`
+	PairedAt  string   `json:"paired_at,omitempty"`
+	// ApprovalKey is the accepted pin of the phone's approval key
+	// (APPROVAL.md §3), empty until first seen.
+	ApprovalKey string `json:"approval_key,omitempty"`
+
+	// Extra holds members this version doesn't know. They are written back
+	// unchanged (SECURITY.md §6: readers keep unknown fields).
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+type plainDevice Device
+
+var deviceFields = []string{"id", "name", "pin", "token", "port", "addresses", "paired_at", "approval_key"}
+
+// UnmarshalJSON reads a device, applying the defaults of SECURITY.md §6
+// (port 8765, no addresses) and keeping unknown members in Extra.
+func (d *Device) UnmarshalJSON(b []byte) error {
+	var p plainDevice
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	extra, err := unknownMembers(b, deviceFields)
+	if err != nil {
+		return err
+	}
+	p.Extra = extra
+	if p.Port == 0 {
+		p.Port = DefaultPhonePort
+	}
+	if p.Addresses == nil {
+		p.Addresses = []string{}
+	}
+	*d = Device(p)
+	return nil
+}
+
+// MarshalJSON writes the known members in their usual order, then the
+// unknown ones.
+func (d Device) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal(plainDevice(d))
+	if err != nil {
+		return nil, err
+	}
+	return appendMembers(b, d.Extra)
+}
+
+// unknownMembers returns the members of the JSON object b not in known.
+func unknownMembers(b []byte, known []string) (map[string]json.RawMessage, error) {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(b, &all); err != nil {
+		return nil, err
+	}
+	for _, k := range known {
+		delete(all, k)
+	}
+	if len(all) == 0 {
+		return nil, nil
+	}
+	return all, nil
+}
+
+// appendMembers adds extra members (sorted by name) to the JSON object b.
+func appendMembers(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
+	if len(extra) == 0 {
+		return b, nil
+	}
+	keys := slices.Sorted(maps.Keys(extra))
+	out := bytes.TrimSuffix(bytes.TrimSpace(b), []byte("}"))
+	for i, k := range keys {
+		if i > 0 || len(out) > 1 {
+			out = append(out, ',')
+		}
+		kb, _ := json.Marshal(k)
+		out = append(append(append(out, kb...), ':'), extra[k]...)
+	}
+	return append(out, '}'), nil
 }
 
 // devicesDoc is the content of devices.json.
 type devicesDoc struct {
-	Version int      `json:"version"`
-	Devices []Device `json:"devices"`
+	Version int                        `json:"version"`
+	Devices []Device                   `json:"devices"`
+	Extra   map[string]json.RawMessage `json:"-"`
+}
+
+type plainDoc devicesDoc
+
+func (d *devicesDoc) UnmarshalJSON(b []byte) error {
+	var p plainDoc
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	extra, err := unknownMembers(b, []string{"version", "devices"})
+	if err != nil {
+		return err
+	}
+	p.Extra = extra
+	*d = devicesDoc(p)
+	return nil
+}
+
+func (d devicesDoc) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal(plainDoc(d))
+	if err != nil {
+		return nil, err
+	}
+	return appendMembers(b, d.Extra)
 }
 
 // Now formats t as devices.json timestamps are written: RFC 3339 in UTC,
@@ -148,7 +254,7 @@ func (s *Store) updateDevices(f func(devs []Device) ([]Device, bool, error)) err
 	if devs == nil {
 		devs = []Device{}
 	}
-	b, err := json.MarshalIndent(devicesDoc{Version: FileVersion, Devices: devs}, "", "  ")
+	b, err := json.MarshalIndent(devicesDoc{Version: FileVersion, Devices: devs, Extra: doc.Extra}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -156,13 +262,21 @@ func (s *Store) updateDevices(f func(devs []Device) ([]Device, bool, error)) err
 }
 
 // PutDevice adds d, replacing a device with the same id (a re-pairing).
+// A re-pairing clears the stored approval key (APPROVAL.md §3) unless d
+// has one, and keeps the old entry's unknown members unless d has its own.
 func (s *Store) PutDevice(d Device) error {
 	if d.Addresses == nil {
 		d.Addresses = []string{}
 	}
+	if d.Port == 0 {
+		d.Port = DefaultPhonePort
+	}
 	return s.updateDevices(func(devs []Device) ([]Device, bool, error) {
 		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == d.ID })
 		if i >= 0 {
+			if d.Extra == nil {
+				d.Extra = devs[i].Extra
+			}
 			devs[i] = d
 		} else {
 			devs = append(devs, d)
@@ -185,25 +299,75 @@ func (s *Store) RemoveDevice(sel string) (Device, error) {
 	return removed, err
 }
 
-// NoteAddress records that device id was reachable at host:port: host moves
-// to the front of its addresses and port is updated. It does nothing if that
-// is already the case, or if the device is gone (unpaired meanwhile).
-func (s *Store) NoteAddress(id, host string, port int) error {
+// NoteAddress records that device id was reachable at host:port
+// (SECURITY.md §6): host moves to the front of its addresses, unless it is
+// a loopback address (e.g. from adb forward), and port is updated only if
+// it came from mDNS (fromMDNS). It does nothing if that is already the
+// case, or if the device is gone (unpaired meanwhile).
+func (s *Store) NoteAddress(id, host string, port int, fromMDNS bool) error {
+	if isLoopback(host) {
+		return nil
+	}
 	return s.updateDevices(func(devs []Device) ([]Device, bool, error) {
 		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == id })
 		if i < 0 {
 			return nil, false, nil
 		}
 		d := &devs[i]
-		if d.Port == port && len(d.Addresses) > 0 && d.Addresses[0] == host {
+		if (!fromMDNS || d.Port == port) && len(d.Addresses) > 0 && d.Addresses[0] == host {
 			return nil, false, nil
 		}
-		d.Port = port
+		if fromMDNS {
+			d.Port = port
+		}
 		d.Addresses = append([]string{host}, slices.DeleteFunc(d.Addresses, func(a string) bool { return a == host })...)
 		const maxAddresses = 8
 		if len(d.Addresses) > maxAddresses {
 			d.Addresses = d.Addresses[:maxAddresses]
 		}
+		return devs, true, nil
+	})
+}
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && a.Unmap().IsLoopback()
+}
+
+// TrustApprovalKey implements first sight of APPROVAL.md §3: if device id
+// has no approval key stored yet, pin is stored. It returns the key that
+// was stored before ("" on first sight). The caller compares it with pin.
+func (s *Store) TrustApprovalKey(id, pin string) (stored string, err error) {
+	err = s.updateDevices(func(devs []Device) ([]Device, bool, error) {
+		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == id })
+		if i < 0 {
+			return nil, false, fmt.Errorf("%w %q (unpaired meanwhile?)", ErrNotFound, id)
+		}
+		stored = devs[i].ApprovalKey
+		if stored != "" {
+			return nil, false, nil
+		}
+		devs[i].ApprovalKey = pin
+		return devs, true, nil
+	})
+	return stored, err
+}
+
+// AcceptApprovalKey stores pin as device id's approval key, replacing any
+// earlier one: the user accepted a changed key (APPROVAL.md §3).
+func (s *Store) AcceptApprovalKey(id, pin string) error {
+	return s.updateDevices(func(devs []Device) ([]Device, bool, error) {
+		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == id })
+		if i < 0 {
+			return nil, false, fmt.Errorf("%w %q (unpaired meanwhile?)", ErrNotFound, id)
+		}
+		if devs[i].ApprovalKey == pin {
+			return nil, false, nil
+		}
+		devs[i].ApprovalKey = pin
 		return devs, true, nil
 	})
 }

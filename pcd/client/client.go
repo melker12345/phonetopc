@@ -178,12 +178,27 @@ type Client struct {
 	nextID  atomic.Int64
 	writeMu sync.Mutex
 
-	mu      sync.Mutex
-	pending map[int64]*call
-	subs    map[string]*Subscription
-	err     error // set once the connection is gone
-	done    chan struct{}
-	hello   protocol.HelloResult
+	mu       sync.Mutex
+	pending  map[int64]*call
+	subs     map[string]*Subscription
+	err      error // set once the connection is gone
+	done     chan struct{}
+	hello    protocol.HelloResult
+	warnings []string
+}
+
+func (c *Client) warn(msg string) {
+	c.mu.Lock()
+	c.warnings = append(c.warnings, msg)
+	c.mu.Unlock()
+}
+
+// Warnings returns things the caller may want to tell the user about the
+// connection, e.g. that a paired phone reports a different device id.
+func (c *Client) Warnings() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.warnings...)
 }
 
 type call struct {

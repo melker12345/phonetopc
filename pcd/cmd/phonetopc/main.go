@@ -244,7 +244,14 @@ func (c *cli) dial(ctx context.Context) (*client.Client, error) {
 	if c.addr != "" {
 		opts = append(opts, client.WithAddress(c.addr))
 	}
-	return client.DialPaired(dctx, c.device, opts...)
+	cl, err := client.DialPaired(dctx, c.device, opts...)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range cl.Warnings() {
+		fmt.Fprintln(c.stderr, "phonetopc: warning:", w)
+	}
+	return cl, nil
 }
 
 func (c *cli) printJSON(v any) error {
