@@ -54,7 +54,7 @@ async def test_hello(server: FakeServer, phone: Phone) -> None:
 async def test_unsupported_protocol(server: FakeServer) -> None:
     server.supported_protocols = ["phonetopc/2"]
     with pytest.raises(phonetopc.UnsupportedProtocol) as info:
-        await phonetopc.connect(server.addr)
+        await phonetopc.connect(server.addr, dev=True)
     assert info.value.supported == ["phonetopc/2"]
     assert info.value.code == -32004
     assert info.value.name == "unsupported_protocol"
@@ -71,13 +71,13 @@ async def test_await_connect_and_close(server: FakeServer) -> None:
 
 async def test_connect_uses_env(server: FakeServer, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PHONETOPC_ADDR", server.addr)
-    async with phonetopc.connect() as phone:
+    async with phonetopc.connect(dev=True) as phone:
         assert phone.url == f"ws://{server.addr}/v1/ws"
 
 
 async def test_connect_refused() -> None:
     with pytest.raises(OSError):
-        await phonetopc.connect("127.0.0.1:1", open_timeout=2)
+        await phonetopc.connect("127.0.0.1:1", dev=True, open_timeout=2)
 
 
 # -- requests --------------------------------------------------------------
@@ -149,7 +149,7 @@ async def test_concurrent_requests_out_of_order(server: FakeServer, phone: Phone
 
 
 async def test_request_timeout_then_recovers(server: FakeServer) -> None:
-    async with phonetopc.connect(server.addr, request_timeout=0.05) as phone:
+    async with phonetopc.connect(server.addr, dev=True, request_timeout=0.05) as phone:
         server.get_delays["battery"] = 0.3
         with pytest.raises(phonetopc.RequestTimeout):
             await phone.get("battery")
@@ -343,7 +343,7 @@ async def test_unsubscribe_unknown_is_ignored(server: FakeServer, phone: Phone) 
 
 
 async def test_late_subscribe_response_is_cleaned_up(server: FakeServer) -> None:
-    async with phonetopc.connect(server.addr, request_timeout=0.05) as phone:
+    async with phonetopc.connect(server.addr, dev=True, request_timeout=0.05) as phone:
         server.delays["subscribe"] = 0.2
         with pytest.raises(phonetopc.RequestTimeout):
             async with phone.subscribe("light"):
@@ -418,7 +418,7 @@ async def test_no_unretrieved_exceptions_on_racy_close(server: FakeServer) -> No
     loop.set_exception_handler(lambda _loop, ctx: contexts.append(ctx))
     try:
         for _ in range(10):
-            phone = await phonetopc.connect(server.addr)
+            phone = await phonetopc.connect(server.addr, dev=True)
             subs = [await phone.subscribe("light").start() for _ in range(3)]
             # Client starts closing; unsubscribes are sent while it's CLOSING.
             closer = asyncio.ensure_future(phone.close())

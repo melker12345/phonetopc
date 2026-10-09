@@ -30,6 +30,9 @@ classifiers = [
 dependencies = ["websockets>=13.0,<18"]
 
 [project.optional-dependencies]
+# Find paired phones via mDNS (_phonetopc._tcp). Without it, the addresses
+# stored at pairing time are tried.
+discovery = ["zeroconf>=0.100"]
 dev = [
     "pytest>=7",
     "pytest-asyncio>=0.23",

@@ -13,7 +13,7 @@ from phonetopc.models import Event
 
 
 def test_tail_human(threaded_server: FakeServer, capsys: pytest.CaptureFixture[str]) -> None:
-    rc = main(["tail", "gyro", "--rate", "200", "-n", "3", "--addr", threaded_server.addr])
+    rc = main(["tail", "gyro", "--rate", "200", "-n", "3", "--addr", threaded_server.addr, "--dev"])
     assert rc == 0
     out, err = capsys.readouterr()
     lines = out.splitlines()
@@ -24,7 +24,7 @@ def test_tail_human(threaded_server: FakeServer, capsys: pytest.CaptureFixture[s
 
 
 def test_tail_json(threaded_server: FakeServer, capsys: pytest.CaptureFixture[str]) -> None:
-    rc = main(["tail", "gyro", "--json", "-n", "2", "--addr", threaded_server.addr])
+    rc = main(["tail", "gyro", "--json", "-n", "2", "--addr", threaded_server.addr, "--dev"])
     assert rc == 0
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [e["seq"] for e in events] == [0, 1]
@@ -32,7 +32,7 @@ def test_tail_json(threaded_server: FakeServer, capsys: pytest.CaptureFixture[st
 
 
 def test_get_list_info(threaded_server: FakeServer, capsys: pytest.CaptureFixture[str]) -> None:
-    addr = ["--addr", threaded_server.addr]
+    addr = ["--addr", threaded_server.addr, "--dev"]
     assert main(["get", "battery", "--json", *addr]) == 0
     assert json.loads(capsys.readouterr().out)["value"] == {"level": 82, "charging": True}
     assert main(["list", *addr]) == 0
@@ -45,9 +45,9 @@ def test_get_list_info(threaded_server: FakeServer, capsys: pytest.CaptureFixtur
 
 
 def test_errors_exit_1(threaded_server: FakeServer, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["get", "nope", "--addr", threaded_server.addr]) == 1
+    assert main(["get", "nope", "--addr", threaded_server.addr, "--dev"]) == 1
     assert "unknown source" in capsys.readouterr().err
-    assert main(["tail", "gyro", "--addr", "127.0.0.1:1"]) == 1
+    assert main(["tail", "gyro", "--addr", "127.0.0.1:1", "--dev"]) == 1
 
 
 def test_tail_reports_disconnect(
@@ -55,7 +55,7 @@ def test_tail_reports_disconnect(
 ) -> None:
     threaded_server.auto_stream = False
     threaded_server.close_on.add("subscribe")
-    assert main(["tail", "light", "--addr", threaded_server.addr]) == 1
+    assert main(["tail", "light", "--addr", threaded_server.addr, "--dev"]) == 1
     assert "closed" in capsys.readouterr().err
 
 
@@ -68,7 +68,7 @@ def test_format_event() -> None:
 
 
 def test_python_dash_m(threaded_server: FakeServer) -> None:
-    env = {**os.environ, "PHONETOPC_ADDR": threaded_server.addr}
+    env = {**os.environ, "PHONETOPC_ADDR": f"ws://{threaded_server.addr}"}
     proc = subprocess.run(
         [sys.executable, "-m", "phonetopc", "tail", "gyro", "-n", "2", "--json"],
         capture_output=True,

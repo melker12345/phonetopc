@@ -20,6 +20,7 @@ __all__ = [
     "DeviceInfo",
     "Event",
     "HelloResult",
+    "PCInfo",
     "SensorInfo",
     "ServerInfo",
     "SubscribeResult",
@@ -119,13 +120,31 @@ class ServerInfo:
 
 
 @dataclass(frozen=True)
+class PCInfo:
+    """``hello`` ``result.pc`` (secure mode): the pairing the phone recognised."""
+
+    id: str
+    name: str
+
+    @classmethod
+    def from_json(cls, data: Any) -> PCInfo:
+        w = "hello.pc"
+        obj = _obj(data, w)
+        return cls(id=_str(obj, "id", w), name=_str(obj, "name", w))
+
+
+@dataclass(frozen=True)
 class HelloResult:
-    """Result of the ``hello`` handshake."""
+    """Result of the ``hello`` handshake.
+
+    ``pc`` is set in secure mode only (SECURITY.md section 5).
+    """
 
     protocol: str
     server: ServerInfo
     device: DeviceInfo
     capabilities: tuple[str, ...]
+    pc: PCInfo | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -137,6 +156,7 @@ class HelloResult:
             server=ServerInfo.from_json(obj.get("server")),
             device=DeviceInfo.from_json(obj.get("device")),
             capabilities=_str_list(obj, "capabilities", w),
+            pc=PCInfo.from_json(obj["pc"]) if obj.get("pc") is not None else None,
             raw=obj,
         )
 

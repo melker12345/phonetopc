@@ -76,7 +76,7 @@ async def server() -> AsyncIterator[FakeServer]:
 
 @pytest.fixture
 async def phone(server: FakeServer) -> AsyncIterator[phonetopc.Phone]:
-    async with phonetopc.connect(server.addr, client_name="pytest") as p:
+    async with phonetopc.connect(server.addr, dev=True, client_name="pytest") as p:
         yield p
 
 

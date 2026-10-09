@@ -1,4 +1,4 @@
-"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md, draft 1).
+"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md and SECURITY.md, draft 2).
 
 One :class:`Phone` owns one WebSocket and one reader task. The reader
 correlates responses with pending requests by ``id`` and routes ``event``
@@ -11,11 +11,14 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import ipaddress
 import itertools
 import json
 import logging
 import os
+import ssl
 from collections.abc import AsyncIterator, Generator, Mapping
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -27,9 +30,15 @@ import websockets.exceptions
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as _ws_connect
 
+from . import discovery
+from ._tls import PinCheckFailed, pinned_context, verify_transport
 from ._version import __version__
 from .errors import (
+    AmbiguousDevice,
     ConnectionClosed,
+    NotPaired,
+    PhoneUnreachable,
+    PinMismatch,
     ProtocolError,
     RequestTimeout,
     SubscriptionOverflow,
@@ -42,9 +51,18 @@ from .models import (
     DeviceInfo,
     Event,
     HelloResult,
+    PCInfo,
     SensorInfo,
     ServerInfo,
     SubscribeResult,
+)
+from .store import (
+    PairedDevice,
+    find_by_address,
+    load_devices,
+    normalize_host,
+    remember_address,
+    select_device,
 )
 
 __all__ = [
@@ -84,6 +102,9 @@ _UNSET: Any = object()
 
 def resolve_url(addr: str | None = None) -> str:
     """Turn a user-supplied address into a WebSocket URL.
+
+    This is pure string handling; :func:`connect` uses it for dev mode, and to
+    parse addresses for secure mode (where the scheme becomes ``wss``).
 
     * ``None`` -> ``$PHONETOPC_ADDR``, else ``127.0.0.1:8765``
     * ``host`` / ``host:port`` / ``[v6]:port`` / bare IPv6 -> ``ws://host:port/v1/ws``
@@ -366,6 +387,8 @@ class Phone:
         self._hello: HelloResult | None = None
         #: Why the connection ended (``None`` while open).
         self.closed_reason: ConnectionClosed | None = None
+        #: The pairing used (secure mode), ``None`` in dev mode.
+        self.paired_device: PairedDevice | None = None
 
     # -- handshake info ---------------------------------------------------
 
@@ -388,6 +411,16 @@ class Phone:
     @property
     def capabilities(self) -> tuple[str, ...]:
         return self.hello.capabilities
+
+    @property
+    def pc(self) -> PCInfo | None:
+        """Which pairing the phone recognised (``hello`` ``result.pc``); secure mode only."""
+        return self.hello.pc
+
+    @property
+    def secure(self) -> bool:
+        """``True`` for pinned TLS with a token, ``False`` for dev mode (plaintext)."""
+        return self.paired_device is not None
 
     @property
     def closed(self) -> bool:
@@ -483,11 +516,16 @@ class Phone:
     def _start(self) -> None:
         self._reader = asyncio.ensure_future(self._read_loop())
 
-    async def _handshake(self, client_name: str, client_version: str) -> HelloResult:
-        result = await self._call(
-            "hello",
-            {"protocol": PROTOCOL, "client": {"name": client_name, "version": client_version}},
-        )
+    async def _handshake(
+        self, client_name: str, client_version: str, token: str | None = None
+    ) -> HelloResult:
+        params: dict[str, Any] = {
+            "protocol": PROTOCOL,
+            "client": {"name": client_name, "version": client_version},
+        }
+        if token is not None:
+            params["auth"] = {"token": token}
+        result = await self._call("hello", params)
         hello = HelloResult.from_json(result)
         if hello.protocol != PROTOCOL:
             raise ProtocolError(f"server answered hello with protocol {hello.protocol!r}")
@@ -698,27 +736,283 @@ def _closed_from(exc: websockets.exceptions.ConnectionClosed) -> ConnectionClose
     return ConnectionClosed(f"connection closed ({detail})", code=frame.code, reason=frame.reason)
 
 
+#: Seconds to browse mDNS for a paired phone before trying its stored addresses.
+MDNS_TIMEOUT = 2.0
+
+_DEV_HINT = "for a phone in dev mode, pass dev=True (--dev) or a ws:// URL"
+
+# Errors that mean "not reachable here, try the next address".
+_ATTEMPT_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,  # includes ssl.SSLError and, on 3.11+, TimeoutError
+    asyncio.TimeoutError,
+    EOFError,
+    websockets.exceptions.InvalidHandshake,
+)
+
+
+# Errors after the TCP connection was accepted: TLS or the upgrade failed, which
+# is what a phone in dev mode (plaintext) looks like.
+_TLS_PHASE_ERRORS: tuple[type[BaseException], ...] = (
+    ssl.SSLError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    EOFError,
+    websockets.exceptions.InvalidHandshake,
+)
+
+
+def _describe(exc: BaseException) -> str:
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def _join_url(scheme: str, host: str, port: int, path: str = DEFAULT_PATH) -> str:
+    netloc = f"[{host}]" if ":" in host else host
+    return f"{scheme}://{netloc}:{port}{path}"
+
+
+@dataclass(frozen=True)
+class _Address:
+    """A parsed ``host[:port]`` or ``ws(s)://`` address."""
+
+    scheme: str | None  # "ws", "wss" or None (no scheme given)
+    host: str
+    port: int
+    path: str
+
+    @classmethod
+    def parse(cls, addr: str) -> _Address:
+        given = addr.strip()
+        scheme = urlsplit(given).scheme if "://" in given else None
+        parts = urlsplit(resolve_url(given))  # validates, fills in port and path
+        assert parts.hostname is not None
+        port = parts.port if parts.port is not None else DEFAULT_PORT
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        return cls(scheme, parts.hostname, port, path)
+
+    def display(self) -> str:
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return f"{host}:{self.port}"
+
+
+@dataclass(frozen=True)
+class _Plan:
+    """How :func:`connect` will connect, decided from its arguments alone."""
+
+    dev_url: str | None = None  # dev mode: connect here in plaintext
+    device: str | None = None  # secure mode: device= query
+    address: _Address | None = None  # secure mode: explicit address
+
+
+def _plan(addr: str | None, device: str | None, dev: bool) -> _Plan:
+    if addr is None:
+        addr = os.environ.get(ENV_ADDR) or None
+    if dev:
+        if device is not None:
+            raise ValueError(
+                "device= picks a paired phone for a secure connection; it can't be combined "
+                "with dev=True"
+            )
+        url = resolve_url(addr)
+        if url.startswith("wss://"):
+            raise ValueError("dev=True connects without TLS; use a ws:// URL or drop dev=True")
+        return _Plan(dev_url=url)
+    if addr is None:
+        return _Plan(device=device)
+    address = _Address.parse(addr)
+    if address.scheme == "ws":
+        if device is not None:
+            raise ValueError(
+                f"{addr!r} is a dev-mode (plaintext) URL, but device= asks for a secure "
+                "connection; use wss:// or host:port, or drop device="
+            )
+        return _Plan(dev_url=resolve_url(addr))
+    return _Plan(device=device, address=address)
+
+
+def _pick_for_address(
+    devices: list[PairedDevice], device: str | None, address: _Address
+) -> PairedDevice:
+    """Which pairing to use for an explicit address."""
+    if device is not None:
+        return select_device(devices, device)
+    matches = find_by_address(devices, address.host, address.port)
+    if len(matches) == 1:
+        return matches[0]
+    where = address.display()
+    if len(matches) > 1:
+        names = ", ".join(d.label() for d in matches)
+        raise AmbiguousDevice(
+            f"several paired phones were last seen at {where} ({names}): pass device="
+        )
+    if not devices:
+        raise NotPaired(
+            f"no paired phone, so {where} can't be reached securely: run `phonetopc pair` "
+            f"first ({_DEV_HINT})"
+        )
+    if len(devices) == 1:
+        # Not a known address, but there's only one phone it can be. Its pin
+        # is checked, so a different phone at that address is refused.
+        return devices[0]
+    names = ", ".join(d.label() for d in devices)
+    raise AmbiguousDevice(
+        f"none of the paired phones ({names}) is known at {where}: pass device=<name or id> "
+        "(--device) to say which one to expect there"
+    )
+
+
+def _remember(paired: PairedDevice, host: str, port: int, *, from_mdns: bool) -> None:
+    """Best effort: store where we found the phone (SECURITY.md section 6)."""
+    if not from_mdns and port != paired.port:
+        return  # e.g. adb forward to another local port: not the phone's LAN address
+    if _is_loopback(host):
+        return
+    try:
+        remember_address(paired.id, host, port=port if from_mdns else None)
+    except Exception as exc:  # never fail a working connection over this
+        logger.warning("could not update the stored addresses of %s: %s", paired.label(), exc)
+
+
+def _is_loopback(host: str) -> bool:
+    h = normalize_host(host)
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
 class _Connect:
     """Return value of :func:`connect`: awaitable *and* async context manager."""
 
-    def __init__(self, url: str, kwargs: dict[str, Any], ws_kwargs: dict[str, Any]) -> None:
-        self._url = url
+    def __init__(self, plan: _Plan, kwargs: dict[str, Any], ws_kwargs: dict[str, Any]) -> None:
+        self._plan = plan
         self._kwargs = kwargs
         self._ws_kwargs = ws_kwargs
         self._phone: Phone | None = None
 
     async def _open(self) -> Phone:
+        if self._plan.dev_url is not None:
+            ws = await _ws_connect(
+                self._plan.dev_url, open_timeout=self._kwargs["open_timeout"], **self._ws_kwargs
+            )
+            return await self._start(ws, self._plan.dev_url, None)
+        return await self._open_secure()
+
+    async def _start(self, ws: ClientConnection, url: str, paired: PairedDevice | None) -> Phone:
         kw = self._kwargs
-        ws = await _ws_connect(self._url, open_timeout=kw["open_timeout"], **self._ws_kwargs)
         phone = Phone(ws, request_timeout=kw["request_timeout"], queue_size=kw["queue_size"])
-        phone.url = self._url
+        phone.url = url
+        phone.paired_device = paired
         phone._start()
         try:
-            await phone._handshake(kw["client_name"], kw["client_version"])
+            await phone._handshake(
+                kw["client_name"], kw["client_version"], paired.token if paired else None
+            )
         except BaseException:
             await phone.close()
             raise
+        if paired is not None and phone.device.id != paired.id:
+            logger.warning(
+                "%s has the pinned key of %s but reports device id %r",
+                url,
+                paired.label(),
+                phone.device.id,
+            )
         return phone
+
+    async def _open_secure(self) -> Phone:
+        plan = self._plan
+        devices = load_devices()
+        located: discovery.Located | None = None
+        if plan.address is not None:
+            paired = _pick_for_address(devices, plan.device, plan.address)
+            candidates = [(plan.address.host, plan.address.port, plan.address.path)]
+        else:
+            try:
+                paired = select_device(devices, plan.device)
+            except NotPaired as exc:
+                raise NotPaired(f"{exc} ({_DEV_HINT})") from None
+            located = await discovery.locate(paired.id, MDNS_TIMEOUT)
+            candidates = []
+            if located is not None:
+                candidates += [(a, located.port, DEFAULT_PATH) for a in located.addresses]
+            seen = {(normalize_host(h), p) for h, p, _ in candidates}
+            candidates += [
+                (a, paired.port, DEFAULT_PATH)
+                for a in paired.addresses
+                if (normalize_host(a), paired.port) not in seen
+            ]
+            if not candidates:
+                raise PhoneUnreachable(
+                    f"no known address for {paired.label()}: pass its address, e.g. "
+                    "connect('192.168.1.20') or --addr, or install mDNS support with "
+                    "`pip install 'phonetopc[discovery]'`",
+                    [],
+                )
+
+        attempts: list[tuple[str, BaseException]] = []
+        for host, port, path in candidates:
+            url = _join_url("wss", host, port, path)
+            try:
+                ws = await self._connect_pinned(url, paired)
+            except PinMismatch:
+                raise
+            except _ATTEMPT_ERRORS as exc:
+                logger.debug("could not connect to %s: %r", url, exc)
+                attempts.append((url, exc))
+                continue
+            phone = await self._start(ws, url, paired)
+            from_mdns = located is not None and host in located.addresses
+            _remember(paired, host, port, from_mdns=from_mdns)
+            return phone
+        raise self._unreachable(paired, attempts, located)
+
+    async def _connect_pinned(self, url: str, paired: PairedDevice) -> ClientConnection:
+        if "ssl" in self._ws_kwargs:
+            raise ValueError("ssl= can't be passed in secure mode: the pinned context is used")
+        ctx = pinned_context(paired.pin)
+        try:
+            ws = await _ws_connect(
+                url, ssl=ctx, open_timeout=self._kwargs["open_timeout"], **self._ws_kwargs
+            )
+        except PinCheckFailed as exc:
+            raise PinMismatch(paired.label(), url, paired.pin, exc.actual) from None
+        try:
+            verify_transport(ws.transport, paired.pin)
+        except PinCheckFailed as exc:
+            ws.transport.abort()
+            raise PinMismatch(paired.label(), url, paired.pin, exc.actual) from None
+        return ws
+
+    def _unreachable(
+        self,
+        paired: PairedDevice,
+        attempts: list[tuple[str, BaseException]],
+        located: discovery.Located | None,
+    ) -> PhoneUnreachable:
+        lines = [f"could not reach {paired.label()}:"]
+        lines += [f"  {url}: {_describe(exc)}" for url, exc in attempts]
+        hints = []
+        if located is not None and located.dev_mode:
+            hints.append(f"the phone advertises dev mode on the network; {_DEV_HINT}")
+        elif any(isinstance(e, _TLS_PHASE_ERRORS) for _, e in attempts):
+            hints.append(
+                f"something answered but TLS failed: if the phone is in dev mode, {_DEV_HINT}"
+            )
+        hints.append("check that the phone app is running and on the same network")
+        if self._plan.address is None:
+            hints.append("pass the phone's current address, e.g. connect('192.168.1.20') or --addr")
+            if located is None:
+                hints.append(
+                    "`pip install 'phonetopc[discovery]'` lets the client find it via mDNS"
+                )
+        lines += [f"hint: {h}" for h in hints]
+        err = PhoneUnreachable("\n".join(lines), attempts)
+        if attempts:
+            err.__cause__ = attempts[-1][1]
+        return err
 
     def __await__(self) -> Generator[Any, None, Phone]:
         return self._open().__await__()
@@ -735,6 +1029,8 @@ class _Connect:
 def connect(
     addr: str | None = None,
     *,
+    device: str | None = None,
+    dev: bool = False,
     client_name: str = "phonetopc-python",
     client_version: str = __version__,
     request_timeout: float | None = DEFAULT_REQUEST_TIMEOUT,
@@ -747,14 +1043,36 @@ def connect(
     Use either ``async with connect(...) as phone:`` or
     ``phone = await connect(...)`` (then call ``await phone.close()``).
 
-    ``addr`` is ``host[:port]`` or a ``ws://`` URL; see :func:`resolve_url`.
-    Extra keyword arguments go to :func:`websockets.asyncio.client.connect`.
+    **Secure mode** (the default) uses a pairing made by ``phonetopc pair``,
+    read from ``devices.json`` (SECURITY.md section 6): TLS where the phone's
+    key must match the stored pin, plus the stored token in ``hello``.
 
-    Raises :class:`OSError` / :class:`TimeoutError` if the socket can't be
-    opened, :class:`~phonetopc.errors.UnsupportedProtocol` if the server
-    doesn't speak ``phonetopc/1``.
+    * ``connect()``: the only paired phone (``device=`` picks one by name or
+      id when there are several). It is looked up via mDNS if the optional
+      ``zeroconf`` package is installed, then at its stored addresses in order.
+    * ``connect("192.168.1.20[:port]")`` or a ``wss://`` URL: that address,
+      expecting the paired phone last seen there (else ``device=``, else the
+      only paired phone).
+
+    **Dev mode** (plaintext, no authentication; the phone app's developer
+    setting): ``dev=True``, or a ``ws://`` URL. With ``dev=True`` and no
+    address, ``127.0.0.1:8765`` is used.
+
+    ``addr`` defaults to ``$PHONETOPC_ADDR``, which follows the same rules.
+    ``open_timeout`` applies to each address tried. Extra keyword arguments
+    go to :func:`websockets.asyncio.client.connect`.
+
+    Raises :class:`~phonetopc.errors.NotPaired` /
+    :class:`~phonetopc.errors.AmbiguousDevice` when it can't tell which
+    pairing to use, :class:`~phonetopc.errors.PinMismatch` if the phone's key
+    changed (nothing is sent then), :class:`~phonetopc.errors.Unauthorized` if
+    the phone revoked this PC, :class:`~phonetopc.errors.PhoneUnreachable` (an
+    :class:`OSError`) if no address worked, :class:`OSError` /
+    :class:`TimeoutError` in dev mode if the socket can't be opened, and
+    :class:`~phonetopc.errors.UnsupportedProtocol` if the server doesn't speak
+    ``phonetopc/1``.
     """
-    url = resolve_url(addr)
+    plan = _plan(addr, device, dev)
     kwargs: dict[str, Any] = {
         "client_name": client_name,
         "client_version": client_version,
@@ -762,4 +1080,4 @@ def connect(
         "open_timeout": open_timeout,
         "queue_size": queue_size,
     }
-    return _Connect(url, kwargs, ws_kwargs)
+    return _Connect(plan, kwargs, ws_kwargs)

@@ -7,8 +7,10 @@ Commands::
     list [--json]
     info [--json]
 
-Every command takes ``--addr`` (default: ``$PHONETOPC_ADDR``, else
-``127.0.0.1:8765``).
+Every command takes ``--device NAME_OR_ID`` and ``--addr HOST[:PORT]`` to pick
+a phone paired with ``phonetopc pair`` (default: the only paired phone, or
+``$PHONETOPC_ADDR``), and ``--dev`` to talk plaintext to a phone in dev mode
+(then ``--addr`` defaults to ``$PHONETOPC_ADDR``, else ``127.0.0.1:8765``).
 """
 
 from __future__ import annotations
@@ -77,7 +79,7 @@ def _sensor_line(s: SensorInfo) -> str:
 
 
 def _connect(args: argparse.Namespace) -> _Connect:
-    return connect(args.addr, client_name="phonetopc-cli")
+    return connect(args.addr, device=args.device, dev=args.dev, client_name="phonetopc-cli")
 
 
 async def cmd_tail(args: argparse.Namespace, out: TextIO) -> int:
@@ -146,6 +148,12 @@ async def cmd_info(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"server:       {hello.server.name} {hello.server.version}\n")
         out.write(f"protocol:     {hello.protocol}\n")
         out.write(f"capabilities: {', '.join(hello.capabilities)}\n")
+        out.write(f"url:          {phone.url}\n")
+        if phone.secure:
+            pc = f", phone knows this PC as {hello.pc.name!r}" if hello.pc else ""
+            out.write(f"security:     pinned TLS + token{pc}\n")
+        else:
+            out.write("security:     none (dev mode)\n")
     return 0
 
 
@@ -153,7 +161,18 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--addr",
-        help=f"host[:port] or ws:// URL (default: ${ENV_ADDR}, else 127.0.0.1:8765)",
+        help=f"phone host[:port], wss:// or (dev mode) ws:// URL (default: ${ENV_ADDR}, "
+        "else the paired phone's known addresses; with --dev 127.0.0.1:8765)",
+    )
+    common.add_argument(
+        "--device",
+        metavar="NAME_OR_ID",
+        help="which paired phone (needed when several are paired)",
+    )
+    common.add_argument(
+        "--dev",
+        action="store_true",
+        help="dev mode: plaintext ws://, no pairing (the phone's developer setting)",
     )
     common.add_argument("--json", action="store_true", help="machine-readable JSON output")
 

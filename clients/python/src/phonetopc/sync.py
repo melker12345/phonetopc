@@ -5,7 +5,7 @@ method here submits a coroutine to it and waits for the result::
 
     import phonetopc.sync
 
-    with phonetopc.sync.connect("192.168.1.20") as phone:
+    with phonetopc.sync.connect() as phone:  # the phone paired with `phonetopc pair`
         print(phone.get("battery").value)
         with phone.subscribe("gyro", rate_hz=50) as events:
             for ev in events:
@@ -21,7 +21,7 @@ from typing import Any, TypeVar
 
 from .client import DEFAULT_QUEUE_SIZE, DEFAULT_REQUEST_TIMEOUT, Overflow, Phone, Subscription
 from .client import connect as _async_connect
-from .models import DeviceInfo, Event, HelloResult, SensorInfo
+from .models import DeviceInfo, Event, HelloResult, PCInfo, SensorInfo
 
 __all__ = ["SyncPhone", "SyncSubscription", "connect"]
 
@@ -123,6 +123,14 @@ class SyncPhone:
         return self._phone.device
 
     @property
+    def pc(self) -> PCInfo | None:
+        return self._phone.pc
+
+    @property
+    def secure(self) -> bool:
+        return self._phone.secure
+
+    @property
     def closed(self) -> bool:
         return self._phone.closed
 
@@ -172,18 +180,26 @@ class SyncPhone:
 def connect(
     addr: str | None = None,
     *,
+    device: str | None = None,
+    dev: bool = False,
     client_name: str = "phonetopc-python",
     request_timeout: float | None = DEFAULT_REQUEST_TIMEOUT,
     open_timeout: float | None = 10.0,
     queue_size: int = DEFAULT_QUEUE_SIZE,
     **ws_kwargs: Any,
 ) -> SyncPhone:
-    """Blocking :func:`phonetopc.connect`. Use as ``with connect(...) as phone:``."""
+    """Blocking :func:`phonetopc.connect`. Use as ``with connect(...) as phone:``.
+
+    Takes the same arguments: by default a secure connection to the paired
+    phone (``device=`` picks one), ``dev=True`` or a ``ws://`` URL for dev mode.
+    """
     runner = _LoopThread()
 
     async def _open() -> Phone:
         return await _async_connect(
             addr,
+            device=device,
+            dev=dev,
             client_name=client_name,
             request_timeout=request_timeout,
             open_timeout=open_timeout,
