@@ -2,18 +2,24 @@
 
 The phone side of phonetopc: a foreground service that serves the phone's sensors over
 WebSocket JSON-RPC, as specified in [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)
-(`phonetopc/1`, draft 1).
+(`phonetopc/1`, draft 2) and [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
+tokens, milestone M2).
 
-Draft 1 is **plaintext and unauthenticated**, so the server only runs after you turn on
-**Developer mode (unencrypted)** in the app. Pairing and TLS come in a later version.
+The server runs in one of two modes, on the same port (default 8765):
+
+| Mode | URL | Who can connect |
+|---|---|---|
+| **Secure** (default) | `wss://<phone>:8765/v1/ws` | Paired PCs only: pinned TLS plus the PC's token in `hello` |
+| **Developer mode** | `ws://<phone>:8765/v1/ws` | Anyone on the network, no encryption (draft 1). Off by default, behind a warning |
 
 ## Layout
 
 | Module | What it is |
 |---|---|
-| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. No Android imports. |
-| `server/` | Pure Kotlin/JVM. Ktor (CIO) WebSocket server on `/v1/ws`. |
-| `app/` | The Android app: sensors, foreground service, mDNS, Compose UI. |
+| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. Also the security core (`protocol.security`): SPKI pins, base64url, the pairing code, constant-time compare, tokens, the failed-hello rate limiter. No Android imports. |
+| `server/` | Pure Kotlin/JVM. Ktor (CIO) WebSocket server on `/v1/ws`, and the TLS frontend for secure mode. |
+| `pairing/` | Pure Kotlin/JVM. The phone's side of pairing: QR payload parser, pinned `wss://` WebSocket client, the pairing state machine. |
+| `app/` | The Android app: sensors, foreground service, Keystore key, paired PCs, mDNS, QR scanner, Compose UI. |
 
 ## Requirements
 
@@ -30,25 +36,42 @@ API 37, so `gradle/libs.versions.toml` pins the latest versions that work with 3
 ```sh
 cd android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # also runs the :protocol and :server JVM tests
+./gradlew testDebugUnitTest    # also runs the :protocol, :server and :pairing JVM tests
 ./gradlew lint
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Enable developer mode and start the server
+## Pair a PC and start the server
 
-1. Open phonetopc. Go through the short onboarding (or skip it).
-2. **Settings → Developer mode (unencrypted)** and confirm the warning.
-3. Optional: change the **Port** (default 8765) and turn off sensors you don't want to share.
-   Turned-off sensors are reported as `available: false`.
-4. **Home → Start server.** The card shows the address to use from the PC, for example
-   `192.168.1.23:8765`.
+1. Open phonetopc and go through the short onboarding (or skip it).
+2. On the PC, run `phonetopc pair`. It shows a QR code and also advertises itself on the
+   network.
+3. On the phone, open **Pair** and pick one:
+   - **Scan QR code**: point the camera at the code. The phone checks that the PC it reaches
+     has the key in the code, then your PC asks you to confirm.
+   - **Find on network**: tap your PC in the list. Both screens show a 6-digit code; tap
+     **Codes match** only if they are the same, and confirm on the PC too.
+4. **Home → Start server.** Paired PCs connect with `wss://` and their token; `phonetopc tail`
+   and friends do that for you.
+
+**Devices** lists paired PCs with when they were paired, when they last connected and
+whether they are connected now. **Revoke** forgets a PC and disconnects it at once.
+
+**Settings → About → This phone's key** shows the phone's pin (`sha256/…` and a short hex
+form). After pairing, the PC shows the same value for this phone.
+
+Optional: change the **Port** (default 8765) and turn off sensors you don't want to share.
+Turned-off sensors are reported as `available: false`.
 
 The notification (`phonetopc · N clients connected`) has **Pause** (clients stay connected,
 sensors stop) and **Stop**. Add the **PC button** Quick Settings tile to send
 `ui`/`tile_tap` events.
 
-## Connect from the PC
+## Developer mode (plain ws://)
+
+For poking at the protocol by hand: **Settings → Developer mode (unencrypted)**, confirm the
+warning. The server restarts in plain `ws://` and accepts anyone, without a token, like
+draft 1. Home shows "Developer mode · unencrypted" while it's on.
 
 Over **USB** (works on networks that isolate clients; needs USB debugging):
 
@@ -72,13 +95,41 @@ Then type requests, one JSON object per line:
 {"jsonrpc":"2.0","id":4,"method":"get","params":{"source":"battery"}}
 ```
 
-The phone also advertises itself over mDNS (`_phonetopc._tcp`, TXT `id`, `proto=1`, `dev=1`):
+The phone also advertises itself over mDNS (`_phonetopc._tcp`, TXT `id`, `proto=1`, and
+`tls=1` in secure mode or `dev=1` in developer mode):
 
 ```sh
 avahi-browse -rt _phonetopc._tcp
 ```
 
 Don't rely on that: many networks block multicast.
+
+## Security notes
+
+- **Key.** On first use the app generates an ECDSA P-256 key in **Android Keystore**
+  (hardware-backed where the phone has a TEE or StrongBox), with the self-signed certificate
+  Keystore makes for it. The private key is not exportable; the platform TLS stack (Conscrypt)
+  signs handshakes through Keystore. Uninstalling the app deletes the key, and PCs then have
+  to pair again.
+- **TLS.** Ktor's CIO engine can't serve TLS, so in secure mode it listens on `127.0.0.1` on a
+  random port, and a small TLS frontend (`server/…/Tls.kt`, a plain `SSLServerSocket`) on the
+  public port terminates TLS and relays each connection to it. The frontend tells the server
+  the real client address (for rate limiting and the Home screen); loopback connections that
+  didn't come through it, e.g. from another app on the phone, are refused. TLS 1.3 and 1.2,
+  ECDHE with AES-GCM or ChaCha20-Poly1305 only.
+- **Tokens.** Pairing ends with the phone issuing a 32-byte random token. The phone stores only
+  its SHA-256 (DataStore, excluded from backups); `hello` tokens are hashed and compared in
+  constant time.
+- **hello.** In secure mode a missing, unknown or revoked token gets `-32010` and the
+  connection is closed with 1008. A connection that hasn't completed `hello` within 10 s is
+  closed with 1008. More than 5 failed `hello`s per minute from one address are refused without
+  checking the token.
+- **Pairing.** The phone is the client of the PC's pairing listener. QR pairing pins the PC key
+  from the code before sending anything; network pairing uses the committed 6-digit code of
+  SECURITY.md §4.3. The PC is stored only after it answered `pair_finish`.
+- **Camera.** QR codes are decoded with ZXing on CameraX: no Google Play Services or ML Kit, so
+  scanning works on de-Googled phones. The permission is asked for on the scan screen, with
+  an explanation first.
 
 ## How it behaves
 
@@ -95,9 +146,10 @@ Don't rely on that: many networks block multicast.
   on_change events back up, the connection is closed with 1008 (spec §5).
 - `ts_mono_ns` is `SensorEvent.timestamp`; `ts` is that converted to wall-clock time.
 - If the server was running when the app is updated (`adb install -r`), it starts again on
-  its own. **Settings → Start on boot** (off by default) does the same after a reboot, once
-  you unlock the phone. Stopping the server (in the app, from the notification, or by turning
-  developer mode off) means it stays stopped; Pause doesn't count as stopping. If Android
+  its own, in the mode that is set. **Settings → Start on boot** (off by default) does the
+  same after a reboot, once you unlock the phone. Stopping the server (in the app or from the
+  notification) means it stays stopped; Pause doesn't count as stopping. Switching developer
+  mode on or off while it runs restarts it in the new mode. If Android
   refuses the background start, you get a "Tap to start phonetopc" notification instead.
 - Phone makers' battery managers can still kill the service. **Settings → Keep running in
   the background** asks for the battery optimization exemption and shows steps for your
