@@ -31,6 +31,11 @@ All messages follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 - `params` MUST be an object if present. An explicit `"params": null` is treated as absent. Any other type gets `-32602`.
 - Frames that are not strict JSON (e.g. bare words, trailing garbage) get `-32700` with `"id": null`. A JSON value that isn't an object gets `-32600` with `"id": null`.
 - **Order of checks.** A server processes each frame in this order and answers with the first error that applies: (1) not strict JSON → `-32700`; (2) not a JSON object (array, scalar) → `-32600`; (3) no `id` member → ignore silently; (4) invalid `id`, `jsonrpc` ≠ `"2.0"` or `method` not a string → `-32600`; (5) no successful `hello` yet and `method` ≠ `hello` → `-32003`; (6) unknown method → `-32601`; (7) invalid `params` → `-32602`; (8) method-specific errors.
+  - Errors from step 4 echo the request's `id` when the `id` itself is valid; only an invalid `id` is answered with `"id": null`.
+  - `"method": ""` is a string, so it passes step 4 and fails at step 5 or 6.
+  - Step 7 covers everything checkable without the sensor catalog: required members, types, `rate_hz > 0`, `min_delta ≥ 0`. So `{"source":"nope","rate_hz":0}` gets `-32602`.
+  - Within step 8: unknown source (`-32001`), then a `type` the source doesn't have (`-32602`), then unavailable source (`-32002`), then `-32005` / `-32006`.
+  - [`conformance/server-cases.json`](conformance/server-cases.json) pins all of this down case by case.
 - Clients MUST ignore unknown fields. Servers MUST ignore unknown fields in `params`.
 - `id` MUST be an integer that fits in a signed 53-bit range (so every JSON library represents it exactly) or a string. Servers SHOULD reject other forms (fractions, exponents, out-of-range integers, `null`) with `-32600`. Rejecting `null` is a deliberate tightening of JSON-RPC 2.0, which merely discourages it. Responses can arrive interleaved with events; clients correlate by `id`.
 
