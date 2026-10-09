@@ -56,12 +56,16 @@ network, not a stolen token, not a bug elsewhere in the phone app.
 
 | Param | Rules |
 |---|---|
-| `reason` | Required. 1–200 characters after trimming, no control characters. Shown to the user verbatim |
+| `reason` | Required. 1–200 Unicode code points; must not start or end with whitespace; must not contain control characters (category Cc) or bidirectional controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069), so it can't be made to look like something else. Shown to the user verbatim |
 | `nonce` | Required. Exactly 32 bytes after base64url decoding. Generated fresh by the PC for every request |
 | `timeout_ms` | Optional, default 30000, allowed 5000–120000 |
 
-Invalid params: `-32602`. Without capability `approval`: result `{"approved": false, "why": "unavailable"}`.
+Invalid params: `-32602`. The phone never trims or normalizes `reason`: it rejects or accepts it exactly as
+received. Clients SHOULD validate before sending.
+Without capability `approval`: result `{"approved": false, "why": "unavailable"}`. A client that sees the
+capability without `hello.approval` (or the reverse) MUST treat approval as unavailable and send nothing.
 
+- If the client's own wait runs out, that's a client-side error (e.g. a timeout exception), not a `why`.
 - The response is sent only once there's an outcome, which can take up to `timeout_ms` plus a little; clients MUST
   NOT time out the request earlier than `timeout_ms` + 5 s. Events and other responses continue meanwhile.
 - **One approval at a time per phone.** While one is pending, others get `"why": "busy"`.
@@ -103,6 +107,8 @@ phonetopc-approval/1
 <base64url(SHA-256(reason as UTF-8 bytes))>
 ```
 
+`reason` here is exactly the string sent in the request, with no trimming or normalization on either side.
+
 - `phone id` is `hello.device.id`, `pc id` is `hello.pc.id` of this session.
 - Algorithm: ECDSA P-256 with SHA-256 (`SHA256withECDSA`); `signature` is the DER encoding, base64url.
 
@@ -110,7 +116,8 @@ The PC approves only if **all** of these hold:
 
 1. The response belongs to a request it sent in this session, with the nonce it generated, and arrived before
    its own timeout.
-2. `approval.pin` of this session equals the stored, accepted `approval_key` (§3).
+2. `approval.pin` of this session is the pin of `approval.key` (the PC computes it), and equals the stored,
+   accepted `approval_key` (§3).
 3. The signature verifies with `approval.key` over the bytes above, built from **its own** copy of the nonce,
    reason, phone id and pc id — never from values echoed by the phone.
 
