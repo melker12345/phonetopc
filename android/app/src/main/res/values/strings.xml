@@ -30,6 +30,9 @@
     <!-- Common -->
     <string name="allow">Allow</string>
     <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+    <string name="try_again">Try again</string>
 
     <!-- Tabs -->
     <string name="tab_home">Home</string>
@@ -38,12 +41,10 @@
     <string name="tab_settings">Settings</string>
 
     <!-- Home -->
-    <string name="home_state_dev_off">Developer mode is off</string>
     <string name="home_state_stopped">Stopped</string>
     <string name="home_state_starting">Starting…</string>
     <string name="home_state_running">Running</string>
     <string name="home_state_paused">Paused</string>
-    <string name="home_sub_dev_off">This version serves sensor data without encryption or pairing, so it only runs in developer mode.</string>
     <string name="home_sub_stopped">Start the server so your PC can connect.</string>
     <string name="home_sub_starting">Opening the port…</string>
     <string name="home_sub_paused">Clients stay connected, but no sensor data is sent.</string>
@@ -53,7 +54,10 @@
         <item quantity="other">%d clients connected</item>
     </plurals>
     <string name="home_streaming_at">%1$s at %2$s Hz</string>
-    <string name="home_open_settings">Open settings</string>
+    <string name="home_mode_secure">Secure · paired PCs only</string>
+    <string name="home_mode_dev">Developer mode · unencrypted</string>
+    <string name="home_no_paired">No PC is paired yet, so nothing can connect.</string>
+    <string name="home_pair_action">Pair a PC</string>
     <string name="home_start">Start server</string>
     <string name="home_stop">Stop server</string>
     <string name="home_connect_from_pc">Connect from your PC</string>
@@ -64,6 +68,7 @@
     <string name="home_usb_body">adb forward tcp:%1$d tcp:%1$d, then use 127.0.0.1:%1$d</string>
     <string name="home_clients_header">Connected clients</string>
     <string name="home_clients_empty">No clients yet. Point a client on your PC at the address above.</string>
+    <string name="home_clients_empty_secure">No clients yet. Paired PCs connect on their own, for example with phonetopc tail.</string>
     <string name="home_client_connecting">Connecting…</string>
     <string name="home_client_unnamed">Unnamed client</string>
     <string name="home_client_no_subs">Connected, not subscribed to anything yet</string>
@@ -87,27 +92,76 @@
 
     <!-- Pair -->
     <string name="pair_title">Pair a PC</string>
-    <string name="pair_soon_title">Pairing is coming soon</string>
-    <string name="pair_soon_body">Secure pairing with encryption arrives in the next version. Until then, enable developer mode in Settings and connect by address.</string>
+    <string name="pair_intro">Run phonetopc pair on your PC, then pick how to find it.</string>
     <string name="pair_qr_title">Scan QR code</string>
-    <string name="pair_qr_body">Scan the code shown by phonetopc pair on your PC.</string>
+    <string name="pair_qr_body">Point the camera at the code in your PC\'s terminal. Works on any network.</string>
     <string name="pair_network_title">Find on network</string>
-    <string name="pair_network_body">Pick your PC from the ones in pairing mode nearby.</string>
-    <string name="pair_coming_soon">Coming soon</string>
+    <string name="pair_network_body">Pick your PC from the ones in pairing mode nearby, then compare a 6-digit code.</string>
+    <string name="pair_scan_title">Scan the QR code</string>
+    <string name="pair_scan_hint">Hold your phone so the code on your PC fills the frame.</string>
+    <string name="pair_scan_not_ours">That isn\'t a phonetopc pairing code.</string>
+    <string name="pair_scan_version">This code is from a newer phonetopc. Update the app on this phone.</string>
+    <string name="pair_scan_malformed">This pairing code is incomplete. Run phonetopc pair again.</string>
+    <string name="pair_camera_title">Camera access</string>
+    <string name="pair_camera_body">phonetopc uses the camera only to read the pairing code on your PC\'s screen. Nothing is recorded or sent anywhere.</string>
+    <string name="pair_camera_allow">Allow camera</string>
+    <string name="pair_camera_denied">Camera access is off. Allow it in system settings, or use Find on network instead.</string>
+    <string name="pair_camera_settings">Open settings</string>
+    <string name="pair_browse_title">PCs in pairing mode</string>
+    <string name="pair_browse_searching">Looking for PCs running phonetopc pair…</string>
+    <string name="pair_browse_empty">Make sure phonetopc pair is running on your PC and both devices are on the same network. Some networks block discovery; the QR code always works.</string>
+    <string name="pair_browse_failed">Network discovery isn\'t available right now. Scan the QR code instead.</string>
+    <string name="pair_browse_resolving">Finding address…</string>
+    <string name="pair_use_qr_instead">Scan QR code instead</string>
+    <string name="pair_connecting">Connecting to %1$s…</string>
+    <string name="pair_connecting_unknown">Connecting…</string>
+    <string name="pair_approve_title">Confirm on your PC</string>
+    <string name="pair_approve_body">Your PC asks whether to pair with “%1$s”. Answer yes there.</string>
     <string name="pair_code_label">Confirmation code</string>
-    <string name="pair_code_body">Both screens will show the same code. Check that they match.</string>
+    <string name="pair_code_question">Does %1$s show the same code?</string>
+    <string name="pair_code_match">Codes match</string>
+    <string name="pair_code_mismatch">Don\'t match</string>
+    <string name="pair_code_waiting">Now confirm the code on your PC too.</string>
+    <string name="pair_finishing">Finishing…</string>
+    <string name="pair_success_title">Paired with %1$s</string>
+    <string name="pair_success_body">It can now connect securely, with an encrypted connection and its own key. You can revoke it any time under Devices.</string>
+    <string name="pair_success_dev_mode">The server is in developer mode. Turn developer mode off in Settings so only paired PCs can connect.</string>
+    <string name="pair_done">Done</string>
+    <string name="pair_view_devices">Paired devices</string>
+    <string name="pair_failed_title">Pairing didn\'t work</string>
+    <string name="pair_err_bad_secret">Your PC didn\'t accept this code. Scan the code your PC shows right now.</string>
+    <string name="pair_err_rejected">Pairing was declined on your PC.</string>
+    <string name="pair_err_out_of_order">Your PC and phone got out of step. Start pairing again.</string>
+    <string name="pair_err_codes_differ">The codes didn\'t match, so nothing was saved. If they really were the same, try again; if not, someone may be interfering with your network.</string>
+    <string name="pair_err_commitment">Your PC\'s answer didn\'t check out, so pairing was stopped. Someone may be interfering with your network. Try again, or use the QR code.</string>
+    <string name="pair_err_expired">The pairing session on your PC timed out. Run phonetopc pair again.</string>
+    <string name="pair_err_unsupported">Your PC uses a different pairing version. Update phonetopc on the PC or this app.</string>
+    <string name="pair_err_pin_mismatch">The PC that answered isn\'t the one in the QR code. Nothing was sent. Check that you scanned your own PC\'s code.</string>
+    <string name="pair_err_unreachable">Couldn\'t reach your PC. Check that both are on the same network and phonetopc pair is still running.</string>
+    <string name="pair_err_connection_lost">The connection to your PC dropped. Try again.</string>
+    <string name="pair_err_timeout">Your PC didn\'t answer in time.</string>
+    <string name="pair_err_protocol">Something unexpected happened: %1$s</string>
 
     <!-- Devices -->
     <string name="devices_title">Paired devices</string>
     <string name="devices_empty_title">No paired PCs yet</string>
-    <string name="devices_empty_body">PCs you pair will show up here, with when they were last seen and a way to revoke their access.</string>
+    <string name="devices_empty_body">PCs you pair show up here, with when they last connected and a way to revoke their access.</string>
     <string name="devices_pair_action">Pair a PC</string>
+    <string name="devices_pair_another">Pair another PC</string>
+    <string name="devices_paired_on">Paired %1$s</string>
+    <string name="devices_last_connected">Last connected %1$s</string>
+    <string name="devices_never_connected">Never connected</string>
+    <string name="devices_connected_now">Connected now</string>
+    <string name="devices_revoke">Revoke</string>
+    <string name="devices_revoke_title">Revoke %1$s?</string>
+    <string name="devices_revoke_body">It\'s disconnected right away and can\'t connect again until you pair it again.</string>
+    <string name="devices_pin">Key %1$s</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_section_server">Server</string>
     <string name="settings_dev_mode">Developer mode (unencrypted)</string>
-    <string name="settings_dev_mode_summary">Required to run the server in this version</string>
+    <string name="settings_dev_mode_summary">Plain ws:// without pairing, for development. Off means secure mode: encrypted, paired PCs only.</string>
     <string name="settings_dev_mode_warning">The server is unencrypted and has no login. Anyone on the same network can connect and read the sensors you allow below. Only use it on networks you trust.</string>
     <string name="settings_dev_mode_dialog_title">Turn on developer mode?</string>
     <string name="settings_dev_mode_dialog_body">While the server runs, any device on your network can connect without a password and read your allowed sensors. Traffic isn\'t encrypted. Use it only on networks you trust, or over USB.</string>
@@ -131,6 +185,10 @@
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
     <string name="settings_device_id">Device ID</string>
+    <string name="settings_phone_key">This phone\'s key</string>
+    <string name="settings_phone_key_hw">Kept in secure hardware. A PC shows the same key after pairing.</string>
+    <string name="settings_phone_key_sw">Kept in Android Keystore. A PC shows the same key after pairing.</string>
+    <string name="settings_copy_pin">Copy key</string>
 
     <!-- Vendor guides -->
     <string name="vendor_samsung">On Samsung phones</string>
@@ -185,6 +243,6 @@
     <string name="onboarding_battery_vendor">%1$s there are a few extra steps. You\'ll find them in Settings.</string>
     <string name="onboarding_battery_action">Allow background use</string>
     <string name="onboarding_done_title">You\'re all set</string>
-    <string name="onboarding_done_body">Turn on developer mode in Settings, start the server, and point a client on your PC at the address on the home screen.</string>
+    <string name="onboarding_done_body">Next, pair your PC: run phonetopc pair on it and open the Pair tab here. Then start the server on the home screen.</string>
     <string name="onboarding_done_action">Open phonetopc</string>
 </resources>

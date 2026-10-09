@@ -1,6 +1,7 @@
 package io.github.melker12345.phonetopc.ui.settings
 
 import android.Manifest
+import android.content.ClipData
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,9 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Numbers
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -37,6 +40,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -51,12 +55,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -70,18 +77,22 @@ import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.data.AppSettings
 import io.github.melker12345.phonetopc.data.SettingsRepository
 import io.github.melker12345.phonetopc.protocol.PROTOCOL_VERSION
+import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.ui.MainViewModel
+import io.github.melker12345.phonetopc.ui.PhoneKeyInfo
 import io.github.melker12345.phonetopc.ui.SensorUiCatalog
 import io.github.melker12345.phonetopc.ui.SystemSettings
 import io.github.melker12345.phonetopc.ui.components.IconBadge
 import io.github.melker12345.phonetopc.ui.components.SectionHeader
 import io.github.melker12345.phonetopc.ui.rememberOnResume
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val deviceId by vm.deviceId.collectAsStateWithLifecycle()
+    val phoneKey by vm.phoneKey.collectAsStateWithLifecycle()
     val s = settings ?: AppSettings()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -118,7 +129,7 @@ fun SettingsScreen(vm: MainViewModel) {
             item { VendorGuideCard(Vendor.detect()) }
 
             item { SectionHeader(stringResource(R.string.settings_section_about), Modifier.padding(top = 16.dp)) }
-            item { AboutGroup(deviceId) }
+            item { AboutGroup(deviceId, phoneKey) }
         }
     }
 }
@@ -364,13 +375,46 @@ fun VendorGuideCard(vendor: Vendor, modifier: Modifier = Modifier) {
 // ---- about ----
 
 @Composable
-private fun AboutGroup(deviceId: String?) {
+private fun AboutGroup(deviceId: String?, phoneKey: PhoneKeyInfo?) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     Group {
         ListItem(
             colors = transparentItem,
             leadingContent = { IconBadge(Icons.Rounded.Info, size = 36.dp) },
             headlineContent = { Text(stringResource(R.string.settings_version)) },
-            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 1)") },
+            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 2)") },
+        )
+        // SECURITY.md §2: the pin a PC stores for this phone, for comparing by eye.
+        ListItem(
+            colors = transparentItem,
+            leadingContent = { IconBadge(Icons.Rounded.Key, size = 36.dp) },
+            headlineContent = { Text(stringResource(R.string.settings_phone_key)) },
+            supportingContent = {
+                Column {
+                    Text(
+                        phoneKey?.let { Pins.shortHex(it.pin) } ?: "…",
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    phoneKey?.let {
+                        Text(it.pin, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            stringResource(if (it.hardwareBacked) R.string.settings_phone_key_hw else R.string.settings_phone_key_sw),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            trailingContent = phoneKey?.let { key ->
+                {
+                    IconButton(onClick = {
+                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("phonetopc pin", key.pin))) }
+                    }) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.settings_copy_pin))
+                    }
+                }
+            },
         )
         ListItem(
             colors = transparentItem,

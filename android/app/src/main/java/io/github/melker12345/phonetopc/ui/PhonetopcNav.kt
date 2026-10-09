@@ -100,9 +100,12 @@ private fun MainTabs(vm: MainViewModel) {
             enterTransition = { fadeIn() },
             exitTransition = { fadeOut() },
         ) {
-            composable(Tab.HOME.route) { HomeScreen(vm, onOpenSettings = { nav.switchTo(Tab.SETTINGS.route) }) }
-            composable(Tab.PAIR.route) { PairScreen() }
-            composable(Tab.DEVICES.route) { DevicesScreen(onPair = { nav.switchTo(Tab.PAIR.route) }) }
+            composable(Tab.HOME.route) { HomeScreen(vm, onPair = { nav.switchTo(Tab.PAIR.route) }) }
+            composable(Tab.PAIR.route) {
+                val settings by vm.settings.collectAsStateWithLifecycle()
+                PairScreen(devMode = settings?.devMode == true, onOpenDevices = { nav.switchTo(Tab.DEVICES.route) })
+            }
+            composable(Tab.DEVICES.route) { DevicesScreen(vm, onPair = { nav.switchTo(Tab.PAIR.route) }) }
             composable(Tab.SETTINGS.route) { SettingsScreen(vm) }
         }
     }

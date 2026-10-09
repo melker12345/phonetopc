@@ -25,10 +25,10 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material.icons.rounded.WifiOff
@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.protocol.ClientSnapshot
 import io.github.melker12345.phonetopc.protocol.Demand
+import io.github.melker12345.phonetopc.protocol.PcInfo
 import io.github.melker12345.phonetopc.protocol.SubscriptionSnapshot
 import io.github.melker12345.phonetopc.server.DEFAULT_PORT
 import io.github.melker12345.phonetopc.server.WS_PATH
@@ -87,23 +89,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
+fun HomeScreen(vm: MainViewModel, onPair: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val addresses by vm.addresses.collectAsStateWithLifecycle()
+    val paired by vm.pairedPcs.collectAsStateWithLifecycle()
     HomeContent(
         devMode = settings?.devMode ?: false,
         configuredPort = settings?.port ?: DEFAULT_PORT,
         status = status,
         addresses = addresses,
+        hasPairedPcs = paired?.isNotEmpty() ?: true,
         onStart = vm::startServer,
         onStop = vm::stopServer,
         onPause = vm::setPaused,
-        onOpenSettings = onOpenSettings,
+        onPair = onPair,
     )
 }
 
-private enum class HomeState { DEV_MODE_OFF, STOPPED, STARTING, RUNNING, PAUSED }
+private enum class HomeState { STOPPED, STARTING, RUNNING, PAUSED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,13 +116,16 @@ private fun HomeContent(
     configuredPort: Int,
     status: BridgeStatus,
     addresses: List<String>,
+    hasPairedPcs: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onPause: (Boolean) -> Unit,
-    onOpenSettings: () -> Unit,
+    onPair: () -> Unit,
 ) {
+    // While running, the mode the server actually runs in; otherwise the one it will start in.
+    val secure = status.secure ?: !devMode
     val state = when (status.state) {
-        RunState.STOPPED -> if (devMode) HomeState.STOPPED else HomeState.DEV_MODE_OFF
+        RunState.STOPPED -> HomeState.STOPPED
         RunState.STARTING -> HomeState.STARTING
         RunState.RUNNING -> HomeState.RUNNING
         RunState.PAUSED -> HomeState.PAUSED
@@ -142,10 +149,10 @@ private fun HomeContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "status") {
-                StatusCard(state, status, onStart, onStop, onPause, onOpenSettings)
+                StatusCard(state, status, secure, hasPairedPcs, onStart, onStop, onPause, onPair)
             }
             item(key = "address") {
-                AddressCard(addresses, status.port ?: configuredPort, dimmed = state != HomeState.RUNNING)
+                AddressCard(addresses, status.port ?: configuredPort, secure, dimmed = state != HomeState.RUNNING)
             }
             if (status.active) {
                 item(key = "clients-header") {
@@ -154,7 +161,7 @@ private fun HomeContent(
                 if (status.clients.isEmpty()) {
                     item(key = "clients-empty") {
                         Text(
-                            stringResource(R.string.home_clients_empty),
+                            stringResource(if (secure) R.string.home_clients_empty_secure else R.string.home_clients_empty),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),
@@ -172,17 +179,19 @@ private fun HomeContent(
 private fun StatusCard(
     state: HomeState,
     status: BridgeStatus,
+    secure: Boolean,
+    hasPairedPcs: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onPause: (Boolean) -> Unit,
-    onOpenSettings: () -> Unit,
+    onPair: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val (container, content) = when (state) {
         HomeState.RUNNING -> scheme.primaryContainer to scheme.onPrimaryContainer
         HomeState.PAUSED -> scheme.tertiaryContainer to scheme.onTertiaryContainer
         HomeState.STARTING -> scheme.secondaryContainer to scheme.onSecondaryContainer
-        HomeState.STOPPED, HomeState.DEV_MODE_OFF -> scheme.surfaceContainerHigh to scheme.onSurface
+        HomeState.STOPPED -> scheme.surfaceContainerHigh to scheme.onSurface
     }
     val animatedContainer by animateColorAsState(container, label = "statusContainer")
     val animatedContent by animateColorAsState(content, label = "statusContent")
@@ -213,7 +222,22 @@ private fun StatusCard(
                     )
                 }
             }
-            status.error?.takeIf { state == HomeState.STOPPED || state == HomeState.DEV_MODE_OFF }?.let { error ->
+            Spacer(Modifier.height(16.dp))
+            ModeChip(secure)
+            if (secure && !hasPairedPcs) {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.home_no_paired),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onPair, colors = ButtonDefaults.textButtonColors(contentColor = animatedContent)) {
+                        Text(stringResource(R.string.home_pair_action))
+                    }
+                }
+            }
+            status.error?.takeIf { state == HomeState.STOPPED }?.let { error ->
                 Spacer(Modifier.height(12.dp))
                 Text(error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             }
@@ -221,11 +245,6 @@ private fun StatusCard(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 val big = Modifier.weight(1f).height(56.dp)
                 when (state) {
-                    HomeState.DEV_MODE_OFF -> Button(onClick = onOpenSettings, modifier = big) {
-                        Icon(Icons.Rounded.Settings, null, Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text(stringResource(R.string.home_open_settings))
-                    }
                     HomeState.STOPPED -> Button(onClick = onStart, modifier = big) {
                         Icon(Icons.Rounded.PlayArrow, null, Modifier.size(ButtonDefaults.IconSize))
                         Spacer(Modifier.width(ButtonDefaults.IconSpacing))
@@ -262,8 +281,27 @@ private fun StatusCard(
     }
 }
 
+/** Secure (wss, paired PCs only) or dev mode (plain ws, anyone), always visible on Home. */
+@Composable
+private fun ModeChip(secure: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = CircleShape,
+        color = if (secure) scheme.surface.copy(alpha = 0.6f) else scheme.errorContainer,
+        contentColor = if (secure) scheme.onSurface else scheme.onErrorContainer,
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (secure) Icons.Rounded.Lock else Icons.Rounded.LockOpen, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                stringResource(if (secure) R.string.home_mode_secure else R.string.home_mode_dev),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
 private fun HomeState.icon(): ImageVector = when (this) {
-    HomeState.DEV_MODE_OFF -> Icons.Rounded.Lock
     HomeState.STOPPED -> Icons.Rounded.PowerSettingsNew
     HomeState.STARTING -> Icons.Rounded.HourglassTop
     HomeState.RUNNING -> Icons.Rounded.WifiTethering
@@ -271,7 +309,6 @@ private fun HomeState.icon(): ImageVector = when (this) {
 }
 
 private fun HomeState.title(): Int = when (this) {
-    HomeState.DEV_MODE_OFF -> R.string.home_state_dev_off
     HomeState.STOPPED -> R.string.home_state_stopped
     HomeState.STARTING -> R.string.home_state_starting
     HomeState.RUNNING -> R.string.home_state_running
@@ -280,7 +317,6 @@ private fun HomeState.title(): Int = when (this) {
 
 @Composable
 private fun subtitle(state: HomeState, status: BridgeStatus): String = when (state) {
-    HomeState.DEV_MODE_OFF -> stringResource(R.string.home_sub_dev_off)
     HomeState.STOPPED -> stringResource(R.string.home_sub_stopped)
     HomeState.STARTING -> stringResource(R.string.home_sub_starting)
     HomeState.PAUSED -> stringResource(R.string.home_sub_paused)
@@ -307,7 +343,8 @@ private fun formatHz(rate: Double): String =
     if (rate == Math.floor(rate)) rate.toInt().toString() else "%.1f".format(rate)
 
 @Composable
-private fun AddressCard(addresses: List<String>, port: Int, dimmed: Boolean) {
+private fun AddressCard(addresses: List<String>, port: Int, secure: Boolean, dimmed: Boolean) {
+    val scheme = if (secure) "wss" else "ws"
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
@@ -355,7 +392,7 @@ private fun AddressCard(addresses: List<String>, port: Int, dimmed: Boolean) {
                     )
                     IconButton(onClick = {
                         scope.launch {
-                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("phonetopc", "ws://$hostPort$WS_PATH")))
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("phonetopc", "$scheme://$hostPort$WS_PATH")))
                             copied = true
                         }
                     }) {
@@ -366,7 +403,7 @@ private fun AddressCard(addresses: List<String>, port: Int, dimmed: Boolean) {
                     }
                 }
                 Text(
-                    "ws://$hostPort$WS_PATH",
+                    "$scheme://$hostPort$WS_PATH",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -409,11 +446,16 @@ private fun ClientCard(client: ClientSnapshot) {
                 Column(Modifier.weight(1f)) {
                     val clientName = client.clientName
                     val clientVersion = client.clientVersion
-                    val name = when {
-                        !client.helloDone -> stringResource(R.string.home_client_connecting)
+                    val program = when {
                         clientName.isNullOrBlank() -> stringResource(R.string.home_client_unnamed)
                         clientVersion.isNullOrBlank() -> clientName
                         else -> "$clientName $clientVersion"
+                    }
+                    val pcName = client.pc?.name
+                    val name = when {
+                        !client.helloDone -> stringResource(R.string.home_client_connecting)
+                        pcName != null -> "$pcName · $program"
+                        else -> program
                     }
                     Text(name, style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -468,7 +510,7 @@ private fun SubscriptionPill(sub: SubscriptionSnapshot) {
 
 private val previewClients = listOf(
     ClientSnapshot(
-        1, "192.168.1.40:51234", "air-mouse", "0.1.0", true,
+        1, "192.168.1.40:51234", "air-mouse", "0.1.0", true, pc = PcInfo("9d1c", "arch-desktop"), subscriptions =
         listOf(
             SubscriptionSnapshot("s-0001", "game_rotation_vector", null, 100.0),
             SubscriptionSnapshot("s-0002", "ui", null, null),
@@ -481,21 +523,21 @@ private val previewClients = listOf(
 @Composable
 private fun HomeRunningPreview() = PhonetopcTheme(dynamicColor = false) {
     HomeContent(
-        devMode = true, configuredPort = DEFAULT_PORT,
+        devMode = false, configuredPort = DEFAULT_PORT,
         status = BridgeStatus(
-            state = RunState.RUNNING, port = DEFAULT_PORT, clients = previewClients,
+            state = RunState.RUNNING, port = DEFAULT_PORT, secure = true, clients = previewClients,
             streaming = mapOf("game_rotation_vector" to Demand(100.0), "ui" to Demand(null)),
         ),
-        addresses = listOf("192.168.1.23"),
-        onStart = {}, onStop = {}, onPause = {}, onOpenSettings = {},
+        addresses = listOf("192.168.1.23"), hasPairedPcs = true,
+        onStart = {}, onStop = {}, onPause = {}, onPair = {},
     )
 }
 
 @Preview(showBackground = true)
 @Composable
-private fun HomeDevOffPreview() = PhonetopcTheme(darkTheme = true, dynamicColor = false) {
+private fun HomeSecureUnpairedPreview() = PhonetopcTheme(darkTheme = true, dynamicColor = false) {
     HomeContent(
         devMode = false, configuredPort = DEFAULT_PORT, status = BridgeStatus(),
-        addresses = emptyList(), onStart = {}, onStop = {}, onPause = {}, onOpenSettings = {},
+        addresses = emptyList(), hasPairedPcs = false, onStart = {}, onStop = {}, onPause = {}, onPair = {},
     )
 }

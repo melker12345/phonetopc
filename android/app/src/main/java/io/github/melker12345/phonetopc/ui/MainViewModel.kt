@@ -5,13 +5,20 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.melker12345.phonetopc.appGraph
 import io.github.melker12345.phonetopc.data.AppSettings
+import io.github.melker12345.phonetopc.data.PairedPc
+import io.github.melker12345.phonetopc.data.PhoneKey
 import io.github.melker12345.phonetopc.service.BridgeStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** The phone's TLS key as shown in Settings › About. */
+data class PhoneKeyInfo(val pin: String, val hardwareBacked: Boolean)
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = app.appGraph
@@ -28,8 +35,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _deviceId = MutableStateFlow<String?>(null)
     val deviceId: StateFlow<String?> = _deviceId.asStateFlow()
 
+    /** `null` until loaded. */
+    val pairedPcs: StateFlow<List<PairedPc>?> = graph.pairedPcs.loaded
+
+    private val _phoneKey = MutableStateFlow<PhoneKeyInfo?>(null)
+    val phoneKey: StateFlow<PhoneKeyInfo?> = _phoneKey.asStateFlow()
+
     init {
         viewModelScope.launch { _deviceId.value = graph.settings.deviceId() }
+        viewModelScope.launch {
+            _phoneKey.value = withContext(Dispatchers.IO) {
+                runCatching { PhoneKey.identity() }.getOrNull()?.let {
+                    PhoneKeyInfo(it.pin, PhoneKey.isHardwareBacked(it.privateKey))
+                }
+            }
+        }
+    }
+
+    /** SECURITY.md §5: forget the PC; the server closes its open sessions with 1008. */
+    fun revoke(id: String) {
+        graph.appScope.launch { graph.pairedPcs.remove(id) }
     }
 
     fun hardwarePresent(source: String) = graph.sensorSource.hardwarePresent(source)

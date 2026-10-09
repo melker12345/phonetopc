@@ -8,6 +8,11 @@
         tools:ignore="HighSamplingRate" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only for scanning a PC's pairing QR code; asked for on the Pair screen. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
