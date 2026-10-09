@@ -2,4 +2,22 @@
 <resources>
     <string name="app_name">phonetopc</string>
     <string name="tile_label">PC button</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Bridge status</string>
+    <string name="notification_channel_description">Shows while phonetopc is serving sensor data to your PC.</string>
+    <string name="notification_starting">phonetopc · starting…</string>
+    <string name="notification_paused">phonetopc · paused</string>
+    <plurals name="notification_clients">
+        <item quantity="one">phonetopc · %d client connected</item>
+        <item quantity="other">phonetopc · %d clients connected</item>
+    </plurals>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_stop">Stop</string>
+
+    <!-- Service errors -->
+    <string name="error_dev_mode_off">Developer mode is off. Turn it on in Settings to start the server.</string>
+    <string name="error_port_in_use">Couldn\'t open port %1$d. Is another app using it?</string>
+    <string name="error_foreground_not_allowed">Android didn\'t allow the service to start in the background. Open the app and start it again.</string>
 </resources>
