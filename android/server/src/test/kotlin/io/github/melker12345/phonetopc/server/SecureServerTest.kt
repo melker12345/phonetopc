@@ -120,6 +120,22 @@ class SecureServerTest {
         }
     }
 
+    @Test fun rateLimitedAddressIsClosed1013EvenWithAValidToken() {
+        val port = start()
+        repeat(5) {
+            connect(port).use { ws ->
+                ws.call(1, "hello", hello(Secrets.newToken()))
+                assertNull(ws.receive())
+                assertEquals(1008, ws.closeCode)
+            }
+        }
+        connect(port).use { ws ->
+            ws.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":${hello(token)}}""")
+            assertNull("no answer when rate limited", ws.receive())
+            assertEquals(1013, ws.closeCode)
+        }
+    }
+
     @Test fun helloTimeoutCloses1008() {
         val port = start(helloTimeoutMs = 300)
         connect(port).use { ws ->

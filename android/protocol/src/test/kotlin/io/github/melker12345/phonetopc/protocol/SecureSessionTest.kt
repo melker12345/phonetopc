@@ -99,10 +99,46 @@ class SecureSessionTest {
         assertFalse(s.closeRequest.isCompleted)
     }
 
-    @Test fun unsupportedProtocolComesBeforeAuth() {
+    @Test fun authComesBeforeProtocol() {
+        // SECURITY.md §5: params shape, then auth, then protocol.
         val s = hub.openSession("a")
-        val r = s.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/9"}}""").single()
+        assertUnauthorizedAndClosed(s, s.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/9"}}"""))
+        val ok = hub.openSession("b")
+        val r = ok.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/9","auth":{"token":"$token"}}}""").single()
         assertEquals(-32004, r.errorCode())
+        assertFalse(ok.closeRequest.isCompleted)
+        assertFalse(ok.helloDone)
+    }
+
+    @Test fun paramsShapeComesBeforeAuth() {
+        for (params in listOf("""["phonetopc/1"]""", """{"auth":{"token":"$token"}}""", """{"protocol":1}""", """{}""")) {
+            val s = hub.openSession("a")
+            val r = s.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":$params}""").single()
+            assertEquals(params, -32602, r.errorCode())
+            assertFalse(params, s.closeRequest.isCompleted)
+        }
+    }
+
+    @Test fun failedRehelloCloses1008() {
+        val bad = listOf(
+            """{"protocol":"phonetopc/1","auth":{"token":"${Secrets.newToken()}"}}""",
+            """{"protocol":"phonetopc/9","auth":{"token":"$token"}}""",
+            """{"auth":{"token":"$token"}}""",
+        )
+        for (params in bad) {
+            val s = hub.openSession("a")
+            assertTrue("result" in s.hello("""{"token":"$token"}""").single())
+            val out = s.send("""{"jsonrpc":"2.0","id":2,"method":"hello","params":$params}""")
+            assertTrue(params, "error" in out.single())
+            assertEquals(params, CloseCodes.POLICY_VIOLATION, s.closeRequest.getCompleted().code)
+            assertTrue(s.send("""{"jsonrpc":"2.0","id":3,"method":"list_sensors"}""").isEmpty())
+        }
+    }
+
+    @Test fun successfulRehelloKeepsTheSession() {
+        val s = hub.openSession("a")
+        s.hello("""{"token":"$token"}""")
+        assertTrue("result" in s.hello("""{"token":"$token"}""").single())
         assertFalse(s.closeRequest.isCompleted)
     }
 
@@ -112,20 +148,49 @@ class SecureSessionTest {
         assertUnauthorizedAndClosed(s, s.hello("""{"token":"$token"}"""))
     }
 
-    @Test fun rateLimitPerAddressBlocksEvenValidTokens() {
+    @Test fun rateLimitPerAddressCloses1013EvenWithValidTokens() {
         repeat(3) {
             val bad = hub.openSession("10.0.0.9:$it", "10.0.0.9")
             assertUnauthorizedAndClosed(bad, bad.hello(null))
         }
+        // A new connection from that address is closed with 1013 at once ...
         val blocked = hub.openSession("10.0.0.9:99", "10.0.0.9")
-        assertUnauthorizedAndClosed(blocked, blocked.hello("""{"token":"$token"}"""))
+        assertEquals(CloseCodes.TRY_AGAIN_LATER, blocked.closeRequest.getCompleted().code)
+        // ... and a hello on it gets no answer, even with a valid token.
+        assertTrue(blocked.hello("""{"token":"$token"}""").isEmpty())
+        assertFalse(blocked.helloDone)
         // Another address is unaffected.
         val other = hub.openSession("10.0.0.10:1", "10.0.0.10")
         assertTrue("result" in other.hello("""{"token":"$token"}""").single())
         // The window passes.
         now += 60_000
         val later = hub.openSession("10.0.0.9:100", "10.0.0.9")
+        assertFalse(later.closeRequest.isCompleted)
         assertTrue("result" in later.hello("""{"token":"$token"}""").single())
+    }
+
+    @Test fun limitReachedWhileConnectedClosesAtHello() {
+        val waiting = hub.openSession("10.0.0.9:1", "10.0.0.9")
+        repeat(3) {
+            val bad = hub.openSession("10.0.0.9:${it + 2}", "10.0.0.9")
+            bad.hello(null)
+        }
+        assertTrue(waiting.hello("""{"token":"$token"}""").isEmpty())
+        assertEquals(CloseCodes.TRY_AGAIN_LATER, waiting.closeRequest.getCompleted().code)
+    }
+
+    @Test fun repairingClosesOnlySessionsWithTheOldToken() {
+        val old = hub.openSession("a")
+        old.hello("""{"token":"$token"}""")
+        val newToken = Secrets.newToken()
+        paired.clear()
+        paired[TokenHash.of(newToken)] = PcInfo("9d1c0a", "arch-desktop")
+        val fresh = hub.openSession("b")
+        fresh.hello("""{"token":"$newToken"}""")
+        val current = TokenHash.of(newToken)
+        assertEquals(1, hub.disconnectSessions { pc, hash -> pc.id == "9d1c0a" && hash != current })
+        assertEquals(CloseCodes.POLICY_VIOLATION, old.closeRequest.getCompleted().code)
+        assertFalse(fresh.closeRequest.isCompleted)
     }
 
     @Test fun revokingAPcClosesItsSessions() {

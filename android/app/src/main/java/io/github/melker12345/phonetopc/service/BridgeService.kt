@@ -190,13 +190,16 @@ class BridgeService : Service() {
                 .distinctUntilChanged()
                 .collect { setWakeLock(it) }
         }
-        // SECURITY.md §5: a revoked PC (or one re-paired with a new token) loses its sessions now.
+        // SECURITY.md §5 and §4.4: a revoked PC loses its sessions now, and re-pairing closes
+        // the sessions that used the old token (1008). Sessions with the new token stay.
         launch {
             var known = graph.pairedPcs.current().associate { it.id to it.tokenHash }
             graph.pairedPcs.loaded.filterNotNull().collect { list ->
                 val now = list.associate { it.id to it.tokenHash }
-                val gone = known.filter { (id, hash) -> now[id] != hash }.keys
-                if (gone.isNotEmpty()) hub.disconnectPcs { it.id in gone }
+                val changed = known.filter { (id, hash) -> now[id] != hash }.keys
+                if (changed.isNotEmpty()) {
+                    hub.disconnectSessions { pc, tokenHash -> pc.id in changed && tokenHash != now[pc.id] }
+                }
                 known = now
             }
         }

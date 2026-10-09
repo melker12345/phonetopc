@@ -1,5 +1,6 @@
 package io.github.melker12345.phonetopc.protocol
 
+import io.github.melker12345.phonetopc.protocol.security.TokenHash
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.channels.Channel
@@ -22,6 +23,9 @@ data class CloseRequest(val code: Short, val reason: String)
 object CloseCodes {
     const val UNSUPPORTED_DATA: Short = 1003
     const val POLICY_VIOLATION: Short = 1008
+
+    /** SECURITY.md §5: an address over the failed-hello limit. */
+    const val TRY_AGAIN_LATER: Short = 1013
 }
 
 /**
@@ -62,6 +66,14 @@ class Session internal constructor(
 
     /** Secure mode: the paired PC this session authenticated as. */
     @Volatile var pc: PcInfo? = null
+        private set
+
+    /**
+     * Secure mode: [io.github.melker12345.phonetopc.protocol.security.TokenHash] of the token
+     * this session authenticated with, so re-pairing can close exactly the sessions that used
+     * the old token (SECURITY.md §4.4).
+     */
+    @Volatile var tokenHash: String? = null
         private set
 
     /**
@@ -111,7 +123,7 @@ class Session internal constructor(
     suspend fun handleText(text: String) {
         if (ending) return
         val reply = respond(text) ?: return
-        queue.trySend(Out(reply.text, KIND_RESPONSE))
+        reply.text?.let { queue.trySend(Out(it, KIND_RESPONSE)) }
         reply.closeAfter?.let { closeAfterQueued(it) }
         // Spec §4.3: a new subscription's events (including its initial value) may only be
         // queued once its subscribe response is.
@@ -171,9 +183,12 @@ class Session internal constructor(
 
     // ---- JSON-RPC framing ----
 
-    /** A response to queue, plus the subscription it created, which may start once it's queued. */
+    /**
+     * A response to queue, plus the subscription it created, which may start once it's queued.
+     * [text] is `null` when the session closes without answering (rate limited).
+     */
     internal class Reply(
-        val text: String,
+        val text: String?,
         val newSubscription: Subscription? = null,
         val closeAfter: CloseRequest? = null,
     )
@@ -229,11 +244,22 @@ class Session internal constructor(
             else -> return error(replyId, RpcException(RpcError.INVALID_PARAMS, "params must be an object"))
         }
 
+        val isHello = method.content == "hello"
+        val rehello = isHello && helloDone
         return try {
             val handled = dispatch(method.content, params)
             Reply(Rpc.result(replyId, handled.result), handled.newSubscription)
+        } catch (e: RateLimited) {
+            // SECURITY.md §5: a limited address is closed with 1013, even with a valid token.
+            Reply(null, closeAfter = CloseRequest(CloseCodes.TRY_AGAIN_LATER, "too many failed hellos; try again later"))
         } catch (e: RpcException) {
-            val close = if (e.error == RpcError.UNAUTHORIZED) CloseRequest(CloseCodes.POLICY_VIOLATION, "unauthorized") else null
+            // SECURITY.md §5: -32010 closes with 1008, and so does any failed hello after a
+            // successful one.
+            val close = when {
+                e.error == RpcError.UNAUTHORIZED -> CloseRequest(CloseCodes.POLICY_VIOLATION, "unauthorized")
+                rehello && hub.security != null -> CloseRequest(CloseCodes.POLICY_VIOLATION, "hello failed")
+                else -> null
+            }
             Reply(Rpc.error(replyId, e), closeAfter = close)
         } catch (e: CancellationException) {
             throw e
@@ -270,8 +296,16 @@ class Session internal constructor(
         }
     }
 
+    /**
+     * Order of checks (SECURITY.md §5): rate limit (close 1013, no answer), params shape
+     * (-32602), then in secure mode `auth` (-32010), then the protocol version (-32004). An
+     * unauthenticated client learns nothing but -32010.
+     */
     private fun hello(params: JsonObject): JsonElement {
+        val security = hub.security
+        if (security != null && security.limiter.isBlocked(remoteHost)) throw RateLimited()
         val protocol = params.requireString("protocol")
+        val auth = security?.let { authenticate(it, params) }
         if (protocol !in SUPPORTED_PROTOCOLS) {
             throw RpcException(
                 RpcError.UNSUPPORTED_PROTOCOL,
@@ -279,11 +313,14 @@ class Session internal constructor(
                 buildJsonObject { put("supported", buildJsonArray { SUPPORTED_PROTOCOLS.forEach { add(JsonPrimitive(it)) } }) },
             )
         }
-        val pcInfo = hub.security?.let { authenticate(it, params) }
+        val pcInfo = auth?.first
         client = (params["client"] as? JsonObject)?.let {
             ClientInfo(it.lenientString("name"), it.lenientString("version"))
         }
-        if (pcInfo != null) pc = pcInfo
+        if (auth != null) {
+            pc = auth.first
+            tokenHash = auth.second
+        }
         helloDone = true
         hub.sessionChanged()
         pcInfo?.let { hub.security?.onAuthenticated?.invoke(it) }
@@ -299,24 +336,24 @@ class Session internal constructor(
 
     /**
      * SECURITY.md §5. A missing, malformed, unknown or revoked token is -32010, and the caller
-     * closes with 1008. Addresses with too many recent failures are refused without a lookup.
+     * closes with 1008. Returns the PC and the hash of the token it used.
      */
-    private fun authenticate(security: SecureAccess, params: JsonObject): PcInfo {
-        if (security.limiter.isBlocked(remoteHost)) {
-            throw RpcException(RpcError.UNAUTHORIZED, "Too many failed attempts; try again later")
-        }
+    private fun authenticate(security: SecureAccess, params: JsonObject): Pair<PcInfo, String> {
         val token = ((params["auth"] as? JsonObject)?.get("token") as? JsonPrimitive)
             ?.takeIf { it.isString }?.content
         val found = token?.takeIf { it.isNotEmpty() }?.let(security.authenticate)
-        if (found == null) {
+        if (token == null || found == null) {
             security.limiter.recordFailure(remoteHost)
             throw RpcException(
                 RpcError.UNAUTHORIZED,
                 if (token == null) "hello needs auth.token; pair this PC first" else "Unknown or revoked token",
             )
         }
-        return found
+        return found to TokenHash.of(token)
     }
+
+    /** The address is over the failed-hello limit: close with 1013 without answering. */
+    private class RateLimited : Exception()
 
     private fun subscribe(params: JsonObject): Handled {
         // Spec §2 step 7: params that can be checked without the catalog, for any source.

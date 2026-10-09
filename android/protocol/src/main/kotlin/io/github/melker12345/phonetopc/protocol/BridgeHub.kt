@@ -94,6 +94,10 @@ class BridgeHub(
             sessions[session.sessionId] = session
             publishClientsLocked()
         }
+        // SECURITY.md §5: an address over the failed-hello limit is closed with 1013 right away.
+        if (security?.limiter?.isBlocked(remoteHost) == true) {
+            session.requestClose(CloseRequest(CloseCodes.TRY_AGAIN_LATER, "too many failed hellos; try again later"))
+        }
         return session
     }
 
@@ -101,8 +105,17 @@ class BridgeHub(
      * Closes, with 1008, every session that authenticated as a PC matching [predicate], e.g.
      * one the user just revoked (SECURITY.md §5). Returns how many were closed.
      */
-    fun disconnectPcs(predicate: (PcInfo) -> Boolean): Int {
-        val victims = synchronized(lock) { sessions.values.filter { s -> s.pc?.let(predicate) == true } }
+    fun disconnectPcs(predicate: (PcInfo) -> Boolean): Int = disconnectSessions { pc, _ -> predicate(pc) }
+
+    /**
+     * Like [disconnectPcs], but also sees the hash of the token each session used
+     * ([io.github.melker12345.phonetopc.protocol.security.TokenHash]). Re-pairing closes only
+     * the sessions that used the replaced token (SECURITY.md §4.4).
+     */
+    fun disconnectSessions(predicate: (pc: PcInfo, tokenHash: String?) -> Boolean): Int {
+        val victims = synchronized(lock) {
+            sessions.values.filter { s -> s.pc?.let { predicate(it, s.tokenHash) } == true }
+        }
         victims.forEach { it.revoke() }
         return victims.size
     }
