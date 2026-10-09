@@ -6,6 +6,7 @@ Commands::
     get SOURCE [--type T] [--json]
     list [--json]
     info [--json]
+    approval-key [--accept]
 
 Every command takes ``--device NAME_OR_ID`` and ``--addr HOST[:PORT]`` to pick
 a phone paired with ``phonetopc pair`` (default: the only paired phone, or
@@ -26,6 +27,7 @@ from ._version import __version__
 from .client import ENV_ADDR, _Connect, connect
 from .errors import Error
 from .models import Event, SensorInfo
+from .store import load_devices
 
 
 def _fmt_value(value: Any) -> str:
@@ -157,6 +159,32 @@ async def cmd_info(args: argparse.Namespace, out: TextIO) -> int:
     return 0
 
 
+async def cmd_approval_key(args: argparse.Namespace, out: TextIO) -> int:
+    async with _connect(args) as phone:
+        if phone.paired_device is None:
+            print("phonetopc: approval keys exist only in secure mode", file=sys.stderr)
+            return 1
+        device_id = phone.paired_device.id
+        current = phone.approval_key
+        stored = next((d.approval_key for d in load_devices() if d.id == device_id), None)
+        if current is None:
+            out.write(f"{phone.device.name} has no approval key (no fingerprint enrolled?)\n")
+            return 1
+        if args.accept:
+            changed = await phone.accept_approval_key()
+            verb = "accepted" if changed else "already accepted"
+            out.write(f"{verb}: approval key {current} of {phone.device.name}\n")
+            return 0
+    out.write(f"phone:    {current}\n")
+    out.write(f"accepted: {stored or '(none yet: trusted on first approval)'}\n")
+    if stored is not None and stored != current:
+        out.write(
+            "The phone's approval key changed (fingerprints added or removed?). If you did that, "
+            "trust the new key with --accept.\n"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -201,6 +229,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("info", parents=[common], help="show device and server info")
     p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser(
+        "approval-key", parents=[common], help="show or accept the phone's approval key"
+    )
+    p.add_argument(
+        "--accept",
+        action="store_true",
+        help="trust the phone's current approval key (after fingerprints changed on it)",
+    )
+    p.set_defaults(func=cmd_approval_key)
     return parser
 
 

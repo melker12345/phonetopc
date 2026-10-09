@@ -500,3 +500,31 @@ def test_sync_request_approval(
         assert not result and result.why == "denied"
         assert phone.approval_key == threaded_secure_server.approval_info["pin"]
         assert not phone.accept_approval_key()
+
+
+def test_cli_approval_key(
+    threaded_secure_server: FakeServer,
+    write_store: StoreWriter,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from phonetopc.cli import main
+
+    if not HAVE_CRYPTO:
+        pytest.skip("needs the cryptography package")
+    write_store(device_entry(threaded_secure_server))
+    assert main(["approval-key"]) == 1
+    assert "no approval key" in capsys.readouterr().out
+
+    threaded_secure_server.enable_approval()
+    pin = threaded_secure_server.approval_info["pin"]
+    path = write_store(device_entry(threaded_secure_server, approval_key=PINS["pc"]))
+    assert main(["approval-key"]) == 0
+    out = capsys.readouterr().out
+    assert pin in out and PINS["pc"] in out and "--accept" in out
+    assert stored_approval_key(path) == PINS["pc"]
+
+    assert main(["approval-key", "--accept"]) == 0
+    assert capsys.readouterr().out.startswith("accepted: ")
+    assert stored_approval_key(path) == pin
+    assert main(["approval-key", "--accept"]) == 0
+    assert "already accepted" in capsys.readouterr().out
