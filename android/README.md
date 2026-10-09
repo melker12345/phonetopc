@@ -2,9 +2,9 @@
 
 The phone side of phonetopc: a foreground service that serves the phone's sensors over
 WebSocket JSON-RPC, as specified in [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)
-(`phonetopc/1`, draft 0).
+(`phonetopc/1`, draft 1).
 
-Draft 0 is **plaintext and unauthenticated**, so the server only runs after you turn on
+Draft 1 is **plaintext and unauthenticated**, so the server only runs after you turn on
 **Developer mode (unencrypted)** in the app. Pairing and TLS come in a later version.
 
 ## Layout
@@ -87,6 +87,10 @@ Don't rely on that: many networks block multicast.
   its own rate.
 - A partial wake lock is held only while a continuous sensor (accelerometer, gyro, game
   rotation vector) is streaming. Otherwise the foreground service alone keeps the app alive.
+- The `subscribe` response always comes before that subscription's first event. Subscribing
+  to `light`, `proximity` or `battery` starts with the current value as `seq` 0 (for light
+  and proximity, as soon as the sensor reports it); `ui` sends nothing until the tile is
+  tapped. These sources only send an event when the value actually changes.
 - If a client can't keep up, continuous events are dropped (visible as `seq` gaps). If
   on_change events back up, the connection is closed with 1008 (spec §5).
 - `ts_mono_ns` is `SensorEvent.timestamp`; `ts` is that converted to wall-clock time.

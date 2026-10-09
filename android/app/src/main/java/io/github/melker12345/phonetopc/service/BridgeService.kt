@@ -36,7 +36,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Foreground service (type connectedDevice) that runs the WebSocket server, advertises it via
- * mDNS and keeps the process alive. Draft 0 is plaintext, so it refuses to run unless the
+ * mDNS and keeps the process alive. Draft 1 is plaintext, so it refuses to run unless the
  * user enabled developer mode.
  */
 class BridgeService : Service() {

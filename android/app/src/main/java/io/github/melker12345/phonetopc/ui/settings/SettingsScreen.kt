@@ -356,7 +356,7 @@ private fun AboutGroup(deviceId: String?) {
             colors = transparentItem,
             leadingContent = { IconBadge(Icons.Rounded.Info, size = 36.dp) },
             headlineContent = { Text(stringResource(R.string.settings_version)) },
-            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 0)") },
+            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 1)") },
         )
         ListItem(
             colors = transparentItem,

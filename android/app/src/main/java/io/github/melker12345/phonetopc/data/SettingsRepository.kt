@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.map
 import java.security.SecureRandom
 
 data class AppSettings(
-    /** "Developer mode (unencrypted)": the only way the plaintext draft-0 server may run. */
+    /** "Developer mode (unencrypted)": the only way the plaintext draft-1 server may run. */
     val devMode: Boolean = false,
     val port: Int = DEFAULT_PORT,
     /** Sources the user has turned off; they are reported as `available: false`. */
