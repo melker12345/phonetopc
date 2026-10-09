@@ -41,6 +41,8 @@ class PhonetopcServerTest {
             if (demand == null) this.demand.remove(source) else this.demand[source] = demand
         }
         override suspend fun read(source: String): Reading? = null
+        val known = ConcurrentHashMap<String, Reading>()
+        override fun currentReading(source: String): Reading? = known[source]
         override fun setSink(sink: ReadingSink?) { target = sink }
     }
 
@@ -91,6 +93,19 @@ class PhonetopcServerTest {
             assertEquals(id, ev["params"]!!.jsonObject["subscription"]!!.jsonPrimitive.content)
             assertEquals(i.toLong(), ev["params"]!!.jsonObject["seq"]!!.jsonPrimitive.long)
         }
+    }
+
+    @Test fun onChangeSubscribeResponseThenInitialValue() = ws {
+        source.known["light"] = Reading("light", "illuminance", Values.number(250f), "lx", 1, 1_000)
+        call(1, "hello", """{"protocol":"phonetopc/1"}""")
+        val sub = call(2, "subscribe", """{"source":"light"}""")["result"]!!.jsonObject
+        assertEquals("on_change", sub["mode"]!!.jsonPrimitive.content)
+        val ev = next()
+        assertEquals("event", ev["method"]!!.jsonPrimitive.content)
+        val params = ev["params"]!!.jsonObject
+        assertEquals(sub["subscription"], params["subscription"])
+        assertEquals(0L, params["seq"]!!.jsonPrimitive.long)
+        assertEquals("250.0", params["value"].toString())
     }
 
     @Test fun binaryFrameClosesWith1003() = ws {

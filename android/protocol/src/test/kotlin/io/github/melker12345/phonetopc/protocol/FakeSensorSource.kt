@@ -17,12 +17,22 @@ class FakeSensorSource : SensorSource {
         )
     }
 
+    /** What [currentReading] reports: the state a running listener knows. */
+    val known = mutableMapOf<String, Reading>()
+
+    /** Delivered synchronously when a source is started, like Android's first on_change reading. */
+    val emitOnStart = mutableMapOf<String, Reading>()
+
     override fun setDemand(source: String, demand: Demand?) {
         demandLog += source to demand
+        val wasRunning = source in current
         if (demand == null) current.remove(source) else current[source] = demand
+        if (demand != null && !wasRunning) emitOnStart[source]?.let { emit(it) }
     }
 
     override suspend fun read(source: String): Reading? = latest[source]
+
+    override fun currentReading(source: String): Reading? = known[source]
 
     override fun setSink(sink: ReadingSink?) {
         this.sink = sink

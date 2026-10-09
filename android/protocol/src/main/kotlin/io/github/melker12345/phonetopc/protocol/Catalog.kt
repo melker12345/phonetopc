@@ -28,9 +28,15 @@ data class SensorSpec(
     val unit: String,
     val shape: Shape,
     val mode: SensorMode,
+    /**
+     * An on_change source whose value is a state (light, proximity, battery), as opposed to an
+     * event-like one (`ui`). New subscriptions to a stateful source start with the current
+     * value (spec §4.3), and readings that don't change the state are not sent.
+     */
+    val stateful: Boolean = mode == SensorMode.ON_CHANGE,
 )
 
-/** The draft-0 sensor catalog, spec §6. */
+/** The sensor catalog, spec §6. */
 object SensorCatalog {
     const val ACCELEROMETER = "accelerometer"
     const val GYRO = "gyro"
@@ -47,7 +53,7 @@ object SensorCatalog {
         SensorSpec(PROXIMITY, listOf("distance"), "cm", Shape.NUMBER, SensorMode.ON_CHANGE),
         SensorSpec(LIGHT, listOf("illuminance"), "lx", Shape.NUMBER, SensorMode.ON_CHANGE),
         SensorSpec(BATTERY, listOf("state"), "%", Shape.OBJECT, SensorMode.ON_CHANGE),
-        SensorSpec(UI, listOf("tile_tap"), "", Shape.BOOL, SensorMode.ON_CHANGE),
+        SensorSpec(UI, listOf("tile_tap"), "", Shape.BOOL, SensorMode.ON_CHANGE, stateful = false),
     )
 
     private val bySource = all.associateBy { it.source }

@@ -128,6 +128,18 @@ class BridgeHub(
         }
     }
 
+    /**
+     * Let a new subscription deliver events, starting with the current value of a stateful
+     * source if one is known (spec §4.3). Call after its `subscribe` response is queued.
+     * Nothing initial is sent while the source isn't running (paused, unavailable); the
+     * first reading after it starts becomes the initial event instead.
+     */
+    internal fun startSubscription(sub: Subscription) {
+        val routed = routes[sub.spec.source]?.contains(sub) == true
+        val current = if (sub.spec.stateful && routed) source.currentReading(sub.spec.source) else null
+        sub.start(current, deviceId)
+    }
+
     internal fun removeSubscriptions(subs: List<Subscription>) {
         if (subs.isEmpty()) return
         synchronized(lock) {
@@ -168,10 +180,11 @@ class BridgeHub(
                 newRoutes[src] = subs.toList()
             }
         }
+        // Route first: a source may deliver its first reading as soon as it is started.
+        routes = newRoutes
         for (src in appliedDemand.keys - wanted.keys) source.setDemand(src, null)
         for ((src, d) in wanted) if (appliedDemand[src] != d) source.setDemand(src, d)
         appliedDemand = wanted
-        routes = newRoutes
         _demand.value = wanted.toMap()
     }
 

@@ -30,7 +30,8 @@ object CloseCodes {
  * [close] when the connection ends.
  *
  * Outgoing responses and events share one ordered queue, so a response is never overtaken
- * by an event produced after it (e.g. no event follows an `unsubscribe` response).
+ * by an event produced after it (e.g. no event follows an `unsubscribe` response). A new
+ * subscription only starts producing events after its `subscribe` response is queued.
  * Responses are never dropped. Events are bounded per spec §5: continuous ones are dropped
  * when [BridgeHub.continuousQueueCapacity] events are pending; if
  * [BridgeHub.onChangeQueueCapacity] on_change events are pending the session asks to be
@@ -88,8 +89,11 @@ class Session internal constructor(
 
     /** Handle one inbound text frame; the response (if any) is queued for sending. */
     suspend fun handleText(text: String) {
-        val response = respond(text) ?: return
-        queue.trySend(Out(response, KIND_RESPONSE))
+        val reply = respond(text) ?: return
+        queue.trySend(Out(reply.text, KIND_RESPONSE))
+        // Spec §4.3: a new subscription's events (including its initial value) may only be
+        // queued once its subscribe response is.
+        reply.newSubscription?.let { hub.startSubscription(it) }
     }
 
     /** Ask the transport to close the connection. First request wins. */
@@ -130,34 +134,39 @@ class Session internal constructor(
 
     // ---- JSON-RPC framing ----
 
-    internal suspend fun respond(text: String): String? {
+    /** A response to queue, plus the subscription it created, which may start once it's queued. */
+    internal class Reply(val text: String, val newSubscription: Subscription? = null)
+
+    internal suspend fun respond(text: String): Reply? {
+        fun error(id: JsonElement?, e: RpcException) = Reply(Rpc.error(id, e))
+
         val element = try {
             ProtocolJson.parseToJsonElement(text).takeIf { isStrictJson(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
             null
-        } ?: return Rpc.error(null, RpcException(RpcError.PARSE_ERROR))
+        } ?: return error(null, RpcException(RpcError.PARSE_ERROR))
         if (element is JsonArray) {
-            return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "Batch requests are not supported"))
+            return error(null, RpcException(RpcError.INVALID_REQUEST, "Batch requests are not supported"))
         }
         if (element !is JsonObject) {
-            return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "Request must be a JSON object"))
+            return error(null, RpcException(RpcError.INVALID_REQUEST, "Request must be a JSON object"))
         }
 
         val id = element["id"]
         if (id != null && !isValidId(id)) {
-            return Rpc.error(null, RpcException(RpcError.INVALID_REQUEST, "id must be an integer or a string"))
+            return error(null, RpcException(RpcError.INVALID_REQUEST, "id must be an integer or a string"))
         }
         val replyId: JsonElement = id ?: JsonNull
 
         val jsonrpc = element["jsonrpc"]
         if (jsonrpc !is JsonPrimitive || !jsonrpc.isString || jsonrpc.content != "2.0") {
-            return Rpc.error(replyId, RpcException(RpcError.INVALID_REQUEST, "jsonrpc must be \"2.0\""))
+            return error(replyId, RpcException(RpcError.INVALID_REQUEST, "jsonrpc must be \"2.0\""))
         }
         val method = element["method"]
         if (method !is JsonPrimitive || !method.isString) {
-            return Rpc.error(replyId, RpcException(RpcError.INVALID_REQUEST, "method must be a string"))
+            return error(replyId, RpcException(RpcError.INVALID_REQUEST, "method must be a string"))
         }
         // Spec §2: a message without id is a notification. The protocol defines none from the
         // client, so it is ignored without a reply, whatever its method and params.
@@ -167,17 +176,18 @@ class Session internal constructor(
         val params = when (val p = element["params"]) {
             null, JsonNull -> EMPTY
             is JsonObject -> p
-            else -> return Rpc.error(replyId, RpcException(RpcError.INVALID_PARAMS, "params must be an object"))
+            else -> return error(replyId, RpcException(RpcError.INVALID_PARAMS, "params must be an object"))
         }
 
         return try {
-            Rpc.result(replyId, dispatch(method.content, params))
+            val handled = dispatch(method.content, params)
+            Reply(Rpc.result(replyId, handled.result), handled.newSubscription)
         } catch (e: RpcException) {
-            Rpc.error(replyId, e)
+            error(replyId, e)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Rpc.error(replyId, RpcException(RpcError.INTERNAL_ERROR, e.message ?: "Internal error"))
+            error(replyId, RpcException(RpcError.INTERNAL_ERROR, e.message ?: "Internal error"))
         }
     }
 
@@ -188,16 +198,20 @@ class Session internal constructor(
         else -> false
     }
 
-    private suspend fun dispatch(method: String, params: JsonObject): JsonElement {
+    private class Handled(val result: JsonElement, val newSubscription: Subscription? = null)
+
+    private suspend fun dispatch(method: String, params: JsonObject): Handled {
         // Spec §3: *any* request other than hello before a successful hello gets -32003,
         // including unknown methods.
         if (method != "hello" && !helloDone) throw RpcException(RpcError.HELLO_REQUIRED)
         return when (method) {
-            "hello" -> hello(params)
-            "list_sensors" -> ProtocolJson.encodeToJsonElement(ListSensorsResult.serializer(), ListSensorsResult(hub.describe()))
+            "hello" -> Handled(hello(params))
+            "list_sensors" -> Handled(
+                ProtocolJson.encodeToJsonElement(ListSensorsResult.serializer(), ListSensorsResult(hub.describe())),
+            )
             "subscribe" -> subscribe(params)
-            "unsubscribe" -> unsubscribe(params)
-            "get" -> get(params)
+            "unsubscribe" -> Handled(unsubscribe(params))
+            "get" -> Handled(get(params))
             else -> throw RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: $method")
         }
     }
@@ -225,7 +239,7 @@ class Session internal constructor(
         return ProtocolJson.encodeToJsonElement(HelloResult.serializer(), result)
     }
 
-    private fun subscribe(params: JsonObject): JsonElement {
+    private fun subscribe(params: JsonObject): Handled {
         val sourceName = params.requireString("source")
         val spec = SensorCatalog[sourceName]
             ?: throw RpcException(RpcError.UNKNOWN_SOURCE, "Unknown source: $sourceName")
@@ -249,11 +263,13 @@ class Session internal constructor(
         } else {
             null // rate_hz only applies to continuous sources and is ignored otherwise
         }
+        // The subscription is routed (and the source started) now but stays pending, holding
+        // back events, until handleText has queued this response.
         val sub = Subscription(hub.newSubscriptionId(), this, spec, type, rate, minDelta)
         subscriptions[sub.id] = sub
         hub.addSubscription(sub)
         val result = SubscribeResult(sub.id, spec.source, type?.let { listOf(it) } ?: spec.types, spec.mode, rate)
-        return ProtocolJson.encodeToJsonElement(SubscribeResult.serializer(), result)
+        return Handled(ProtocolJson.encodeToJsonElement(SubscribeResult.serializer(), result), sub)
     }
 
     private fun unsubscribe(params: JsonObject): JsonElement {

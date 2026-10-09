@@ -128,6 +128,17 @@ interface SensorSource {
     /** Latest known reading for `get`. May briefly start the sensor. `null` if there is none. */
     suspend fun read(source: String): Reading?
 
+    /**
+     * The current value of a stateful on_change source, sent as the first event of a new
+     * subscription (spec §4.3). Called right after the hub demanded the source, from the
+     * session's thread; must not block or call back into the hub.
+     *
+     * Only return a value that reflects the present state, e.g. one produced by a listener that
+     * is running now. A stale cached value would be reported as current. Return `null` when
+     * unknown; the first reading the source delivers then becomes the initial event.
+     */
+    fun currentReading(source: String): Reading? = null
+
     /** Where readings go; `null` detaches. */
     fun setSink(sink: ReadingSink?)
 }

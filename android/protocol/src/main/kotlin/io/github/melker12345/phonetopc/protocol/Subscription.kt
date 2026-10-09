@@ -10,6 +10,10 @@ import kotlin.math.sqrt
 /**
  * One `subscribe` of one session. Filters (type, rate, min_delta), numbers and forwards
  * readings to its session. All mutable state is guarded by `this`.
+ *
+ * A subscription is created *pending*: it is already routed (so the hardware can start and
+ * nothing is missed) but holds back events until [start], which the session calls after it
+ * queued the `subscribe` response. That guarantees the response goes out first (spec §4.3).
  */
 class Subscription internal constructor(
     val id: String,
@@ -21,38 +25,81 @@ class Subscription internal constructor(
     val rateHz: Double?,
     val minDelta: Double?,
 ) {
+    private enum class State { PENDING, LIVE, INACTIVE }
+
     private val downsampler = rateHz?.let { Downsampler(it) }
     private var seq = 0L
-    private var lastSent: JsonElement? = null
-    private var active = true
+    private var lastSent: Reading? = null
+    private var state = State.PENDING
+
+    /** on_change readings that arrived while pending; only the newest for stateful sources. */
+    private val held = ArrayList<Reading>()
 
     val continuous: Boolean get() = spec.mode == SensorMode.CONTINUOUS
 
     internal fun offer(reading: Reading, deviceId: String) {
         synchronized(this) {
-            if (!active) return
-            if (type != null && reading.type != type) return
-            if (downsampler != null && !downsampler.isDue(reading.tsMonoNs)) return
-            val last = lastSent
-            if (minDelta != null && last != null && distance(last, reading.value) < minDelta) return
-            downsampler?.emitted(reading.tsMonoNs)
-            lastSent = reading.value
-            // seq is consumed even if the session then drops the event under backpressure,
-            // so drops show up as gaps (spec §5).
-            val event = Rpc.notification("event", reading.toJson(deviceId, id, seq++))
-            session.enqueueEvent(event, continuous)
+            when (state) {
+                State.INACTIVE -> Unit
+                // Continuous samples from before the response are simply not part of the stream.
+                State.PENDING -> if (!continuous) {
+                    if (spec.stateful) held.clear()
+                    held += reading
+                }
+                State.LIVE -> send(reading, deviceId)
+            }
         }
+    }
+
+    /**
+     * Go live once the `subscribe` response is queued. For a stateful source the first event
+     * (seq 0) is the current value: the newer of [current] (the source's cached value) and any
+     * reading that arrived while pending. Event-like sources only deliver what was held.
+     */
+    internal fun start(current: Reading?, deviceId: String) {
+        synchronized(this) {
+            if (state != State.PENDING) return
+            state = State.LIVE
+            val initial = if (spec.stateful) {
+                listOfNotNull(current, held.lastOrNull()).maxByOrNull { it.tsMonoNs }?.let { listOf(it) }.orEmpty()
+            } else {
+                held.toList()
+            }
+            held.clear()
+            for (reading in initial) send(reading, deviceId)
+        }
+    }
+
+    private fun send(reading: Reading, deviceId: String) {
+        if (type != null && reading.type != type) return
+        val last = lastSent
+        // The initial value can reach a stateful subscription twice (from the cache and from
+        // the listener that just started), so drop readings that are older than the last one
+        // sent or don't change the state.
+        if (spec.stateful && last != null && (reading.tsMonoNs < last.tsMonoNs || reading.value == last.value)) return
+        if (downsampler != null && !downsampler.isDue(reading.tsMonoNs)) return
+        if (minDelta != null && last != null && distance(last.value, reading.value) < minDelta) return
+        downsampler?.emitted(reading.tsMonoNs)
+        lastSent = reading
+        // seq counts events that passed the filters above. It is consumed even if the session
+        // then drops the event under backpressure, so drops show up as gaps (spec §5).
+        val event = Rpc.notification("event", reading.toJson(deviceId, id, seq++))
+        session.enqueueEvent(event, continuous)
     }
 
     /** After this returns, no further event of this subscription is enqueued. */
     internal fun deactivate() {
-        synchronized(this) { active = false }
+        synchronized(this) {
+            state = State.INACTIVE
+            held.clear()
+        }
     }
 
     companion object {
         /**
-         * Euclidean distance for vectors, absolute difference for numbers.
-         * Other shapes (battery object, bool) are not comparable and always count as changed.
+         * Euclidean distance for vectors (vec3, quat), absolute difference for numbers.
+         * Other shapes (battery object, bool) are not comparable and always count as changed,
+         * so min_delta doesn't apply to them (spec §4.3).
          */
         fun distance(a: JsonElement, b: JsonElement): Double {
             if (a is JsonPrimitive && b is JsonPrimitive && !a.isString && !b.isString) {

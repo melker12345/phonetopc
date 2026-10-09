@@ -264,6 +264,179 @@ class SessionTest {
         assertEquals(Demand(null), src.current["battery"])
     }
 
+    // ---- ordering and initial value (spec §4.3) ----
+
+    private fun light(lx: Float, tsNs: Long) =
+        Reading("light", "illuminance", Values.number(lx), "lx", tsNs / 1_000_000, tsNs)
+
+    private fun battery(level: Int, charging: Boolean, tsNs: Long) =
+        Reading("battery", "state", Values.battery(level, charging), "%", tsNs / 1_000_000, tsNs)
+
+    /** Subscribe and return every frame queued by that request, in order. */
+    private fun Session.subscribeFrames(params: String, id: Int = 1): List<JsonObject> =
+        send("""{"jsonrpc":"2.0","id":$id,"method":"subscribe","params":$params}""")
+
+    @Test fun onChangeSubscriptionStartsWithCurrentValue() {
+        src.known["light"] = light(120f, 1_000)
+        val s = helloSession()
+        val frames = s.subscribeFrames("""{"source":"light"}""")
+        assertEquals(2, frames.size)
+        val sub = frames[0].result()["subscription"]!!.jsonPrimitive.content
+        val ev = events(frames).single()
+        assertEquals(sub, ev["subscription"]!!.jsonPrimitive.content)
+        assertEquals(0L, ev["seq"]!!.jsonPrimitive.long)
+        assertEquals(120.0, ev["value"]!!.jsonPrimitive.double, 0.0)
+        assertEquals(1_000L, ev["ts_mono_ns"]!!.jsonPrimitive.long)
+        // The next change is seq 1.
+        src.emit(light(80f, 2_000))
+        assertEquals(listOf(1L), events(s.drain()).map { it["seq"]!!.jsonPrimitive.long })
+    }
+
+    @Test fun firstReadingIsTheInitialValueWhenNoneIsKnown() {
+        val s = helloSession()
+        val frames = s.subscribeFrames("""{"source":"proximity"}""")
+        assertEquals(1, frames.size)
+        assertNotNull(frames[0]["result"])
+        src.emit(Reading("proximity", "distance", Values.number(5f), "cm", 1, 1_000))
+        val ev = events(s.drain()).single()
+        assertEquals(0L, ev["seq"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun readingDeliveredWhileSubscribingComesAfterResponse() {
+        // The listener reports right when it starts, before the response is queued.
+        src.emitOnStart["light"] = light(42f, 1_000)
+        val s = helloSession()
+        val frames = s.subscribeFrames("""{"source":"light"}""")
+        assertEquals(2, frames.size)
+        assertNotNull(frames[0]["result"])
+        val ev = frames[1]["params"]!!.jsonObject
+        assertEquals(0L, ev["seq"]!!.jsonPrimitive.long)
+        assertEquals(42.0, ev["value"]!!.jsonPrimitive.double, 0.0)
+    }
+
+    @Test fun cachedAndFirstReadingAreNotDuplicated() {
+        // The cache and the starting listener report the same state.
+        src.known["light"] = light(42f, 1_000)
+        src.emitOnStart["light"] = light(42f, 1_000)
+        val s = helloSession()
+        assertEquals(1, events(s.subscribeFrames("""{"source":"light"}""")).size)
+        // A later reading with the same value is not a change either.
+        src.emit(light(42f, 5_000))
+        assertTrue(s.drain().isEmpty())
+        // Nor is an older one.
+        src.emit(light(7f, 500))
+        assertTrue(s.drain().isEmpty())
+        src.emit(light(43f, 6_000))
+        assertEquals(listOf(1L), events(s.drain()).map { it["seq"]!!.jsonPrimitive.long })
+    }
+
+    @Test fun newerHeldReadingWinsOverStaleCache() {
+        src.known["battery"] = battery(80, false, 1_000)
+        src.emitOnStart["battery"] = battery(81, true, 2_000)
+        val s = helloSession()
+        val evs = events(s.subscribeFrames("""{"source":"battery"}"""))
+        assertEquals(1, evs.size)
+        assertEquals(81, evs[0]["value"]!!.jsonObject["level"]!!.jsonPrimitive.int)
+        assertEquals(0L, evs[0]["seq"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun batteryFirstDeliveryAfterStartIsNotRepeated() {
+        // Sticky broadcast read for the initial value, then the receiver delivers the same state.
+        src.known["battery"] = battery(80, false, 1_000)
+        val s = helloSession()
+        assertEquals(1, events(s.subscribeFrames("""{"source":"battery"}""")).size)
+        src.emit(battery(80, false, 2_000))
+        assertTrue(s.drain().isEmpty())
+        src.emit(battery(80, true, 3_000))
+        assertEquals(1, events(s.drain()).size)
+    }
+
+    @Test fun secondSubscriptionAlsoGetsInitialValue() {
+        val s = helloSession()
+        val first = s.subscribe("""{"source":"light"}""")
+        src.known["light"] = light(10f, 1_000)
+        src.emit(light(10f, 1_000))
+        assertEquals(first, events(s.drain()).single()["subscription"]!!.jsonPrimitive.content)
+        val frames = s.subscribeFrames("""{"source":"light"}""", id = 2)
+        val second = frames[0].result()["subscription"]!!.jsonPrimitive.content
+        val ev = events(frames).single()
+        assertEquals(second, ev["subscription"]!!.jsonPrimitive.content)
+        assertEquals(0L, ev["seq"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun uiAndContinuousSendNothingInitially() {
+        src.known["ui"] = Reading("ui", "tile_tap", Values.bool(true), "", 1, 1)
+        src.known["gyro"] = Reading("gyro", "rotation", Values.vec(0f, 0f, 0f), "rad/s", 1, 1)
+        src.emitOnStart["gyro"] = Reading("gyro", "rotation", Values.vec(0f, 0f, 0f), "rad/s", 1, 1)
+        val s = helloSession()
+        assertEquals(1, s.subscribeFrames("""{"source":"ui"}""").size)
+        assertEquals(1, s.subscribeFrames("""{"source":"gyro"}""").size)
+        // Taps are events, not state: equal values are all delivered.
+        src.emit(Reading("ui", "tile_tap", Values.bool(true), "", 2, 2))
+        src.emit(Reading("ui", "tile_tap", Values.bool(true), "", 3, 3))
+        assertEquals(listOf(0L, 1L), events(s.drain()).map { it["seq"]!!.jsonPrimitive.long })
+    }
+
+    @Test fun noInitialValueWhilePaused() {
+        src.known["battery"] = battery(80, false, 1_000)
+        hub.setPaused(true)
+        val s = helloSession()
+        assertEquals(1, s.subscribeFrames("""{"source":"battery"}""").size)
+        hub.setPaused(false)
+        src.emit(battery(80, false, 2_000))
+        assertEquals(0L, events(s.drain()).single()["seq"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun typeFilteredSubscriptionStartsWithMatchingValue() {
+        src.known["light"] = light(3f, 1_000)
+        val s = helloSession()
+        assertEquals(1, events(s.subscribeFrames("""{"source":"light","type":"illuminance"}""")).size)
+    }
+
+    @Test fun responseAlwaysPrecedesEventsUnderConcurrentReadings() {
+        val source = FakeSensorSource()
+        val bigHub = BridgeHub(
+            source, ServerInfo("t", "0"), { DeviceInfo("dev1", "P", platform = "android") },
+            continuousQueueCapacity = 1_000_000, onChangeQueueCapacity = 1_000_000,
+        )
+        val s = bigHub.openSession("t")
+        s.rpc("hello", """{"protocol":"phonetopc/1"}""")
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val emitter = Thread {
+            var t = 0L
+            while (!stop.get()) {
+                Thread.sleep(0, 50_000)
+                t += 1_000_000
+                source.emit(Reading("light", "illuminance", Values.number(t.toDouble()), "lx", t, t))
+                source.emit(Reading("gyro", "rotation", Values.vec(0f, 0f, t.toFloat()), "rad/s", t, t))
+            }
+        }
+        emitter.start()
+        val frames = mutableListOf<JsonObject>()
+        try {
+            for (i in 0 until 50) {
+                val p = if (i % 2 == 0) """{"source":"light"}""" else """{"source":"gyro","rate_hz":200}"""
+                runBlocking { s.handleText("""{"jsonrpc":"2.0","id":$i,"method":"subscribe","params":$p}""") }
+                frames += s.drain()
+            }
+        } finally {
+            stop.set(true)
+            emitter.join()
+        }
+        frames += s.drain()
+        val responseIndex = HashMap<String, Int>()
+        frames.forEachIndexed { i, f ->
+            f["result"]?.jsonObject?.get("subscription")?.let { responseIndex[it.jsonPrimitive.content] = i }
+        }
+        assertEquals(50, responseIndex.size)
+        frames.forEachIndexed { i, f ->
+            val ev = f["params"]?.jsonObject ?: return@forEachIndexed
+            val sub = ev["subscription"]!!.jsonPrimitive.content
+            val at = responseIndex[sub]
+            assertTrue("event of $sub at $i before its response at $at", at != null && at < i)
+        }
+    }
+
     @Test fun eachSubscriptionGetsOwnIdAndSeq() {
         val s = helloSession()
         val a = s.subscribe("""{"source":"accelerometer","rate_hz":200}""")
