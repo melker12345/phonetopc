@@ -1,0 +1,203 @@
+"""Command line: ``python -m phonetopc <command>``.
+
+Commands::
+
+    tail SOURCE [--type T] [--rate HZ] [--min-delta X] [--count N] [--json]
+    get SOURCE [--type T] [--json]
+    list [--json]
+    info [--json]
+
+Every command takes ``--addr`` (default: ``$PHONETOPC_ADDR``, else
+``127.0.0.1:8765``).
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from collections.abc import Sequence
+from typing import Any, TextIO
+
+from ._version import __version__
+from .client import ENV_ADDR, _Connect, connect
+from .errors import Error
+from .models import Event, SensorInfo
+
+
+def _fmt_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:+.4f}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_fmt_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value)
+
+
+def format_event(ev: Event) -> str:
+    """One human-readable line per event: time, seq (padded), source/type, value, unit."""
+    parts = [ev.datetime.astimezone().strftime("%H:%M:%S.%f")[:-3]]
+    if ev.seq is not None:
+        parts.append(f"#{ev.seq:<6}")
+    parts.append(f"{ev.source}/{ev.type}")
+    parts.append(_fmt_value(ev.value) + (f" {ev.unit}" if ev.unit else ""))
+    return " ".join(parts)
+
+
+def event_json(ev: Event) -> str:
+    obj: dict[str, Any] = {
+        "source": ev.source,
+        "type": ev.type,
+        "value": ev.value,
+        "unit": ev.unit,
+        "ts": ev.ts,
+        "ts_mono_ns": ev.ts_mono_ns,
+        "device": ev.device,
+    }
+    if ev.subscription is not None:
+        obj = {"subscription": ev.subscription, "seq": ev.seq, **obj}
+    return json.dumps(obj, separators=(",", ":"))
+
+
+def _hz(value: float | None) -> str:
+    return "?" if value is None else f"{value:g}"
+
+
+def _sensor_line(s: SensorInfo) -> str:
+    rate = ""
+    if s.continuous:
+        rate = f"{_hz(s.min_rate_hz)}-{_hz(s.max_rate_hz)} Hz, default {_hz(s.default_rate_hz)}"
+    avail = "" if s.available else "  [unavailable]"
+    types = ",".join(s.types)
+    return f"{s.source:<22} {types:<12} {s.shape:<7} {s.unit or '-':<6} {s.mode:<10} {rate}{avail}"
+
+
+def _connect(args: argparse.Namespace) -> _Connect:
+    return connect(args.addr, client_name="phonetopc-cli")
+
+
+async def cmd_tail(args: argparse.Namespace, out: TextIO) -> int:
+    status = 0
+    async with _connect(args) as phone:
+        sub = phone.subscribe(
+            args.source,
+            type=args.type,
+            rate_hz=args.rate,
+            min_delta=args.min_delta,
+        )
+        n = 0
+        async with sub as events:
+            if not args.json:
+                rate = f" at {events.rate_hz:g} Hz" if events.rate_hz else ""
+                print(
+                    f"# {phone.device.name}: {args.source} ({events.id}){rate}",
+                    file=sys.stderr,
+                )
+            async for ev in events:
+                out.write((event_json(ev) if args.json else format_event(ev)) + "\n")
+                out.flush()
+                n += 1
+                if args.count and n >= args.count:
+                    break
+        if phone.closed:  # the iterator ended because the connection went away
+            print(f"phonetopc: {phone.closed_reason}", file=sys.stderr)
+            status = 1
+        if events.dropped:
+            print(
+                f"# {events.dropped} events dropped "
+                f"({events.dropped_remote} by the server, {events.dropped_local} locally)",
+                file=sys.stderr,
+            )
+    return status
+
+
+async def cmd_get(args: argparse.Namespace, out: TextIO) -> int:
+    async with _connect(args) as phone:
+        ev = await phone.get(args.source, args.type)
+    out.write((event_json(ev) if args.json else format_event(ev)) + "\n")
+    return 0
+
+
+async def cmd_list(args: argparse.Namespace, out: TextIO) -> int:
+    async with _connect(args) as phone:
+        sensors = await phone.list_sensors()
+    if args.json:
+        out.write(json.dumps([dict(s.raw) for s in sensors], indent=2) + "\n")
+    else:
+        for s in sensors:
+            out.write(_sensor_line(s) + "\n")
+    return 0
+
+
+async def cmd_info(args: argparse.Namespace, out: TextIO) -> int:
+    async with _connect(args) as phone:
+        hello = phone.hello
+    if args.json:
+        out.write(json.dumps(dict(hello.raw), indent=2) + "\n")
+    else:
+        d = hello.device
+        out.write(f"device:       {d.name} ({d.manufacturer or '?'} {d.model or '?'})\n")
+        out.write(f"device id:    {d.id}\n")
+        out.write(f"platform:     {d.platform} {d.platform_version or ''}\n")
+        out.write(f"server:       {hello.server.name} {hello.server.version}\n")
+        out.write(f"protocol:     {hello.protocol}\n")
+        out.write(f"capabilities: {', '.join(hello.capabilities)}\n")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--addr",
+        help=f"host[:port] or ws:// URL (default: ${ENV_ADDR}, else 127.0.0.1:8765)",
+    )
+    common.add_argument("--json", action="store_true", help="machine-readable JSON output")
+
+    parser = argparse.ArgumentParser(
+        prog="python -m phonetopc", description="phonetopc command line client"
+    )
+    parser.add_argument("--version", action="version", version=f"phonetopc {__version__}")
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+    sub.required = True
+
+    p = sub.add_parser("tail", parents=[common], help="print events from a sensor")
+    p.add_argument("source", help="sensor source, e.g. gyro")
+    p.add_argument("--type", help="only this event type")
+    p.add_argument("--rate", type=float, metavar="HZ", help="sample rate (continuous sensors)")
+    p.add_argument("--min-delta", type=float, metavar="X", help="server-side change filter")
+    p.add_argument("-n", "--count", type=int, default=0, help="stop after N events")
+    p.set_defaults(func=cmd_tail)
+
+    p = sub.add_parser("get", parents=[common], help="read the latest value once")
+    p.add_argument("source")
+    p.add_argument("--type")
+    p.set_defaults(func=cmd_get)
+
+    p = sub.add_parser("list", parents=[common], help="list the phone's sensors")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("info", parents=[common], help="show device and server info")
+    p.set_defaults(func=cmd_info)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        status: int = asyncio.run(args.func(args, sys.stdout))
+    except KeyboardInterrupt:
+        return 130
+    except BrokenPipeError:  # e.g. `| head`
+        return 0
+    except (Error, OSError, ValueError) as exc:
+        print(f"phonetopc: {exc}", file=sys.stderr)
+        return 1
+    return status
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

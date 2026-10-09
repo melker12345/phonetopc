@@ -38,6 +38,10 @@ dev = [
     "mypy",
 ]
 
+[project.scripts]
+# Named -py so it never shadows the Go `phonetopc` CLI from pcd/.
+phonetopc-py = "phonetopc.cli:main"
+
 [tool.hatch.version]
 path = "src/phonetopc/_version.py"
 
