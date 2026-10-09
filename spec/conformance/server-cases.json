@@ -1,0 +1,658 @@
+[
+  {
+    "name": "parse_error_bare_word",
+    "description": "Step 1: a bare word is not JSON. Answered with -32700 and id null, even before hello.",
+    "hello": false,
+    "send": {"raw": "nope"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_truncated",
+    "description": "Step 1: a truncated object is not JSON.",
+    "hello": false,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_empty_frame",
+    "description": "Step 1: an empty text frame is not JSON.",
+    "hello": true,
+    "send": {"raw": ""},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_trailing_garbage",
+    "description": "Step 1: a valid request followed by garbage is not strict JSON, so the request inside is not answered; the id is null.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"list_sensors\"} x"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_two_objects",
+    "description": "Step 1: two concatenated objects in one frame are not one JSON value.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"list_sensors\"}{}"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_nan",
+    "description": "Step 1: NaN is not a JSON number (some parsers accept it by default).",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"subscribe\",\"params\":{\"source\":\"gyro\",\"rate_hz\":NaN}}"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_unquoted_string",
+    "description": "Step 1: an unquoted word as a member value is not strict JSON (lenient parsers accept it).",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":list_sensors}"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_single_quotes",
+    "description": "Step 1: single-quoted strings are not strict JSON.",
+    "hello": true,
+    "send": {"raw": "{'jsonrpc':'2.0','id':1,'method':'list_sensors'}"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "parse_error_trailing_comma",
+    "description": "Step 1: a trailing comma is not strict JSON.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"list_sensors\",}"},
+    "expect": {"error": -32700, "name": "parse_error", "id": null}
+  },
+  {
+    "name": "surrounding_whitespace_ok",
+    "description": "Whitespace around the JSON value is allowed by RFC 8259; the request is answered normally.",
+    "hello": true,
+    "send": {"raw": " \n\t{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"list_sensors\"}\r\n "},
+    "expect": {"result": "any", "id": 7}
+  },
+  {
+    "name": "batch_array",
+    "description": "Step 2: a JSON-RPC batch array is not supported (spec section 1); -32600 with id null, nothing inside is executed.",
+    "hello": true,
+    "send": [{"jsonrpc": "2.0", "id": 1, "method": "list_sensors"}],
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "batch_array_before_hello",
+    "description": "Step 2 before step 5: a batch containing a hello is still -32600, not a hello.",
+    "hello": false,
+    "send": [{"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1"}}],
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "empty_array",
+    "description": "Step 2: an empty array is not an object.",
+    "hello": true,
+    "send": [],
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "scalar_number",
+    "description": "Step 2: a JSON number is not an object.",
+    "hello": true,
+    "send": 42,
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "scalar_string",
+    "description": "Step 2: a JSON string is not an object.",
+    "hello": true,
+    "send": "list_sensors",
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "scalar_null",
+    "description": "Step 2: JSON null is not an object.",
+    "hello": false,
+    "send": null,
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "notification_ignored",
+    "description": "Step 3: a well-formed request without id is a notification; none are defined, so it is ignored.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "method": "list_sensors"},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_empty_object",
+    "description": "Step 3: {} has no id member, so it is ignored rather than rejected.",
+    "hello": true,
+    "send": {},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_wrong_jsonrpc",
+    "description": "Step 3 before step 4: no id, so a wrong jsonrpc version is not reported.",
+    "hello": true,
+    "send": {"jsonrpc": "1.0", "method": "list_sensors"},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_method_not_string",
+    "description": "Step 3 before step 4: no id, so a non-string method is not reported.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "method": 5},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_without_method",
+    "description": "Step 3 before step 4: no id and no method is still just ignored.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "params": {"source": "gyro"}},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_bad_params",
+    "description": "Step 3 before step 7: no id, so params that are not an object are not reported.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "method": "subscribe", "params": ["gyro"]},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_before_hello",
+    "description": "Step 3 before step 5: no id, so a missing hello is not reported either.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "method": "no_such_method"},
+    "expect": {"no_reply": true}
+  },
+  {
+    "name": "notification_hello_does_not_count",
+    "description": "A hello sent as a notification is ignored entirely: it does not complete the handshake.",
+    "hello": false,
+    "setup": [
+      {"send": {"jsonrpc": "2.0", "method": "hello", "params": {"protocol": "phonetopc/1"}}, "expect": {"no_reply": true}}
+    ],
+    "send": {"jsonrpc": "2.0", "id": 2, "method": "list_sensors"},
+    "expect": {"error": -32003, "name": "hello_required", "id": 2}
+  },
+  {
+    "name": "id_float_one",
+    "description": "Step 4: 1.0 is not an integer literal; -32600 with id null because the id is invalid.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1.0,\"method\":\"list_sensors\"}"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_exponent",
+    "description": "Step 4: 1e3 has an exponent and is rejected.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":1e3,\"method\":\"list_sensors\"}"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_fraction",
+    "description": "Step 4: a fractional id is rejected.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1.5, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_null",
+    "description": "Step 4: id null is present (so not a notification) but invalid: a deliberate tightening of JSON-RPC.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": null, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_two_pow_53",
+    "description": "Step 4: 2^53 is outside the signed 53-bit range.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":9007199254740992,\"method\":\"list_sensors\"}"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_minus_two_pow_53",
+    "description": "Step 4: -2^53 is outside the signed 53-bit range.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":-9007199254740992,\"method\":\"list_sensors\"}"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_max_safe_integer",
+    "description": "2^53-1 is the largest valid integer id and is echoed exactly.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":\"2.0\",\"id\":9007199254740991,\"method\":\"list_sensors\"}"},
+    "expect": {"result": "any", "id": 9007199254740991}
+  },
+  {
+    "name": "id_boolean",
+    "description": "Step 4: a boolean id is rejected.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": true, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_object",
+    "description": "Step 4: an object id is rejected.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": {"n": 1}, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "id_string_ok",
+    "description": "String ids are echoed as strings, including the empty string.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": "", "method": "list_sensors"},
+    "expect": {"result": "any", "id": ""}
+  },
+  {
+    "name": "id_negative_ok",
+    "description": "Negative integer ids are valid.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": -7, "method": "list_sensors"},
+    "expect": {"result": "any", "id": -7}
+  },
+  {
+    "name": "jsonrpc_wrong_version",
+    "description": "Step 4: jsonrpc \"1.0\" with a valid id is -32600; the valid id is echoed.",
+    "hello": true,
+    "send": {"jsonrpc": "1.0", "id": 3, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 3}
+  },
+  {
+    "name": "jsonrpc_missing",
+    "description": "Step 4: a request without jsonrpc is -32600.",
+    "hello": true,
+    "send": {"id": 3, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 3}
+  },
+  {
+    "name": "jsonrpc_number",
+    "description": "Step 4: jsonrpc must be the string \"2.0\", not the number 2.0.",
+    "hello": true,
+    "send": {"raw": "{\"jsonrpc\":2.0,\"id\":3,\"method\":\"list_sensors\"}"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 3}
+  },
+  {
+    "name": "method_missing",
+    "description": "Step 4: an object with an id but no method is -32600.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 4},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 4}
+  },
+  {
+    "name": "method_not_string",
+    "description": "Step 4: a non-string method is -32600.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 4, "method": 5},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 4}
+  },
+  {
+    "name": "invalid_id_and_jsonrpc",
+    "description": "Step 4: with both id and jsonrpc invalid the id can't be echoed, so it is null.",
+    "hello": true,
+    "send": {"jsonrpc": "1.0", "id": 1.5, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": null}
+  },
+  {
+    "name": "invalid_request_before_hello",
+    "description": "Step 4 before step 5: a wrong jsonrpc version before hello is -32600, not -32003.",
+    "hello": false,
+    "send": {"jsonrpc": "1.0", "id": 5, "method": "list_sensors"},
+    "expect": {"error": -32600, "name": "invalid_request", "id": 5}
+  },
+  {
+    "name": "invalid_id_hello",
+    "description": "Step 4 before step 5: a hello with id null is -32600 and does not complete the handshake.",
+    "hello": false,
+    "setup": [
+      {"send": {"jsonrpc": "2.0", "id": null, "method": "hello", "params": {"protocol": "phonetopc/1"}}, "expect": {"error": -32600, "name": "invalid_request", "id": null}}
+    ],
+    "send": {"jsonrpc": "2.0", "id": 2, "method": "list_sensors"},
+    "expect": {"error": -32003, "name": "hello_required", "id": 2}
+  },
+  {
+    "name": "hello_required",
+    "description": "Step 5: a known method before hello is -32003.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors"},
+    "expect": {"error": -32003, "name": "hello_required", "id": 1}
+  },
+  {
+    "name": "hello_required_before_unknown_method",
+    "description": "Step 5 before step 6: an unknown method before hello is -32003, not -32601.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "no_such_method"},
+    "expect": {"error": -32003, "name": "hello_required", "id": 1}
+  },
+  {
+    "name": "hello_required_before_bad_params",
+    "description": "Step 5 before step 7: params that are not an object, before hello, are -32003, not -32602.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": ["gyro"]},
+    "expect": {"error": -32003, "name": "hello_required", "id": 1}
+  },
+  {
+    "name": "hello_required_before_unknown_source",
+    "description": "Step 5 before step 8: subscribing to an unknown source before hello is -32003.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "nope"}},
+    "expect": {"error": -32003, "name": "hello_required", "id": 1}
+  },
+  {
+    "name": "hello_method_is_case_sensitive",
+    "description": "Step 5: \"HELLO\" is not hello, so it is gated like any other method.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "HELLO", "params": {"protocol": "phonetopc/1"}},
+    "expect": {"error": -32003, "name": "hello_required", "id": 1}
+  },
+  {
+    "name": "hello_ok",
+    "description": "A valid hello as the first request succeeds.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "client": {"name": "conformance", "version": "1"}}},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "hello_repeated",
+    "description": "A second hello after a successful one is allowed.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 2, "method": "hello", "params": {"protocol": "phonetopc/1"}},
+    "expect": {"result": "any", "id": 2}
+  },
+  {
+    "name": "hello_unknown_members_ignored",
+    "description": "Unknown members in hello params (and in client) are ignored.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "future": [1, 2], "client": {"name": "x", "version": "1", "extra": true}}},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "hello_unsupported_protocol",
+    "description": "Step 8: an unsupported protocol is -32004 with data.supported.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/999"}},
+    "expect": {"error": -32004, "name": "unsupported_protocol", "id": 1, "data": {"supported": ["phonetopc/1"]}}
+  },
+  {
+    "name": "failed_hello_does_not_complete_handshake",
+    "description": "After only a failed hello, other methods are still -32003.",
+    "hello": false,
+    "setup": [
+      {"send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/999"}}, "expect": {"error": -32004, "name": "unsupported_protocol", "id": 1}}
+    ],
+    "send": {"jsonrpc": "2.0", "id": 2, "method": "list_sensors"},
+    "expect": {"error": -32003, "name": "hello_required", "id": 2}
+  },
+  {
+    "name": "failed_hello_keeps_earlier_success",
+    "description": "A failed hello does not undo an earlier successful one.",
+    "hello": true,
+    "setup": [
+      {"send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/999"}}, "expect": {"error": -32004, "name": "unsupported_protocol", "id": 1}}
+    ],
+    "send": {"jsonrpc": "2.0", "id": 2, "method": "list_sensors"},
+    "expect": {"result": "any", "id": 2}
+  },
+  {
+    "name": "hello_missing_protocol",
+    "description": "Step 7: hello without protocol is -32602.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"client": {"name": "x", "version": "1"}}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "hello_protocol_not_string",
+    "description": "Step 7 before step 8: a non-string protocol is -32602, not -32004.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": 1}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "hello_params_null",
+    "description": "Step 7: params null is treated as absent, so protocol is missing.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": null},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "hello_params_array",
+    "description": "Step 7: hello is never gated, so array params are -32602.",
+    "hello": false,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": ["phonetopc/1"]},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "unknown_method",
+    "description": "Step 6: an unknown method after hello is -32601.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "no_such_method"},
+    "expect": {"error": -32601, "name": "method_not_found", "id": 1}
+  },
+  {
+    "name": "unknown_method_before_bad_params",
+    "description": "Step 6 before step 7: an unknown method with array params is -32601, not -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "no_such_method", "params": [1]},
+    "expect": {"error": -32601, "name": "method_not_found", "id": 1}
+  },
+  {
+    "name": "method_empty_string",
+    "description": "Step 6: the empty string is a string (so step 4 passes) but not a method.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": ""},
+    "expect": {"error": -32601, "name": "method_not_found", "id": 1}
+  },
+  {
+    "name": "method_event_from_client",
+    "description": "Step 6: event is a server notification, not a method a client can call.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "event", "params": {}},
+    "expect": {"error": -32601, "name": "method_not_found", "id": 1}
+  },
+  {
+    "name": "params_null_is_absent",
+    "description": "Step 7: params null is treated as absent; list_sensors needs none.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors", "params": null},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "params_unknown_members_ignored",
+    "description": "Unknown members in params are ignored.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors", "params": {"verbose": true}},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "params_array",
+    "description": "Step 7: array params are -32602, even for a method that takes none.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors", "params": []},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "params_scalar",
+    "description": "Step 7: scalar params are -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "list_sensors", "params": "all"},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_params_null",
+    "description": "Step 7: subscribe with params null is the same as no params, so source is missing.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": null},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_source_not_string",
+    "description": "Step 7: a non-string source is -32602, not -32001.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": 5}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_rate_zero_on_change",
+    "description": "Step 7: rate_hz must be > 0 for any source, even on_change ones where it is otherwise ignored.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "light", "rate_hz": 0}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_rate_negative",
+    "description": "Step 7: a negative rate_hz is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "gyro", "rate_hz": -10}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_rate_not_number",
+    "description": "Step 7: a string rate_hz is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "gyro", "rate_hz": "100"}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_min_delta_negative",
+    "description": "Step 7: min_delta must be >= 0.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "gyro", "min_delta": -0.5}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_bad_params_before_unknown_source",
+    "description": "Step 7 before step 8: rate_hz 0 on an unknown source is -32602, not -32001.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "nope", "rate_hz": 0}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_bad_params_before_unavailable",
+    "description": "Step 7 before step 8: rate_hz 0 on an unavailable source is -32602, not -32002.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "proximity", "rate_hz": 0}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_unknown_source",
+    "description": "Step 8: a source not in the catalog is -32001.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "nope"}},
+    "expect": {"error": -32001, "name": "unknown_source", "id": 1}
+  },
+  {
+    "name": "subscribe_unknown_source_and_type",
+    "description": "Step 8: a type can only be checked against a known source, so an unknown source wins.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "nope", "type": "bogus"}},
+    "expect": {"error": -32001, "name": "unknown_source", "id": 1}
+  },
+  {
+    "name": "subscribe_unknown_type",
+    "description": "Step 8: a type the source does not have is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "gyro", "type": "bogus"}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_unavailable",
+    "description": "Step 8: a known but unavailable source is -32002.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "proximity"}},
+    "expect": {"error": -32002, "name": "source_unavailable", "id": 1}
+  },
+  {
+    "name": "subscribe_unknown_type_before_unavailable",
+    "description": "Step 8: an unknown type on an unavailable source is -32602 (invalid params are reported before device state).",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "proximity", "type": "bogus"}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "subscribe_on_change_ignores_rate",
+    "description": "A positive rate_hz on an on_change source is accepted and ignored.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "light", "rate_hz": 5}},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "get_ok",
+    "description": "get with a matching type returns a reading.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "battery", "type": "state"}},
+    "expect": {"result": "any", "id": 1}
+  },
+  {
+    "name": "get_type_not_string",
+    "description": "Step 7: a non-string type is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "battery", "type": 5}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "get_missing_source",
+    "description": "Step 7: get without source is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"type": "state"}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "get_unknown_source",
+    "description": "Step 8: get on a source not in the catalog is -32001.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "nope"}},
+    "expect": {"error": -32001, "name": "unknown_source", "id": 1}
+  },
+  {
+    "name": "get_unknown_type",
+    "description": "Step 8: get with a type the source does not have is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "battery", "type": "bogus"}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "get_unavailable",
+    "description": "Step 8: get on an unavailable source is -32002.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "proximity"}},
+    "expect": {"error": -32002, "name": "source_unavailable", "id": 1}
+  },
+  {
+    "name": "get_no_value",
+    "description": "Step 8: get on a source with no value yet (ui before any tap) is -32006.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "ui"}},
+    "expect": {"error": -32006, "name": "no_value", "id": 1}
+  },
+  {
+    "name": "unsubscribe_missing_subscription",
+    "description": "Step 7: unsubscribe without subscription is -32602.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "unsubscribe", "params": {}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "unsubscribe_subscription_not_string",
+    "description": "Step 7: a non-string subscription is -32602, not -32005.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "unsubscribe", "params": {"subscription": 1}},
+    "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+  },
+  {
+    "name": "unsubscribe_unknown",
+    "description": "Step 8: a subscription id that is not in this session is -32005.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "unsubscribe", "params": {"subscription": "s-nope"}},
+    "expect": {"error": -32005, "name": "unknown_subscription", "id": 1}
+  },
+  {
+    "name": "binary_frame",
+    "description": "Binary frames are reserved: the server closes with 1003.",
+    "hello": true,
+    "send": {"binary": "AAEC"},
+    "expect": {"close": 1003}
+  },
+  {
+    "name": "binary_frame_before_hello",
+    "description": "A binary frame closes with 1003 even before hello, whatever its content.",
+    "hello": false,
+    "send": {"binary": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjEsIm1ldGhvZCI6ImhlbGxvIn0="},
+    "expect": {"close": 1003}
+  }
+]
