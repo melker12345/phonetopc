@@ -138,27 +138,18 @@ Goal: modern, clean and simple. The app should be opened rarely, and when it is,
 
 ### 4.1 Pairing
 
-Pairing happens once per phone/PC pair. Running `phonetopc pair` on the PC opens a short-lived pairing listener and offers both paths at once. The user picks whichever works.
+Pairing happens once per phone/PC pair. Running `phonetopc pair` on the PC opens a short-lived pairing listener and offers both ways at once; the user picks one on the phone. The exact protocol is in [`spec/SECURITY.md`](spec/SECURITY.md) §4.
 
-**Path A, network discovery (default when mDNS works):**
-1. The phone's *Find on network* list shows PCs currently in pairing mode, found via mDNS (`_phonetopc-pair._tcp`).
-2. The user taps their PC. The phone connects, and the two sides run a password-authenticated key exchange (SPAKE2) over a 6-digit code shown on the PC that the user types on the phone. This avoids having to trust an unauthenticated mDNS answer.
-3. Both sides exchange long-term public keys and pin them.
-
-**Path B, QR code (manual fallback; works when mDNS is blocked):**
-1. The PC terminal prints a QR code (rendered in the terminal, or as a PNG if requested) containing: protocol version, the PC's LAN address(es) and pairing port, the PC's public key fingerprint, and a one-time pairing secret.
-2. The phone scans it, connects directly to that address, and both sides prove possession of the one-time secret. No mDNS involved.
-3. Both sides exchange long-term public keys and pin them. The phone sends its own address, port and certificate fingerprint, so the PC can reach it later without discovery.
-4. Both screens show the same short confirmation code. This guards against a QR code photographed off a shared screen.
-
-After pairing, both paths end in the same state. The PC remembers the phone's last known address, so if mDNS doesn't work later either, reconnection still works. If the phone's IP changes on such a network, the user can re-scan with `phonetopc pair --refresh`, which only updates the address and keeps the existing keys.
+- **QR code (works without mDNS):** the PC prints a QR code with its addresses, its key pin and a one-time secret. The phone scans it, connects to the PC with that pin, and proves it saw the secret. The PC user confirms the phone's name.
+- **Network discovery and a 6-digit code:** the phone lists PCs in pairing mode (`_phonetopc-pair._tcp`). Both screens then show a 6-digit code from a committed numeric comparison (as in Bluetooth), and the user confirms on both that they match. This replaces the earlier idea of typing a code into a SPAKE2 exchange: it is as strong against a man in the middle, needs only SHA-256, and is quicker.
+- Both ways end with the phone issuing a token to the PC. The PC stores `{phone id, pin, token, addresses}` in `~/.config/phonetopc/devices.json`; the phone shows the PC under *Paired devices*, where it can be revoked.
 
 ### 4.2 Transport security
 
-- The phone serves `wss://` with a **self-signed certificate**. Its fingerprint is pinned on the PC at pairing.
-- The client authenticates with a per-client token issued at pairing (`Authorization: Bearer …` on the WS upgrade). Each token is individually revocable from the phone UI.
+- The phone serves `wss://` with a **self-signed certificate**. The PC pins its public key (SPKI SHA-256) at pairing; no CA, expiry or host name checks.
+- The client sends its per-PC token **inside `hello`** rather than as an HTTP header, because some WebSocket clients (browsers) can't set headers. Each token can be revoked from the phone, which also closes that PC's open sessions.
 - **Why not the Noise protocol or a custom handshake:** every language already has TLS with WebSockets. Noise would force each direct client to implement it, which breaks the any-language goal. `phonetopcd` hides pinning from local clients anyway.
-- Before pairing, the server answers nothing except the pairing endpoint.
+- Unencrypted dev mode remains as an explicit, off-by-default developer setting.
 
 ### 4.3 High-value events, such as unlock: signed challenge-response
 
