@@ -2,8 +2,8 @@
 
 The phone side of phonetopc: a foreground service that serves the phone's sensors over
 WebSocket JSON-RPC, as specified in [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)
-(`phonetopc/1`, draft 2) and [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
-tokens, milestone M2).
+(`phonetopc/1`, draft 3), [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
+tokens, milestone M2) and [`../spec/APPROVAL.md`](../spec/APPROVAL.md) (fingerprint approval).
 
 The server runs in one of two modes, on the same port (default 8765):
 
@@ -16,10 +16,10 @@ The server runs in one of two modes, on the same port (default 8765):
 
 | Module | What it is |
 |---|---|
-| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. Also the security core (`protocol.security`): SPKI pins, base64url, the pairing code, constant-time compare, tokens, the failed-hello rate limiter. No Android imports. |
+| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. Also the security core (`protocol.security`): SPKI pins, base64url, the pairing code, constant-time compare, tokens, the failed-hello rate limiter. And `request_approval` (`protocol.approval`): param rules, the signed message, one approval at a time, the timeout, all behind an `Approver` interface. No Android imports. |
 | `server/` | Pure Kotlin/JVM. Ktor (CIO) WebSocket server on `/v1/ws`, and the TLS frontend for secure mode. |
 | `pairing/` | Pure Kotlin/JVM. The phone's side of pairing: QR payload parser, pinned `wss://` WebSocket client, the pairing state machine. |
-| `app/` | The Android app: sensors, foreground service, Keystore key, paired PCs, mDNS, QR scanner, Compose UI. |
+| `app/` | The Android app: sensors, foreground service, Keystore keys (TLS and approval), paired PCs, mDNS, QR scanner, approval notification and biometric prompt, Compose UI. |
 
 ## Requirements
 
@@ -36,7 +36,9 @@ API 37, so `gradle/libs.versions.toml` pins the latest versions that work with 3
 ```sh
 cd android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # also runs the :protocol, :server and :pairing JVM tests
+./gradlew testDebugUnitTest    # also runs the :protocol, :server and :pairing JVM tests,
+                               # including spec/conformance (server cases, secure server
+                               # cases, pairing and approval vectors)
 ./gradlew lint
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -66,6 +68,42 @@ Turned-off sensors are reported as `available: false`.
 The notification (`phonetopc · N clients connected`) has **Pause** (clients stay connected,
 sensors stop) and **Stop**. Add the **PC button** Quick Settings tile to send
 `ui`/`tile_tap` events.
+
+## Fingerprint approval
+
+A paired PC can ask you to confirm something (e.g. `examples/approve.py`, or the client
+libraries' `request_approval`). The phone answers with a signature from a key that only
+works right after a fingerprint check, and the PC verifies it itself (APPROVAL.md).
+
+- **When it's offered.** Secure mode only (developer mode has no such method), and only while
+  the phone has a strong (Class 3) biometric with at least one fingerprint enrolled. Then
+  `hello` lists capability `approval` and returns `approval: {key, pin}`.
+  **Settings → Approvals** shows whether approval is available (with a shortcut to enroll a
+  fingerprint) and the approval key's pin.
+- **What you see.** A heads-up notification on the *Approval requests* channel:
+  "*arch-desktop* asks for approval", the reason as text, and **Approve** / **Deny**.
+  Approve (or tapping it) opens the fingerprint prompt: the PC's name as title, the reason as
+  subtitle, and a **Deny** button. Deny in the notification answers at once. When the request
+  ends (answered, timed out, the PC disconnected), the notification and prompt disappear.
+- **App in the foreground:** the prompt opens directly, without a notification.
+- **Notifications blocked** (no POST_NOTIFICATIONS on Android 13+, or the channel turned off):
+  requests still work while phonetopc is open; otherwise they are answered `unavailable` at
+  once, because nobody could see them. Settings → Approvals says so.
+- **Locked phone.** The lock screen only shows "A PC asks for approval" (the reason is hidden
+  unless you allow sensitive notifications there). Tapping it asks you to unlock first, then
+  shows the prompt, so a locked phone takes two touches. The prompt deliberately doesn't use
+  `setShowWhenLocked`: whoever holds a locked phone can't read the request or reach the
+  prompt, and a security prompt over the keyguard would be a new surface for no gain.
+- **Outcomes.** Deny → `denied`; back, tapping outside or dismissing the notification →
+  `cancelled`; the request's `timeout_ms` (or the sensor's own timeout) → `timeout`; too many
+  wrong fingers → `lockout`; no usable biometric or no key → `unavailable`; another request
+  pending → `busy`. A wrong finger just lets you try again.
+- **The key.** A separate ECDSA P-256 Keystore key (never the TLS key), usable once per
+  strong-biometric check and with no PIN/pattern fallback, in StrongBox where the phone has
+  it. Adding or removing a fingerprint invalidates it; the phone then creates a new one with a
+  new pin, and the PC refuses approvals until you accept the new key there
+  (`phonetopc approval-key --accept`). Before a signature leaves the phone it is checked
+  against the key that session's `hello` announced.
 
 ## Developer mode (plain ws://)
 
@@ -120,13 +158,21 @@ Don't rely on that: many networks block multicast.
 - **Tokens.** Pairing ends with the phone issuing a 32-byte random token. The phone stores only
   its SHA-256 (DataStore, excluded from backups); `hello` tokens are hashed and compared in
   constant time.
-- **hello.** In secure mode a missing, unknown or revoked token gets `-32010` and the
-  connection is closed with 1008. A connection that hasn't completed `hello` within 10 s is
-  closed with 1008. More than 5 failed `hello`s per minute from one address are refused without
-  checking the token.
-- **Pairing.** The phone is the client of the PC's pairing listener. QR pairing pins the PC key
-  from the code before sending anything; network pairing uses the committed 6-digit code of
-  SECURITY.md §4.3. The PC is stored only after it answered `pair_finish`.
+- **hello.** In secure mode `hello` checks the params shape (`-32602`), then the token, then
+  the protocol version (`-32004`), so a client without a valid token only ever learns
+  `-32010`. A missing, malformed, unknown or revoked token gets `-32010` and the connection is
+  closed with 1008; so does any failed `hello` after a successful one. A connection that hasn't
+  completed `hello` within 10 s is closed with 1008. After 5 failed `hello`s within a minute,
+  that address is closed with 1013 (at connect, or at `hello` without an answer), even with a
+  valid token.
+- **Pairing.** The phone is the client of the PC's pairing listener (default port 8766 on the
+  PC; the phone uses whatever port the QR code or mDNS says). QR pairing pins the PC key from
+  the code before sending anything; a listed address whose pin differs is skipped like an
+  unreachable one. Network pairing uses the committed 6-digit code of SECURITY.md §4.3; if the
+  PC's revealed nonce doesn't match its commitment, the phone sends `match: false` and stops.
+  The phone waits 5.5 minutes for the PC user's answers. The PC is stored only after it
+  answered `pair_finish`. Re-pairing a known PC replaces its token and closes the sessions
+  that used the old one with 1008.
 - **Camera.** QR codes are decoded with ZXing on CameraX: no Google Play Services or ML Kit, so
   scanning works on de-Googled phones. The permission is asked for on the scan screen, with
   an explanation first.
