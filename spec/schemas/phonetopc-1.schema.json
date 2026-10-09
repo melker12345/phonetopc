@@ -18,7 +18,7 @@
         "jsonrpc": { "const": "2.0" },
         "id": { "$ref": "#/$defs/id" },
         "method": { "enum": ["hello", "list_sensors", "subscribe", "unsubscribe", "get"] },
-        "params": { "type": "object" }
+        "params": { "type": ["object", "null"] }
       },
       "allOf": [
         { "if": { "properties": { "method": { "const": "hello" } } },
@@ -128,10 +128,16 @@
       "properties": {
         "subscription": { "type": "string" },
         "source": { "type": "string" },
-        "types": { "type": "array", "items": { "type": "string" } },
+        "types": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "mode": { "enum": ["continuous", "on_change"] },
-        "rate_hz": { "type": "number" }
-      }
+        "rate_hz": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "allOf": [
+        { "if": { "required": ["mode"], "properties": { "mode": { "const": "continuous" } } },
+          "then": { "required": ["rate_hz"] } },
+        { "if": { "required": ["mode"], "properties": { "mode": { "const": "on_change" } } },
+          "then": { "not": { "required": ["rate_hz"] } } }
+      ]
     },
 
     "unsubscribeResult": { "type": "object", "maxProperties": 0 },

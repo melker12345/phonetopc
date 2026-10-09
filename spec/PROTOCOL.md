@@ -27,11 +27,12 @@ All messages follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 - **Requests** (client → server) have `jsonrpc`, `id`, `method`, and optional `params` (object).
 - **Responses** (server → client) have `jsonrpc`, `id`, and exactly one of `result` or `error`.
 - **Notifications** (server → client) have `jsonrpc`, `method`, `params`, and no `id`. This draft defines one: `event`.
-- A message from the client **without** `id` is a JSON-RPC notification. This draft defines no client notifications, so servers MUST ignore them and MUST NOT reply. (A client that wants an answer sends an `id`.)
+- A JSON object from the client **without** an `id` member is a JSON-RPC notification, even if it is otherwise malformed. This draft defines no client notifications, so servers MUST ignore them and MUST NOT reply. (A client that wants an answer sends an `id`.)
 - `params` MUST be an object if present. An explicit `"params": null` is treated as absent. Any other type gets `-32602`.
 - Frames that are not strict JSON (e.g. bare words, trailing garbage) get `-32700` with `"id": null`. A JSON value that isn't an object gets `-32600` with `"id": null`.
+- **Order of checks.** A server processes each frame in this order and answers with the first error that applies: (1) not strict JSON → `-32700`; (2) not a JSON object (array, scalar) → `-32600`; (3) no `id` member → ignore silently; (4) invalid `id`, `jsonrpc` ≠ `"2.0"` or `method` not a string → `-32600`; (5) no successful `hello` yet and `method` ≠ `hello` → `-32003`; (6) unknown method → `-32601`; (7) invalid `params` → `-32602`; (8) method-specific errors.
 - Clients MUST ignore unknown fields. Servers MUST ignore unknown fields in `params`.
-- `id` MUST be an integer or a string. Servers SHOULD reject other forms (fractions, exponents, `null`) with `-32600`. Responses can arrive interleaved with events; clients correlate by `id`.
+- `id` MUST be an integer that fits in a signed 53-bit range (so every JSON library represents it exactly) or a string. Servers SHOULD reject other forms (fractions, exponents, out-of-range integers, `null`) with `-32600`. Rejecting `null` is a deliberate tightening of JSON-RPC 2.0, which merely discourages it. Responses can arrive interleaved with events; clients correlate by `id`.
 
 ## 3. Session lifecycle
 
@@ -90,12 +91,12 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 |---|---|---|
 | `source` | yes | Sensor source name (§6) |
 | `type` | no | Restrict to one event type. Omitted means all types of the source |
-| `rate_hz` | no | Must be > 0 (else `-32602`). Continuous sensors: defaults to `default_rate_hz`, clamped to `[min_rate_hz, max_rate_hz]`, and the result reports the effective rate. `on_change` sensors: ignored, and the result has no `rate_hz` |
+| `rate_hz` | no | Must be > 0 for any source (else `-32602`). Continuous sensors: defaults to `default_rate_hz`, clamped to `[min_rate_hz, max_rate_hz]`, and the result reports the effective rate. `on_change` sensors: ignored, and the result has no `rate_hz` |
 | `min_delta` | no | Must be ≥ 0. Suppress events whose value differs from the last *sent* value by less than this: absolute difference for `number`, Euclidean distance for `vec3`/`quat`. Ignored for `bool` and `object` values |
 
 The result has `subscription`, `source`, `types` (the types this subscription delivers), `mode` (copied from `list_sensors`), and `rate_hz` for continuous sensors.
 
-- **Ordering:** the server MUST send the `subscribe` response before the first `event` of that subscription. Clients MAY still buffer briefly in case of reordering by intermediaries, but a conforming server never does it.
+- **Ordering:** the server MUST send the `subscribe` response before the first `event` of that subscription. Clients MAY discard events for subscription ids they don't know.
 - **Initial value:** for an `on_change` source the server SHOULD send the current value as the first event (seq 0) right after the response, if one is known, so clients don't wait for a change to learn the state. Event-like sources with no state (`ui`) send nothing until something happens.
 
 - The server MAY deliver events at a slightly different rate than requested; Android treats rates as hints.
@@ -109,7 +110,7 @@ The result has `subscription`, `source`, `types` (the types this subscription de
 {"jsonrpc":"2.0","id":4,"result":{}}
 ```
 
-Error `-32005` if the subscription doesn't exist in this session. Events for the subscription MAY still arrive between the request and the response; clients SHOULD discard them. After the response, no more events with that id are sent.
+Error `-32005` if the subscription doesn't exist in this session. Events for the subscription MAY still arrive between the request and the response; clients SHOULD discard them. After the response (success or `-32005`), no more events with that id are sent.
 
 ### 4.5 `get`
 
@@ -135,7 +136,7 @@ One-shot read of the latest value. Params: `source` (required) and `type` (optio
 | Field | Type | Meaning |
 |---|---|---|
 | `subscription` | string | Subscription that produced this event |
-| `seq` | integer | Starts at 0 per subscription. Assigned to every event that passes the subscription's own filters (rate downsampling, `type`, `min_delta`); filtered-out readings don't consume a number. Events then dropped for backpressure keep their number, so **a gap means events were dropped** |
+| `seq` | integer | Starts at 0 per subscription. Assigned to every event that passes the subscription's own filters (rate downsampling, `type`, `min_delta`, and for `on_change` sources suppression of readings that repeat or predate the last sent value); filtered-out readings don't consume a number. Events then dropped for backpressure keep their number, so **a gap means events were dropped** |
 | `source`, `type` | string | See §6 |
 | `value` | per §6 | |
 | `unit` | string | See §6. `""` when unitless |
