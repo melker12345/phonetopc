@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "AmbiguousDevice",
     "ConnectionClosed",
+    "CredentialStoreError",
     "Error",
     "HelloRequired",
     "InternalError",
@@ -18,12 +20,16 @@ __all__ = [
     "InvalidRequest",
     "MethodNotFound",
     "NoValue",
+    "NotPaired",
     "ParseError",
+    "PhoneUnreachable",
     "PhonetopcError",
+    "PinMismatch",
     "ProtocolError",
     "RequestTimeout",
     "SourceUnavailable",
     "SubscriptionOverflow",
+    "Unauthorized",
     "UnknownSource",
     "UnknownSubscription",
     "UnsupportedProtocol",
@@ -65,6 +71,52 @@ class SubscriptionOverflow(Error):
     so instead of silently dropping, the client ends the subscription with this
     error. Consume events faster or raise ``queue_size``.
     """
+
+
+# -- secure connections (SECURITY.md) ------------------------------------------
+
+
+class PinMismatch(Error):
+    """The phone's TLS key doesn't match the pin stored when it was paired.
+
+    Either the phone app was reinstalled or reset (new key: pair again), or
+    something else is answering at that address. Nothing was sent to it.
+    """
+
+    def __init__(self, device: str, address: str, expected: str, actual: str) -> None:
+        super().__init__(
+            f"phone identity changed: the phone at {address} is not the {device!r} you paired "
+            f"(expected key {expected}, got {actual}). If you reinstalled or reset the phone "
+            "app, re-pair with `phonetopc pair`; otherwise something else is answering at that "
+            "address. Nothing was sent to it."
+        )
+        self.device = device
+        self.address = address
+        self.expected = expected
+        self.actual = actual
+
+
+class NotPaired(Error, LookupError):
+    """No pairing matches what was asked for (or there is none at all)."""
+
+
+class AmbiguousDevice(Error, LookupError):
+    """Several paired phones could be meant; pass ``device=``."""
+
+
+class CredentialStoreError(Error):
+    """``devices.json`` is unreadable, malformed or of an unknown version."""
+
+
+class PhoneUnreachable(Error, OSError):
+    """A paired phone couldn't be reached at any known address.
+
+    ``attempts`` lists ``(address, error)`` for every address that was tried.
+    """
+
+    def __init__(self, message: str, attempts: list[tuple[str, BaseException]]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
 
 
 class PhonetopcError(Error):
@@ -179,6 +231,24 @@ class NoValue(PhonetopcError):
     NAME = "no_value"
 
 
+class Unauthorized(PhonetopcError):
+    """Secure mode: the phone doesn't accept this PC's token (``-32010``).
+
+    The PC was revoked on the phone, or the phone forgot the pairing. The
+    phone closes the connection right after this error.
+    """
+
+    CODE = -32010
+    NAME = "unauthorized"
+
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
+        super().__init__(code, message, data)
+        self.args = (
+            f"{message} (code {code}): this PC was revoked on the phone, or the phone no "
+            "longer knows it. Run `phonetopc pair` to pair again.",
+        )
+
+
 _BY_CODE: dict[int, type[PhonetopcError]] = {}
 _BY_NAME: dict[str, type[PhonetopcError]] = {}
 for _cls in (
@@ -193,6 +263,7 @@ for _cls in (
     UnsupportedProtocol,
     UnknownSubscription,
     NoValue,
+    Unauthorized,
 ):
     assert _cls.CODE is not None and _cls.NAME is not None
     _BY_CODE[_cls.CODE] = _cls
