@@ -17,6 +17,7 @@ enum class RpcError(val code: Int, val errorName: String, val defaultMessage: St
     UNSUPPORTED_PROTOCOL(-32004, "unsupported_protocol", "Unsupported protocol"),
     UNKNOWN_SUBSCRIPTION(-32005, "unknown_subscription", "Unknown subscription"),
     NO_VALUE(-32006, "no_value", "No value yet"),
+    UNAUTHORIZED(-32010, "unauthorized", "Unauthorized"),
 }
 
 class RpcException(

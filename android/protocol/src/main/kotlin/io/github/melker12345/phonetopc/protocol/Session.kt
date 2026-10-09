@@ -41,8 +41,10 @@ class Session internal constructor(
     private val hub: BridgeHub,
     val sessionId: Long,
     val remote: String,
+    /** Source address, for rate-limiting failed hellos in secure mode. */
+    val remoteHost: String = remote,
 ) {
-    private class Out(val text: String, val kind: Int)
+    private class Out(val text: String, val kind: Int, val close: CloseRequest? = null)
 
     private val queue = Channel<Out>(Channel.UNLIMITED)
     private val pendingContinuous = AtomicInteger()
@@ -58,6 +60,16 @@ class Session internal constructor(
     @Volatile var client: ClientInfo? = null
         private set
 
+    /** Secure mode: the paired PC this session authenticated as. */
+    @Volatile var pc: PcInfo? = null
+        private set
+
+    /**
+     * Set when the session must end (failed auth, revoked): later frames are ignored and the
+     * close is queued behind the responses already queued.
+     */
+    @Volatile private var ending = false
+
     /** Continuous events dropped because the client could not keep up. */
     val droppedEvents = AtomicLong()
 
@@ -69,13 +81,21 @@ class Session internal constructor(
     /** Next frame to send, suspending until there is one. `null` once the session is closed. */
     suspend fun receiveOutgoing(): String? {
         val out = queue.receiveCatching().getOrNull() ?: return null
-        markSent(out)
-        return out.text
+        return deliver(out)
     }
 
     /** Non-suspending variant, mainly for tests. */
     fun tryReceiveOutgoing(): String? {
         val out = queue.tryReceive().getOrNull() ?: return null
+        return deliver(out)
+    }
+
+    /** A close marker means everything before it has been handed out: now ask for the close. */
+    private fun deliver(out: Out): String? {
+        out.close?.let {
+            requestClose(it)
+            return null
+        }
         markSent(out)
         return out.text
     }
@@ -89,11 +109,28 @@ class Session internal constructor(
 
     /** Handle one inbound text frame; the response (if any) is queued for sending. */
     suspend fun handleText(text: String) {
+        if (ending) return
         val reply = respond(text) ?: return
         queue.trySend(Out(reply.text, KIND_RESPONSE))
+        reply.closeAfter?.let { closeAfterQueued(it) }
         // Spec §4.3: a new subscription's events (including its initial value) may only be
         // queued once its subscribe response is.
         reply.newSubscription?.let { hub.startSubscription(it) }
+    }
+
+    /**
+     * Close once everything queued so far has been sent, so e.g. the -32010 error reaches the
+     * client before the 1008 close (SECURITY.md §5).
+     */
+    private fun closeAfterQueued(request: CloseRequest) {
+        ending = true
+        if (queue.trySend(Out("", KIND_RESPONSE, request)).isFailure) requestClose(request)
+    }
+
+    /** The PC was revoked: close now with 1008 (SECURITY.md §5). */
+    internal fun revoke() {
+        ending = true
+        requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "pairing revoked"))
     }
 
     /** Ask the transport to close the connection. First request wins. */
@@ -135,7 +172,11 @@ class Session internal constructor(
     // ---- JSON-RPC framing ----
 
     /** A response to queue, plus the subscription it created, which may start once it's queued. */
-    internal class Reply(val text: String, val newSubscription: Subscription? = null)
+    internal class Reply(
+        val text: String,
+        val newSubscription: Subscription? = null,
+        val closeAfter: CloseRequest? = null,
+    )
 
     /**
      * Checks a frame in the order of spec §2: strict JSON, object, id present (else ignored),
@@ -192,7 +233,8 @@ class Session internal constructor(
             val handled = dispatch(method.content, params)
             Reply(Rpc.result(replyId, handled.result), handled.newSubscription)
         } catch (e: RpcException) {
-            error(replyId, e)
+            val close = if (e.error == RpcError.UNAUTHORIZED) CloseRequest(CloseCodes.POLICY_VIOLATION, "unauthorized") else null
+            Reply(Rpc.error(replyId, e), closeAfter = close)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -237,18 +279,43 @@ class Session internal constructor(
                 buildJsonObject { put("supported", buildJsonArray { SUPPORTED_PROTOCOLS.forEach { add(JsonPrimitive(it)) } }) },
             )
         }
+        val pcInfo = hub.security?.let { authenticate(it, params) }
         client = (params["client"] as? JsonObject)?.let {
             ClientInfo(it.lenientString("name"), it.lenientString("version"))
         }
+        if (pcInfo != null) pc = pcInfo
         helloDone = true
         hub.sessionChanged()
+        pcInfo?.let { hub.security?.onAuthenticated?.invoke(it) }
         val result = HelloResult(
             protocol = PROTOCOL_VERSION,
             server = hub.serverInfo,
             device = hub.deviceInfo(),
             capabilities = listOf("events", "get"),
+            pc = pcInfo,
         )
         return ProtocolJson.encodeToJsonElement(HelloResult.serializer(), result)
+    }
+
+    /**
+     * SECURITY.md §5. A missing, malformed, unknown or revoked token is -32010, and the caller
+     * closes with 1008. Addresses with too many recent failures are refused without a lookup.
+     */
+    private fun authenticate(security: SecureAccess, params: JsonObject): PcInfo {
+        if (security.limiter.isBlocked(remoteHost)) {
+            throw RpcException(RpcError.UNAUTHORIZED, "Too many failed attempts; try again later")
+        }
+        val token = ((params["auth"] as? JsonObject)?.get("token") as? JsonPrimitive)
+            ?.takeIf { it.isString }?.content
+        val found = token?.takeIf { it.isNotEmpty() }?.let(security.authenticate)
+        if (found == null) {
+            security.limiter.recordFailure(remoteHost)
+            throw RpcException(
+                RpcError.UNAUTHORIZED,
+                if (token == null) "hello needs auth.token; pair this PC first" else "Unknown or revoked token",
+            )
+        }
+        return found
     }
 
     private fun subscribe(params: JsonObject): Handled {
@@ -320,6 +387,7 @@ class Session internal constructor(
         clientName = client?.name,
         clientVersion = client?.version,
         helloDone = helloDone,
+        pc = pc,
         subscriptions = subscriptions.values
             .sortedBy { it.id }
             .map { SubscriptionSnapshot(it.id, it.spec.source, it.type, it.rateHz) },

@@ -1,5 +1,6 @@
 package io.github.melker12345.phonetopc.protocol
 
+import io.github.melker12345.phonetopc.protocol.security.HelloRateLimiter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +21,21 @@ data class ClientSnapshot(
     val clientVersion: String?,
     val helloDone: Boolean,
     val subscriptions: List<SubscriptionSnapshot>,
+    /** Secure mode: the paired PC this session authenticated as. */
+    val pc: PcInfo? = null,
+)
+
+/**
+ * Secure mode (SECURITY.md §5): `hello` must carry a token of a paired PC.
+ *
+ * @param authenticate maps a token to the PC it was issued to, or `null`. Must compare in
+ *   constant time (see [io.github.melker12345.phonetopc.protocol.security.TokenHash]).
+ * @param onAuthenticated called after every successful hello, e.g. to record "last connected".
+ */
+class SecureAccess(
+    val authenticate: (token: String) -> PcInfo?,
+    val limiter: HelloRateLimiter = HelloRateLimiter(),
+    val onAuthenticated: (PcInfo) -> Unit = {},
 )
 
 /**
@@ -35,6 +51,8 @@ class BridgeHub(
     private val deviceInfoProvider: () -> DeviceInfo,
     val continuousQueueCapacity: Int = 512,
     val onChangeQueueCapacity: Int = 1024,
+    /** `null` is dev mode: no authentication, draft-1 behaviour. */
+    val security: SecureAccess? = null,
 ) : ReadingSink {
     private val lock = Any()
     private val sessions = LinkedHashMap<Long, Session>()
@@ -66,13 +84,27 @@ class BridgeHub(
 
     fun deviceInfo(): DeviceInfo = deviceInfoProvider()
 
-    fun openSession(remote: String): Session {
-        val session = Session(this, nextSessionId.getAndIncrement(), remote)
+    /**
+     * @param remote shown in the UI, e.g. `192.168.1.40:51234`.
+     * @param remoteHost the source address failed hellos are rate-limited by.
+     */
+    fun openSession(remote: String, remoteHost: String = remote): Session {
+        val session = Session(this, nextSessionId.getAndIncrement(), remote, remoteHost)
         synchronized(lock) {
             sessions[session.sessionId] = session
             publishClientsLocked()
         }
         return session
+    }
+
+    /**
+     * Closes, with 1008, every session that authenticated as a PC matching [predicate], e.g.
+     * one the user just revoked (SECURITY.md §5). Returns how many were closed.
+     */
+    fun disconnectPcs(predicate: (PcInfo) -> Boolean): Int {
+        val victims = synchronized(lock) { sessions.values.filter { s -> s.pc?.let(predicate) == true } }
+        victims.forEach { it.revoke() }
+        return victims.size
     }
 
     /** Every catalog source, with availability and rates from the platform. */

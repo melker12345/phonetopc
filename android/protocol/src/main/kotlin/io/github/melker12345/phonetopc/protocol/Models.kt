@@ -32,6 +32,10 @@ data class DeviceInfo(
     @SerialName("platform_version") val platformVersion: String? = null,
 )
 
+/** A paired PC as the server recognised it from its token (SECURITY.md §5). */
+@Serializable
+data class PcInfo(val id: String, val name: String)
+
 @Serializable
 internal data class HelloParams(val protocol: String, val client: ClientInfo? = null)
 
@@ -41,6 +45,8 @@ internal data class HelloResult(
     val server: ServerInfo,
     val device: DeviceInfo,
     val capabilities: List<String>,
+    /** Secure mode only: which pairing the token belongs to. */
+    val pc: PcInfo? = null,
 )
 
 @Serializable
