@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutoStartTest {
-    private val running = AppSettings(devMode = true, desiredRunning = true)
+    private val running = AppSettings(desiredRunning = true)
 
     @Test
     fun defaultsNeverStart() {
@@ -19,7 +19,7 @@ class AutoStartTest {
     }
 
     @Test
-    fun updateRestartsWhenDesiredAndDevMode() {
+    fun updateRestartsWhenDesired() {
         assertTrue(AutoStart.shouldStart(PACKAGE_REPLACED, running))
         // Start on boot is irrelevant for updates.
         assertTrue(AutoStart.shouldStart(PACKAGE_REPLACED, running.copy(startOnBoot = true)))
@@ -31,10 +31,13 @@ class AutoStartTest {
     }
 
     @Test
-    fun nothingStartsWithDevModeOff() {
-        val off = running.copy(devMode = false, startOnBoot = true)
-        assertFalse(AutoStart.shouldStart(PACKAGE_REPLACED, off))
-        assertFalse(AutoStart.shouldStart(BOOT_COMPLETED, off))
+    fun modeDoesNotMatter() {
+        // Secure mode is the default and dev mode is the user's choice; both come back.
+        for (dev in listOf(false, true)) {
+            val s = running.copy(devMode = dev, startOnBoot = true)
+            assertTrue(AutoStart.shouldStart(PACKAGE_REPLACED, s))
+            assertTrue(AutoStart.shouldStart(BOOT_COMPLETED, s))
+        }
     }
 
     @Test
@@ -53,8 +56,8 @@ class AutoStartTest {
     fun exhaustiveTruthTable() {
         for (dev in listOf(false, true)) for (desired in listOf(false, true)) for (boot in listOf(false, true)) {
             val s = AppSettings(devMode = dev, desiredRunning = desired, startOnBoot = boot)
-            assertEquals("update $s", dev && desired, AutoStart.shouldStart(PACKAGE_REPLACED, s))
-            assertEquals("boot $s", dev && desired && boot, AutoStart.shouldStart(BOOT_COMPLETED, s))
+            assertEquals("update $s", desired, AutoStart.shouldStart(PACKAGE_REPLACED, s))
+            assertEquals("boot $s", desired && boot, AutoStart.shouldStart(BOOT_COMPLETED, s))
         }
     }
 

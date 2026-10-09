@@ -45,6 +45,7 @@ android {
 
 dependencies {
     implementation(project(":server"))
+    implementation(project(":pairing"))
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.core.ktx)
@@ -65,5 +66,5 @@ dependencies {
 
 // `./gradlew testDebugUnitTest` also runs the pure-JVM protocol and server tests.
 tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
-    dependsOn(":protocol:test", ":server:test")
+    dependsOn(":protocol:test", ":server:test", ":pairing:test")
 }

@@ -18,6 +18,8 @@ data class BridgeStatus(
     val state: RunState = RunState.STOPPED,
     /** Port the server is bound to while running. */
     val port: Int? = null,
+    /** While running: `wss://` with pairing (true) or dev mode's plain `ws://` (false). */
+    val secure: Boolean? = null,
     /** Why the last start attempt failed, if it did. */
     val error: String? = null,
     val clients: List<ClientSnapshot> = emptyList(),

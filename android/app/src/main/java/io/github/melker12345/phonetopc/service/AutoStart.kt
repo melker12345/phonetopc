@@ -20,12 +20,12 @@ object AutoStart {
     }
 
     /**
-     * Start only if the user left it running (and didn't stop it) and the plaintext server is
-     * still allowed. An update restores what the update interrupted; a reboot additionally
-     * needs the user's opt-in.
+     * Start only if the user left it running (and didn't stop it). An update restores what the
+     * update interrupted; a reboot additionally needs the user's opt-in. The server comes back
+     * in whichever mode is set (secure, or dev mode if the user chose it).
      */
     fun shouldStart(trigger: AutoStartTrigger, settings: AppSettings): Boolean {
-        if (!settings.devMode || !settings.desiredRunning) return false
+        if (!settings.desiredRunning) return false
         return when (trigger) {
             AutoStartTrigger.PACKAGE_REPLACED -> true
             AutoStartTrigger.BOOT_COMPLETED -> settings.startOnBoot

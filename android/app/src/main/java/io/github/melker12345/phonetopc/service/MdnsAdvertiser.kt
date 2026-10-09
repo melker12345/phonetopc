@@ -7,7 +7,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 
 /**
- * Advertises `_phonetopc._tcp` with TXT `id`, `proto=1`, `dev=1` (spec §8).
+ * Advertises `_phonetopc._tcp` with TXT `id`, `proto=1` and `tls=1` in secure mode or `dev=1`
+ * in dev mode (spec §8, SECURITY.md §3).
  * Call [refresh] after network changes: NsdManager doesn't reliably re-announce on a new
  * network, so the registration is torn down and made again. Thread-safe: NSD callbacks
  * arrive on a binder thread, so all state is guarded by `this`.
@@ -17,6 +18,7 @@ class MdnsAdvertiser(
     private val serviceName: String,
     private val port: Int,
     private val deviceId: String,
+    private val secure: Boolean,
 ) {
     private val nsd = ContextCompat.getSystemService(context, NsdManager::class.java)
     private var listener: NsdManager.RegistrationListener? = null
@@ -57,7 +59,7 @@ class MdnsAdvertiser(
             port = this@MdnsAdvertiser.port
             setAttribute("id", deviceId)
             setAttribute("proto", "1")
-            setAttribute("dev", "1")
+            if (secure) setAttribute("tls", "1") else setAttribute("dev", "1")
         }
         val l = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {

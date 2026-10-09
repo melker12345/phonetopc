@@ -14,7 +14,9 @@ import io.github.melker12345.phonetopc.BuildConfig
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.appGraph
 import io.github.melker12345.phonetopc.data.DeviceIdentity
+import io.github.melker12345.phonetopc.data.PhoneKey
 import io.github.melker12345.phonetopc.protocol.BridgeHub
+import io.github.melker12345.phonetopc.protocol.SecureAccess
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
 import io.github.melker12345.phonetopc.protocol.SensorMode
 import io.github.melker12345.phonetopc.protocol.ServerInfo
@@ -24,10 +26,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -36,8 +40,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Foreground service (type connectedDevice) that runs the WebSocket server, advertises it via
- * mDNS and keeps the process alive. Draft 1 is plaintext, so it refuses to run unless the
- * user enabled developer mode.
+ * mDNS and keeps the process alive. Secure mode (the default) serves `wss://` with the
+ * phone's Keystore key and only lets paired PCs in; developer mode serves plain `ws://`.
  */
 class BridgeService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -109,18 +113,36 @@ class BridgeService : Service() {
         startJob = scope.launch {
             val graph = appGraph
             val settings = graph.settings.current()
-            if (!settings.devMode) {
-                fail(getString(R.string.error_dev_mode_off))
-                return@launch
-            }
+            val secure = !settings.devMode
             val deviceId = graph.settings.deviceId()
             val source = graph.sensorSource.apply { disabledSources = settings.disabledSources }
+
+            // Secure mode (SECURITY.md §3): the Keystore key for TLS, and paired PCs' tokens.
+            val tls = if (!secure) {
+                null
+            } else {
+                graph.pairedPcs.current() // loaded before the first hello can arrive
+                withContext(Dispatchers.IO) { runCatching { PhoneKey.identity() } }.getOrElse { e ->
+                    Log.e(TAG, "no TLS key", e)
+                    fail(getString(R.string.error_tls_key))
+                    return@launch
+                }
+            }
+            val security = if (!secure) {
+                null
+            } else {
+                SecureAccess(
+                    authenticate = { token -> graph.pairedPcs.authenticate(token)?.info },
+                    onAuthenticated = { pc -> graph.appScope.launch { graph.pairedPcs.touch(pc.id) } },
+                )
+            }
             val newHub = BridgeHub(
                 source = source,
                 serverInfo = ServerInfo("phonetopc-android", BuildConfig.VERSION_NAME),
                 deviceInfoProvider = { DeviceIdentity.info(applicationContext, deviceId) },
+                security = security,
             )
-            val newServer = PhonetopcServer(newHub, port = settings.port)
+            val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)
             val started = withContext(Dispatchers.IO) {
                 graph.bridge.serverLock.withLock { runCatching { newServer.start() } }
             }
@@ -132,19 +154,20 @@ class BridgeService : Service() {
             }
             hub = newHub
             server = newServer
-            controller.update { it.copy(state = RunState.RUNNING, port = settings.port) }
+            controller.update { it.copy(state = RunState.RUNNING, port = settings.port, secure = secure) }
 
-            mdns = MdnsAdvertiser(this@BridgeService, DeviceIdentity.name(this@BridgeService), settings.port, deviceId)
+            mdns = MdnsAdvertiser(this@BridgeService, DeviceIdentity.name(this@BridgeService), settings.port, deviceId, secure)
                 .also { it.start() }
 
-            observe(newHub, graph.networkMonitor)
+            observe(newHub, graph.networkMonitor, devMode = settings.devMode)
         }
     }
 
-    private fun observe(hub: BridgeHub, network: NetworkMonitor) {
+    /** Runs until the bridge is torn down: [startJob] is cancelled, and these with it. */
+    private suspend fun observe(hub: BridgeHub, network: NetworkMonitor, devMode: Boolean) = coroutineScope {
         val graph = appGraph
         // Status for the UI and the notification.
-        scope.launch {
+        launch {
             combine(hub.clients, hub.demand, hub.paused, network.addresses) { clients, demand, paused, addrs ->
                 controller.update {
                     it.copy(
@@ -157,23 +180,31 @@ class BridgeService : Service() {
             }.collect { address -> updateNotification(address) }
         }
         // Re-announce mDNS when the network changes.
-        scope.launch {
+        launch {
             network.addresses.drop(1).collect { mdns?.refresh() }
         }
         // Wake lock only while a continuous source streams.
-        scope.launch {
+        launch {
             hub.demand
                 .map { demand -> demand.keys.any { SensorCatalog[it]?.mode == SensorMode.CONTINUOUS } }
                 .distinctUntilChanged()
                 .collect { setWakeLock(it) }
         }
-        // Per-sensor toggles apply live; turning dev mode off stops the server.
-        scope.launch {
+        // SECURITY.md §5: a revoked PC (or one re-paired with a new token) loses its sessions now.
+        launch {
+            var known = graph.pairedPcs.current().associate { it.id to it.tokenHash }
+            graph.pairedPcs.loaded.filterNotNull().collect { list ->
+                val now = list.associate { it.id to it.tokenHash }
+                val gone = known.filter { (id, hash) -> now[id] != hash }.keys
+                if (gone.isNotEmpty()) hub.disconnectPcs { it.id in gone }
+                known = now
+            }
+        }
+        // Per-sensor toggles apply live; switching between dev and secure mode restarts.
+        launch {
             graph.settings.settings.collect { s ->
-                if (!s.devMode) {
-                    // Turning developer mode off is an explicit stop, so don't bring it back later.
-                    setDesiredRunning(false)
-                    shutdown()
+                if (s.devMode != devMode) {
+                    restart()
                     return@collect
                 }
                 if (graph.sensorSource.disabledSources != s.disabledSources) {
@@ -182,6 +213,12 @@ class BridgeService : Service() {
                 }
             }
         }
+    }
+
+    /** Stop serving and start again with the current settings, staying in the foreground. */
+    private fun restart() {
+        teardown()
+        startBridge(auto = false)
     }
 
     /** Persisted on the app scope so it survives the service stopping right after. */

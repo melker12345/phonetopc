@@ -15,7 +15,10 @@ import kotlinx.coroutines.flow.map
 import java.security.SecureRandom
 
 data class AppSettings(
-    /** "Developer mode (unencrypted)": the only way the plaintext draft-1 server may run. */
+    /**
+     * "Developer mode (unencrypted)": serve plain `ws://` without pairing (draft 1). Off means
+     * secure mode: `wss://` and a paired PC's token (SECURITY.md §3).
+     */
     val devMode: Boolean = false,
     val port: Int = DEFAULT_PORT,
     /** Sources the user has turned off; they are reported as `available: false`. */
@@ -23,7 +26,7 @@ data class AppSettings(
     val onboardingDone: Boolean = false,
     /**
      * The user wants the server running: set when they start it, cleared when they stop it
-     * (UI, notification Stop, or turning developer mode off). Pause keeps it set. Used to bring
+     * (UI or notification Stop). Pause keeps it set. Used to bring
      * the service back after an app update or a reboot.
      */
     val desiredRunning: Boolean = false,
