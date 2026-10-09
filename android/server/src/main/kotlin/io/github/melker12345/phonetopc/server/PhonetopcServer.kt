@@ -67,7 +67,11 @@ class PhonetopcServer(
         }.start(wait = false)
         try {
             val backendPort = runBlocking { backend.engine.resolvedConnectors().first().port }
-            front = TlsFrontend(tls, host, port, backendPort, handshakeTimeoutMillis = helloTimeout.inWholeMilliseconds.toInt())
+            front = TlsFrontend(
+                tls, host, port, backendPort,
+                backendHost = LOOPBACK,
+                handshakeTimeoutMillis = helloTimeout.inWholeMilliseconds.toInt(),
+            )
             front.start()
         } catch (e: Exception) {
             backend.stop(0, 500)

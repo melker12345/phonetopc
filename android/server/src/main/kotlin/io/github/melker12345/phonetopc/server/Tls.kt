@@ -79,9 +79,16 @@ class TlsFrontend(
     private val host: String,
     private val port: Int,
     private val backendPort: Int,
+    /**
+     * The loopback address the backend is bound to. Must match exactly: on Android
+     * `InetAddress.getLoopbackAddress()` is `::1`, while the backend binds `127.0.0.1`.
+     */
+    private val backendHost: String = "127.0.0.1",
     /** A handshake (and the WebSocket upgrade's first bytes) must finish within this. */
     private val handshakeTimeoutMillis: Int = 10_000,
     private val maxConnections: Int = 64,
+    /** Called for relay failures after a successful handshake; those are bugs, not bad clients. */
+    private val onError: (String, Throwable) -> Unit = { msg, e -> System.err.println("phonetopc tls: $msg: $e") },
 ) {
     private var server: SSLServerSocket? = null
     private val peers = ConcurrentHashMap<Int, Peer>()
@@ -159,7 +166,12 @@ class TlsFrontend(
             backend = b
             open += b
             b.tcpNoDelay = true
-            b.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), backendPort), handshakeTimeoutMillis)
+            try {
+                b.connect(InetSocketAddress(InetAddress.getByName(backendHost), backendPort), handshakeTimeoutMillis)
+            } catch (e: IOException) {
+                onError("can't reach the backend at $backendHost:$backendPort", e)
+                throw e
+            }
             loopbackPort = b.localPort
             peers[loopbackPort] = Peer(client.inetAddress.hostAddress ?: "?", client.port)
 
@@ -169,7 +181,8 @@ class TlsFrontend(
             back.cancel(true)
         } catch (_: IOException) {
             // Failed handshakes (scanners, plain ws:// clients, wrong pins) land here.
-        } catch (_: RuntimeException) {
+        } catch (e: RuntimeException) {
+            onError("relay failed", e)
         } finally {
             if (loopbackPort >= 0) peers.remove(loopbackPort)
             closeBoth(client, backend)
