@@ -2,6 +2,7 @@ package pairing
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
@@ -68,7 +69,7 @@ type harness struct {
 	cancel context.CancelFunc
 }
 
-func startListener(t *testing.T, p Prompter, tweak func(*Options)) *harness {
+func testCert(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := security.GenerateKey()
 	if err != nil {
@@ -78,6 +79,12 @@ func startListener(t *testing.T, p Prompter, tweak func(*Options)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return cert
+}
+
+func startListener(t *testing.T, p Prompter, tweak func(*Options)) *harness {
+	t.Helper()
+	cert := testCert(t)
 	h := &harness{pc: protocol.PCInfo{ID: "9d1c00000000aaaa", Name: "arch-desktop"}, saved: make(chan Paired, 4), done: make(chan struct{})}
 	opts := Options{
 		PC: h.pc, Cert: cert, Prompt: p,
@@ -86,6 +93,7 @@ func startListener(t *testing.T, p Prompter, tweak func(*Options)) *harness {
 	if tweak != nil {
 		tweak(&opts)
 	}
+	var err error
 	h.l, err = New(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -259,6 +267,18 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimitIsPerAddress(t *testing.T) {
+	l, err := New(Options{Cert: testCert(t), Prompt: yes(), Save: func(Paired) error { return nil }, MaxFailures: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.fail("192.0.2.1")
+	l.fail("192.0.2.1")
+	if !l.blocked("192.0.2.1") || l.blocked("192.0.2.2") {
+		t.Error("the limit must apply per source address")
+	}
+}
+
 func TestPairSAS(t *testing.T) {
 	p := yes()
 	h := startListener(t, p, nil)
@@ -420,7 +440,11 @@ func TestOutOfOrderAndInvalid(t *testing.T) {
 	wantErr(t, r.call(MethodSASConfirm, map[string]bool{"match": true}), protocol.CodeOutOfOrder)
 	wantErr(t, r.call("hello", nil), protocol.CodeMethodNotFound)
 	wantErr(t, r.send("nope"), protocol.CodeParseError)
-	wantErr(t, r.call(MethodQR, QRParams{Protocol: "phonetopc-pair/9", Secret: "x", Phone: phone}), protocol.CodeUnsupportedProtocol)
+	wantErr(t, r.call(MethodQR, QRParams{Protocol: "phonetopc-pair/9", Secret: security.NewSecret(), Phone: phone}), protocol.CodeUnsupportedProtocol)
+	// Step 7 before step 8: a wrongly sized secret is -32602 even with an
+	// unknown protocol, and it is not a failed attempt.
+	wantErr(t, r.call(MethodQR, QRParams{Protocol: "phonetopc-pair/9", Secret: "x", Phone: phone}), protocol.CodeInvalidParams)
+	wantErr(t, r.call(MethodQR, QRParams{Protocol: Protocol, Secret: security.B64(security.RandomBytes(15)), Phone: phone}), protocol.CodeInvalidParams)
 	m := r.call(MethodSASBegin, SASBeginParams{Protocol: "phonetopc-pair/9", Phone: phone})
 	wantErr(t, m, protocol.CodeUnsupportedProtocol)
 	if m.Error.Data == nil || len(m.Error.Data.Supported) != 1 || m.Error.Data.Supported[0] != Protocol {

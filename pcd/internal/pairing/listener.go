@@ -64,12 +64,13 @@ type Options struct {
 	// Expiry closes the listener (default 5 minutes, §4.1).
 	Expiry time.Duration
 	// MaxFailures failed attempts (bad secret, rejection, SAS mismatch) per
-	// FailureWindow make the listener refuse further attempts until the
-	// window has passed. Defaults 5 and 1 minute (§4.1).
+	// FailureWindow from one address make the listener refuse further
+	// attempts from it until the window has passed. Defaults 5 and 1 minute
+	// (§4.1).
 	MaxFailures   int
 	FailureWindow time.Duration
 	// IdleTimeout closes a pairing connection that sends nothing for this
-	// long (default 3 minutes; users may take a while to compare codes).
+	// long with 1001 (default 5 minutes, the time §4.1 gives users to answer).
 	IdleTimeout time.Duration
 
 	// Logf, if set, receives progress messages for the user.
@@ -92,8 +93,8 @@ type Listener struct {
 
 	mu       sync.Mutex
 	busy     bool
-	failures []time.Time
-	result   chan Paired // buffered(1)
+	failures map[string][]time.Time // by remote host
+	result   chan Paired            // buffered(1)
 	wg       sync.WaitGroup
 }
 
@@ -119,9 +120,12 @@ func New(opts Options) (*Listener, error) {
 		opts.FailureWindow = time.Minute
 	}
 	if opts.IdleTimeout <= 0 {
-		opts.IdleTimeout = 3 * time.Minute
+		opts.IdleTimeout = 5 * time.Minute
 	}
-	return &Listener{opts: opts, pin: pin, result: make(chan Paired, 1), expired: make(chan struct{})}, nil
+	return &Listener{
+		opts: opts, pin: pin, result: make(chan Paired, 1), expired: make(chan struct{}),
+		failures: make(map[string][]time.Time),
+	}, nil
 }
 
 // Secret returns the QR secret.
@@ -187,19 +191,32 @@ func (l *Listener) Serve(ctx context.Context, ln net.Listener) (Paired, error) {
 	return res, err
 }
 
-// blocked reports whether too many attempts failed recently.
-func (l *Listener) blocked() bool {
+// blocked reports whether too many attempts from host failed recently.
+func (l *Listener) blocked(host string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cutoff := time.Now().Add(-l.opts.FailureWindow)
-	l.failures = slices.DeleteFunc(l.failures, func(t time.Time) bool { return t.Before(cutoff) })
-	return len(l.failures) >= l.opts.MaxFailures
+	f := slices.DeleteFunc(l.failures[host], func(t time.Time) bool { return t.Before(cutoff) })
+	if len(f) == 0 {
+		delete(l.failures, host)
+	} else {
+		l.failures[host] = f
+	}
+	return len(f) >= l.opts.MaxFailures
 }
 
-func (l *Listener) fail() {
+func (l *Listener) fail(host string) {
 	l.mu.Lock()
-	l.failures = append(l.failures, time.Now())
+	l.failures[host] = append(l.failures[host], time.Now())
 	l.mu.Unlock()
+}
+
+// remoteHost returns the host part of a remote address.
+func remoteHost(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
 }
 
 func (l *Listener) serveWS(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +233,7 @@ func (l *Listener) serveWS(w http.ResponseWriter, r *http.Request) {
 	defer l.wg.Done()
 	defer conn.CloseNow()
 
-	if l.blocked() {
+	if l.blocked(remoteHost(r.RemoteAddr)) {
 		conn.Close(websocket.StatusTryAgainLater, "too many failed pairing attempts, try again in a minute")
 		return
 	}
@@ -314,7 +331,7 @@ func (s *session) run() {
 			s.conn.Close(websocket.StatusGoingAway, "pairing listener closed")
 			return
 		case <-idle.C:
-			s.conn.Close(websocket.StatusPolicyViolation, "idle for too long")
+			s.conn.Close(websocket.StatusGoingAway, "idle for too long")
 			return
 		case data := <-frames:
 			idle.Reset(s.l.opts.IdleTimeout)
@@ -385,9 +402,10 @@ func (s *session) handle(data []byte) (*protocol.Response, func(), websocket.Sta
 		case protocol.CodeExpired:
 			code = websocket.StatusGoingAway
 		case protocol.CodeBadSecret, protocol.CodeRejected, protocol.CodeSASMismatch:
-			s.l.fail()
+			host := remoteHost(s.remote)
+			s.l.fail(host)
 			s.reset()
-			if s.l.blocked() {
+			if s.l.blocked(host) {
 				code = websocket.StatusPolicyViolation
 			}
 		}
@@ -459,8 +477,8 @@ func (s *session) pairQR(params json.RawMessage) (any, func(), error) {
 	if err := decodeParams(params, &p); err != nil {
 		return nil, nil, err
 	}
-	if p.Secret == "" {
-		return nil, nil, invalid(errors.New("params.secret is required"))
+	if b, err := security.DecodeB64(p.Secret); err != nil || len(b) != security.SecretSize {
+		return nil, nil, invalid(fmt.Errorf("params.secret must be base64url of %d bytes", security.SecretSize))
 	}
 	if err := p.Phone.validate(); err != nil {
 		return nil, nil, invalid(err)

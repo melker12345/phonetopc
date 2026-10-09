@@ -248,7 +248,7 @@ func pairCmd(ctx context.Context, args []string, stdin io.Reader, out io.Writer)
 		pcSel    = fs.String("pc", "", "with --discover: the PC to pair with, by name or id (default: the first found)")
 		pcAddr   = fs.String("pc-addr", "", "compare codes with the pairing listener at host:port (no mDNS)")
 		confirm  = fs.Bool("confirm", false, "confirm the code without asking")
-		timeout  = fs.Duration("timeout", 3*time.Minute, "give up after this long")
+		timeout  = fs.Duration("timeout", 6*time.Minute, "give up after this long (the PC user may take up to 5 minutes to answer)")
 	)
 	// Accept the URI before or after the flags.
 	var pos []string
