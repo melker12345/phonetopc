@@ -19,3 +19,34 @@ Security and trust model. The LAN itself is not the barrier; devices on the same
 Known constraints and landmines. The real wall is the phone side: Android and Samsung aggressive background-process killing. It's mitigated with the foreground service plus wake lock, at a real battery cost that is the user's choice. Sensors are reachable only through their normal Android APIs; no raw sensor hardware access.
 
 Prior art. Apple Handoff and Continuity, the same idea but walled to same-vendor only. Home Assistant, the closest open event-bus analog. IFTTT and Tasker, the trigger-action layer. The market gap exists because no vendor profits from a cross-vendor bridge, and the open community has the least control over the phone, which is the sensor-rich side.
+
+## Status
+
+Milestone M1 (walking skeleton) from [plan.md](plan.md): protocol draft 1 in plaintext **dev mode only**. No pairing or encryption yet, so only use it on a network you trust.
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), JSON Schema, conformance transcripts and cases |
+| [`android/`](android/) | Phone app (Kotlin, Jetpack Compose, Ktor) |
+| [`pcd/`](pcd/) | PC side in Go: `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
+| [`clients/python/`](clients/python/) | Python client library |
+| [`examples/`](examples/) | Python recipes: print gyro, air mouse, lock PC from a phone tile |
+
+## Quick start
+
+No phone needed — use the mock:
+
+```sh
+cd pcd && CGO_ENABLED=0 go build -o bin/ ./cmd/...
+bin/phonetopc-mock &                 # fake phone on 127.0.0.1:8765
+bin/phonetopc tail gyro --rate 10    # stream from the Go CLI
+
+pip install -e clients/python
+python examples/print_gyro.py        # same stream from Python
+```
+
+With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb reverse tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
+
+Any language with a WebSocket library can talk to the phone: send JSON-RPC 2.0 to `ws://<phone>:8765/v1/ws`, starting with `hello`. See [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
