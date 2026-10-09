@@ -114,6 +114,20 @@ def test_sensor_info_parse() -> None:
         phonetopc.SensorInfo.from_json({**info.raw, "available": "yes"})
 
 
+def test_subscribe_result_parse() -> None:
+    base = {"subscription": "s-1", "source": "gyro", "types": ["rotation"]}
+    res = phonetopc.SubscribeResult.from_json({**base, "mode": "continuous", "rate_hz": 100})
+    assert res.mode == "continuous" and res.rate_hz == 100.0
+    res = phonetopc.SubscribeResult.from_json({**base, "source": "light", "mode": "on_change"})
+    assert res.mode == "on_change" and res.rate_hz is None
+    # Draft 0 servers don't send mode.
+    assert phonetopc.SubscribeResult.from_json(base).mode is None
+    with pytest.raises(phonetopc.ProtocolError):
+        phonetopc.SubscribeResult.from_json({**base, "mode": 1})
+    with pytest.raises(phonetopc.ProtocolError):
+        phonetopc.SubscribeResult.from_json({"subscription": "s-1", "source": "gyro"})
+
+
 @pytest.mark.parametrize(
     ("code", "cls"),
     [

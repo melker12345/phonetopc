@@ -185,11 +185,17 @@ class SensorInfo:
 
 @dataclass(frozen=True)
 class SubscribeResult:
-    """Result of ``subscribe``."""
+    """Result of ``subscribe``.
+
+    ``mode`` is ``"continuous"`` or ``"on_change"`` (copied by the server from
+    ``list_sensors``). Draft 1 requires it; it is ``None`` only when talking to
+    an older (draft 0) server that didn't send it.
+    """
 
     subscription: str
     source: str
     types: tuple[str, ...]
+    mode: str | None = None
     rate_hz: float | None = None
 
     @classmethod
@@ -200,6 +206,8 @@ class SubscribeResult:
             subscription=_str(obj, "subscription", w),
             source=_str(obj, "source", w),
             types=_str_list(obj, "types", w),
+            # An enum in the schema; kept as a plain string like SensorInfo.mode.
+            mode=_opt_str(obj, "mode", w),
             rate_hz=_opt_num(obj, "rate_hz", w),
         )
 
