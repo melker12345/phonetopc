@@ -136,7 +136,8 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 		return nil, fmt.Errorf("phonetopc: no address known for %q and mDNS found nothing; is the phone on this network?", dev.Name)
 	}
 
-	dialOpts := append(append([]Option{}, opts...), WithPin(dev.Pin), WithToken(dev.Token))
+	// The store decides about approval keys unless the caller does.
+	dialOpts := append(append([]Option{WithApprovalTrust(storeApprovalTrust(st, dev))}, opts...), WithPin(dev.Pin), WithToken(dev.Token))
 	var (
 		pinErr  error
 		lastErr error
@@ -155,6 +156,11 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 			if got := cl.Server().Device.ID; got != dev.ID {
 				// SECURITY.md §6: warn; the pin already proved the key.
 				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s", dev.Name, dev.ID, got))
+			}
+			// APPROVAL.md §3: the first sight of the approval key stores it;
+			// a changed key is reported now, and approvals are refused.
+			if _, err := cl.CheckApprovalKey(); errors.Is(err, ErrApprovalKeyChanged) {
+				cl.warn(err.Error() + " — check with `phonetopc approval-key`")
 			}
 			return cl, nil
 		}

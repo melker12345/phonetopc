@@ -55,6 +55,8 @@ type (
 	ErrorCode   = protocol.ErrorCode
 	Mode        = protocol.Mode
 	PCInfo      = protocol.PCInfo
+	// ApprovalInfo is hello's approval member (APPROVAL.md §1).
+	ApprovalInfo = protocol.ApprovalInfo
 	// PinMismatchError is returned (wrapped) by Dial when the server's
 	// certificate doesn't match the pin.
 	PinMismatchError = security.PinMismatchError
@@ -102,6 +104,12 @@ type options struct {
 	skipHello   bool
 	eventBuffer int
 	tap         func(Direction, []byte)
+	// approvalTrust decides whether an approval key pin is trusted
+	// (APPROVAL.md §3); see WithApprovalTrust.
+	approvalTrust func(pin string) error
+	// testNonce replaces the approval nonce; only set by this package's
+	// tests, to replay the signed test vectors.
+	testNonce   string
 	dialOptions *websocket.DialOptions
 	pin         string
 	token       string
