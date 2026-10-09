@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">phonetopc</string>
     <string name="tile_label">PC button</string>
 
@@ -20,4 +20,163 @@
     <string name="error_dev_mode_off">Developer mode is off. Turn it on in Settings to start the server.</string>
     <string name="error_port_in_use">Couldn\'t open port %1$d. Is another app using it?</string>
     <string name="error_foreground_not_allowed">Android didn\'t allow the service to start in the background. Open the app and start it again.</string>
+
+    <!-- Common -->
+    <string name="allow">Allow</string>
+    <string name="save">Save</string>
+
+    <!-- Tabs -->
+    <string name="tab_home">Home</string>
+    <string name="tab_pair">Pair</string>
+    <string name="tab_devices">Devices</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Home -->
+    <string name="home_state_dev_off">Developer mode is off</string>
+    <string name="home_state_stopped">Stopped</string>
+    <string name="home_state_starting">Starting…</string>
+    <string name="home_state_running">Running</string>
+    <string name="home_state_paused">Paused</string>
+    <string name="home_sub_dev_off">This version serves sensor data without encryption or pairing, so it only runs in developer mode.</string>
+    <string name="home_sub_stopped">Start the server so your PC can connect.</string>
+    <string name="home_sub_starting">Opening the port…</string>
+    <string name="home_sub_paused">Clients stay connected, but no sensor data is sent.</string>
+    <string name="home_sub_waiting">Waiting for a PC to connect</string>
+    <plurals name="home_clients_connected">
+        <item quantity="one">%d client connected</item>
+        <item quantity="other">%d clients connected</item>
+    </plurals>
+    <string name="home_streaming_at">%1$s at %2$s Hz</string>
+    <string name="home_open_settings">Open settings</string>
+    <string name="home_start">Start server</string>
+    <string name="home_stop">Stop server</string>
+    <string name="home_connect_from_pc">Connect from your PC</string>
+    <string name="home_no_network">Not on a network</string>
+    <string name="home_copy_address">Copy address</string>
+    <string name="home_also_reachable">Also reachable at %1$s</string>
+    <string name="home_usb_title">Over USB</string>
+    <string name="home_usb_body">adb reverse tcp:%1$d tcp:%1$d, then use 127.0.0.1:%1$d</string>
+    <string name="home_clients_header">Connected clients</string>
+    <string name="home_clients_empty">No clients yet. Point a client on your PC at the address above.</string>
+    <string name="home_client_connecting">Connecting…</string>
+    <string name="home_client_unnamed">Unnamed client</string>
+    <string name="home_client_no_subs">Connected, not subscribed to anything yet</string>
+
+    <!-- Sensors -->
+    <string name="sensor_accelerometer">Accelerometer</string>
+    <string name="sensor_accelerometer_desc">Motion, including gravity</string>
+    <string name="sensor_gyro">Gyroscope</string>
+    <string name="sensor_gyro_desc">Rotation speed</string>
+    <string name="sensor_rotation">Orientation</string>
+    <string name="sensor_rotation_desc">Game rotation vector, no compass drift</string>
+    <string name="sensor_proximity">Proximity</string>
+    <string name="sensor_proximity_desc">Whether something is near the screen</string>
+    <string name="sensor_light">Ambient light</string>
+    <string name="sensor_light_desc">Brightness around the phone</string>
+    <string name="sensor_battery">Battery</string>
+    <string name="sensor_battery_desc">Level and charging state</string>
+    <string name="sensor_tile">Quick Settings tile</string>
+    <string name="sensor_tile_desc">Taps on the “PC button” tile</string>
+    <string name="sensor_unknown">Sensor</string>
+
+    <!-- Pair -->
+    <string name="pair_title">Pair a PC</string>
+    <string name="pair_soon_title">Pairing is coming soon</string>
+    <string name="pair_soon_body">Secure pairing with encryption arrives in the next version. Until then, enable developer mode in Settings and connect by address.</string>
+    <string name="pair_qr_title">Scan QR code</string>
+    <string name="pair_qr_body">Scan the code shown by phonetopc pair on your PC.</string>
+    <string name="pair_network_title">Find on network</string>
+    <string name="pair_network_body">Pick your PC from the ones in pairing mode nearby.</string>
+    <string name="pair_coming_soon">Coming soon</string>
+    <string name="pair_code_label">Confirmation code</string>
+    <string name="pair_code_body">Both screens will show the same code. Check that they match.</string>
+
+    <!-- Devices -->
+    <string name="devices_title">Paired devices</string>
+    <string name="devices_empty_title">No paired PCs yet</string>
+    <string name="devices_empty_body">PCs you pair will show up here, with when they were last seen and a way to revoke their access.</string>
+    <string name="devices_pair_action">Pair a PC</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_server">Server</string>
+    <string name="settings_dev_mode">Developer mode (unencrypted)</string>
+    <string name="settings_dev_mode_summary">Required to run the server in this version</string>
+    <string name="settings_dev_mode_warning">The server is unencrypted and has no login. Anyone on the same network can connect and read the sensors you allow below. Only use it on networks you trust.</string>
+    <string name="settings_dev_mode_dialog_title">Turn on developer mode?</string>
+    <string name="settings_dev_mode_dialog_body">While the server runs, any device on your network can connect without a password and read your allowed sensors. Traffic isn\'t encrypted. Use it only on networks you trust, or over USB.</string>
+    <string name="settings_dev_mode_dialog_confirm">Turn on</string>
+    <string name="settings_port">Port</string>
+    <string name="settings_port_summary">%1$d · applies the next time the server starts</string>
+    <string name="settings_port_range" tools:ignore="PluralsCandidate">Between %1$d and %2$d</string>
+    <string name="settings_section_sensors">Sensors</string>
+    <string name="settings_sensors_hint">Turned-off sensors are reported to PCs as unavailable.</string>
+    <string name="settings_sensor_missing">Not available on this phone</string>
+    <string name="settings_section_keep_alive">Keep running in the background</string>
+    <string name="settings_battery">Battery optimization</string>
+    <string name="settings_battery_ok">Unrestricted. Android won\'t pause phonetopc.</string>
+    <string name="settings_battery_restricted">Android may stop phonetopc when the screen is off</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_notifications_ok">The status notification is visible</string>
+    <string name="settings_notifications_off">Allow them to see status and Pause/Stop controls</string>
+    <string name="settings_vendor_more">More on dontkillmyapp.com</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_device_id">Device ID</string>
+
+    <!-- Vendor guides -->
+    <string name="vendor_samsung">On Samsung phones</string>
+    <string name="vendor_xiaomi">On Xiaomi, Redmi and POCO phones</string>
+    <string name="vendor_oneplus">On OnePlus phones</string>
+    <string name="vendor_oppo">On OPPO phones</string>
+    <string name="vendor_realme">On realme phones</string>
+    <string name="vendor_huawei">On Huawei and Honor phones</string>
+    <string name="vendor_generic">If Android still stops phonetopc</string>
+    <string-array name="vendor_samsung_steps">
+        <item>Settings › Apps › phonetopc › Battery: choose Unrestricted.</item>
+        <item>Settings › Battery › Background usage limits: make sure phonetopc isn\'t in Sleeping apps or Deep sleeping apps.</item>
+        <item>In the same screen, add phonetopc to Never sleeping apps.</item>
+    </string-array>
+    <string-array name="vendor_xiaomi_steps">
+        <item>Settings › Apps › Manage apps › phonetopc: turn on Autostart.</item>
+        <item>In the same screen, Battery saver: choose No restrictions.</item>
+        <item>Open Recents, long-press phonetopc and tap the lock icon.</item>
+    </string-array>
+    <string-array name="vendor_oneplus_steps">
+        <item>Settings › Battery › Battery optimization: set phonetopc to Don\'t optimize.</item>
+        <item>Settings › Apps › phonetopc › Battery usage: allow background activity.</item>
+        <item>Open Recents and lock phonetopc so it isn\'t cleared.</item>
+    </string-array>
+    <string-array name="vendor_huawei_steps">
+        <item>Settings › Battery › App launch: turn off Manage automatically for phonetopc.</item>
+        <item>Allow Auto-launch, Secondary launch and Run in background.</item>
+        <item>Open Recents and lock phonetopc so it isn\'t cleared.</item>
+    </string-array>
+    <string-array name="vendor_generic_steps">
+        <item>Allow unrestricted battery use with the button above.</item>
+        <item>Keep the status notification enabled.</item>
+        <item>Look up your phone\'s brand on dontkillmyapp.com for extra steps.</item>
+    </string-array>
+
+    <!-- Onboarding -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_not_now">Not now</string>
+    <string name="onboarding_welcome_title">Your phone, as a sensor for your PC</string>
+    <string name="onboarding_welcome_body">phonetopc streams your phone\'s sensors to programs on your computer, in any language.</string>
+    <string-array name="onboarding_welcome_points">
+        <item>Motion, orientation, light, proximity and battery</item>
+        <item>A Quick Settings button that triggers scripts on your PC</item>
+        <item>You choose which sensors are shared</item>
+    </string-array>
+    <string name="onboarding_welcome_action">Get started</string>
+    <string name="onboarding_notifications_title">Stay in the loop</string>
+    <string name="onboarding_notifications_body">A quiet notification shows when a PC is connected and lets you pause or stop at any time.</string>
+    <string name="onboarding_notifications_action">Allow notifications</string>
+    <string name="onboarding_battery_title">Keep it running</string>
+    <string name="onboarding_battery_body">To keep data flowing while the screen is off, allow phonetopc to run without battery restrictions. It only uses sensors while a PC asks for them.</string>
+    <string name="onboarding_battery_vendor">%1$s there are a few extra steps. You\'ll find them in Settings.</string>
+    <string name="onboarding_battery_action">Allow background use</string>
+    <string name="onboarding_done_title">You\'re all set</string>
+    <string name="onboarding_done_body">Turn on developer mode in Settings, start the server, and point a client on your PC at the address on the home screen.</string>
+    <string name="onboarding_done_action">Open phonetopc</string>
 </resources>
