@@ -1,0 +1,22 @@
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":1,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":2,"method":"no_such_method"}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"method \"no_such_method\" not found","data":{"name":"method_not_found"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"source":"nope"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":3,"error":{"code":-32001,"message":"unknown source \"nope\"","data":{"name":"unknown_source"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":4,"method":"subscribe","params":{"source":"proximity"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":4,"error":{"code":-32002,"message":"source \"proximity\" is not available on this device","data":{"name":"source_unavailable"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":5,"method":"get","params":{"source":"proximity"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":5,"error":{"code":-32002,"message":"source \"proximity\" is not available on this device","data":{"name":"source_unavailable"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":6,"method":"subscribe","params":{"source":"gyro","type":"bogus"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":6,"error":{"code":-32602,"message":"source \"gyro\" has no type \"bogus\" (types: rotation)","data":{"name":"invalid_params"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":7,"method":"subscribe","params":{"source":"gyro","rate_hz":0}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"params.rate_hz must be \u003e 0","data":{"name":"invalid_params"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":8,"method":"subscribe","params":{}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":8,"error":{"code":-32602,"message":"params.source is required","data":{"name":"invalid_params"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":9,"method":"unsubscribe","params":{"subscription":"s-99"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":9,"error":{"code":-32005,"message":"no subscription \"s-99\" in this session","data":{"name":"unknown_subscription"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":10,"method":"get","params":{"source":"ui"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":10,"error":{"code":-32006,"message":"no value for \"ui\" yet","data":{"name":"no_value"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":11,"method":"get","params":{"source":"nope"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":11,"error":{"code":-32001,"message":"unknown source \"nope\"","data":{"name":"unknown_source"}}}}

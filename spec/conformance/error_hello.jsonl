@@ -1,0 +1,6 @@
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":1,"method":"list_sensors"}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"message":"send hello first","data":{"name":"hello_required"}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":2,"method":"hello","params":{"protocol":"phonetopc/2"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32004,"message":"protocol \"phonetopc/2\" is not supported","data":{"name":"unsupported_protocol","supported":["phonetopc/1"]}}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":3,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":3,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}

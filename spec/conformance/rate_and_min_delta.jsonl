@@ -1,0 +1,11 @@
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":1,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":2,"method":"subscribe","params":{"source":"game_rotation_vector","rate_hz":0.5}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"result":{"subscription":"s-1","source":"game_rotation_vector","types":["orientation"],"rate_hz":1}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":3,"method":"unsubscribe","params":{"subscription":"s-1"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":3,"result":{}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":4,"method":"subscribe","params":{"source":"accelerometer","rate_hz":1000,"min_delta":100}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":4,"result":{"subscription":"s-2","source":"accelerometer","types":["motion"],"rate_hz":200}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","method":"event","params":{"subscription":"s-2","seq":0,"source":"accelerometer","type":"motion","value":[-2.0312,0.1195,9.6598],"unit":"m/s^2","ts":1791548184958,"ts_mono_ns":5552922,"device":"mock-0001"}}}
+{"dir":"c2s","msg":{"jsonrpc":"2.0","id":5,"method":"unsubscribe","params":{"subscription":"s-2"}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":5,"result":{}}}
