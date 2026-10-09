@@ -44,6 +44,9 @@ android {
 }
 
 dependencies {
+    implementation(project(":server"))
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -55,4 +58,9 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+}
+
+// `./gradlew testDebugUnitTest` also runs the pure-JVM protocol and server tests.
+tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn(":protocol:test", ":server:test")
 }

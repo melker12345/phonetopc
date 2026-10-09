@@ -1,0 +1,248 @@
+package io.github.melker12345.phonetopc.sensors
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.BatteryManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
+import io.github.melker12345.phonetopc.protocol.Demand
+import io.github.melker12345.phonetopc.protocol.Reading
+import io.github.melker12345.phonetopc.protocol.ReadingSink
+import io.github.melker12345.phonetopc.protocol.SensorCatalog
+import io.github.melker12345.phonetopc.protocol.SensorInfo
+import io.github.melker12345.phonetopc.protocol.SensorMode
+import io.github.melker12345.phonetopc.protocol.SensorSource
+import io.github.melker12345.phonetopc.protocol.Values
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonElement
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * [SensorSource] backed by SensorManager, the sticky battery broadcast and the Quick
+ * Settings tile. Hardware listeners exist only while the hub demands the source; the hub
+ * passes the highest rate any subscription asked for and downsamples per subscription.
+ */
+class AndroidSensorSource(context: Context) : SensorSource {
+    private val appContext = context.applicationContext
+    private val sensorManager = ContextCompat.getSystemService(appContext, SensorManager::class.java)
+    private val thread = HandlerThread("phonetopc-sensors").apply { start() }
+    private val handler = Handler(thread.looper)
+
+    @Volatile private var sink: ReadingSink? = null
+
+    /** Set from the user's per-sensor allow toggles. Call `hub.refreshAvailability()` after changing. */
+    @Volatile var disabledSources: Set<String> = emptySet()
+
+    private val latest = ConcurrentHashMap<String, Reading>()
+    private val listeners = HashMap<String, SensorEventListener>() // guarded by `this`
+    private var batteryReceiver: BroadcastReceiver? = null // guarded by `this`
+    @Volatile private var lastBattery: JsonElement? = null
+
+    private val hardware: Map<String, Sensor> = buildMap {
+        fun add(source: String, type: Int) {
+            sensorManager?.getDefaultSensor(type)?.let { put(source, it) }
+        }
+        add(SensorCatalog.ACCELEROMETER, Sensor.TYPE_ACCELEROMETER)
+        add(SensorCatalog.GYRO, Sensor.TYPE_GYROSCOPE)
+        add(SensorCatalog.GAME_ROTATION_VECTOR, Sensor.TYPE_GAME_ROTATION_VECTOR)
+        add(SensorCatalog.PROXIMITY, Sensor.TYPE_PROXIMITY)
+        add(SensorCatalog.LIGHT, Sensor.TYPE_LIGHT)
+    }
+
+    /** Availability ignoring the user's toggles: what the hardware offers. */
+    private val baseInfo: Map<String, SensorInfo> = SensorCatalog.all.associate { spec ->
+        val sensor = hardware[spec.source]
+        val info = when {
+            spec.source == SensorCatalog.BATTERY || spec.source == SensorCatalog.UI ->
+                SensorInfo.of(spec, available = true)
+            sensor == null -> SensorInfo.of(spec, available = false)
+            spec.mode == SensorMode.CONTINUOUS -> {
+                // minDelay is the fastest period in µs. With HIGH_SAMPLING_RATE_SENSORS declared
+                // Android 12+ doesn't cap this at 200 Hz.
+                val maxHz = if (sensor.minDelay > 0) 1_000_000.0 / sensor.minDelay else FALLBACK_MAX_HZ
+                val roundedMax = Math.round(maxHz * 10) / 10.0
+                SensorInfo.of(
+                    spec,
+                    available = true,
+                    minRateHz = MIN_RATE_HZ,
+                    maxRateHz = max(roundedMax, MIN_RATE_HZ),
+                    defaultRateHz = min(DEFAULT_RATE_HZ, max(roundedMax, MIN_RATE_HZ)),
+                )
+            }
+            else -> SensorInfo.of(spec, available = true)
+        }
+        spec.source to info
+    }
+
+    /** Hardware presence per source, for the settings screen. */
+    fun hardwarePresent(source: String): Boolean = baseInfo[source]?.available == true
+
+    override fun describe(): List<SensorInfo> {
+        val disabled = disabledSources
+        return SensorCatalog.all.map { spec ->
+            val info = baseInfo.getValue(spec.source)
+            if (spec.source in disabled) info.copy(available = false) else info
+        }
+    }
+
+    override fun setSink(sink: ReadingSink?) {
+        this.sink = sink
+    }
+
+    @Synchronized
+    override fun setDemand(source: String, demand: Demand?) {
+        when (source) {
+            SensorCatalog.BATTERY -> if (demand != null) startBattery() else stopBattery()
+            SensorCatalog.UI -> Unit // tile taps are pushed by the tile service
+            else -> {
+                listeners.remove(source)?.let { sensorManager?.unregisterListener(it) }
+                val sensor = hardware[source] ?: return
+                if (demand == null) return
+                val periodUs = demand.rateHz?.let { (1_000_000.0 / it).toInt() } ?: SensorManager.SENSOR_DELAY_NORMAL
+                val listener = Listener(source)
+                if (sensorManager?.registerListener(listener, sensor, periodUs, handler) == true) {
+                    listeners[source] = listener
+                }
+            }
+        }
+    }
+
+    override suspend fun read(source: String): Reading? {
+        if (source in disabledSources) return null
+        return when (source) {
+            SensorCatalog.BATTERY -> readBatterySticky()
+            SensorCatalog.UI -> latest[source]
+            else -> latest[source] ?: readOnce(source)
+        }
+    }
+
+    /** Called from the Quick Settings tile. */
+    fun emitTileTap() {
+        if (SensorCatalog.UI in disabledSources) return
+        val reading = Reading(
+            SensorCatalog.UI, "tile_tap", Values.bool(true), "",
+            System.currentTimeMillis(), SystemClock.elapsedRealtimeNanos(),
+        )
+        latest[SensorCatalog.UI] = reading
+        sink?.onReading(reading)
+    }
+
+    // ---- hardware sensors ----
+
+    private inner class Listener(
+        private val source: String,
+        private val oneShot: CompletableDeferred<Reading>? = null,
+    ) : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val reading = toReading(source, event) ?: return
+            latest[source] = reading
+            if (oneShot != null) oneShot.complete(reading) else sink?.onReading(reading)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    /** Briefly start a sensor to answer `get` when nothing is cached (spec §4.5). */
+    private suspend fun readOnce(source: String): Reading? {
+        val sensor = hardware[source] ?: return null
+        val manager = sensorManager ?: return null
+        val result = CompletableDeferred<Reading>()
+        val listener = Listener(source, result)
+        if (!manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_FASTEST, handler)) return null
+        return try {
+            withTimeoutOrNull(ONE_SHOT_TIMEOUT_MS) { result.await() }
+        } finally {
+            manager.unregisterListener(listener)
+        }
+    }
+
+    private fun toReading(source: String, event: SensorEvent): Reading? {
+        val spec = SensorCatalog[source] ?: return null
+        val v = event.values
+        val value = when (source) {
+            SensorCatalog.ACCELEROMETER, SensorCatalog.GYRO ->
+                if (v.size >= 3) Values.vec(v[0], v[1], v[2]) else return null
+            SensorCatalog.GAME_ROTATION_VECTOR -> {
+                if (v.size < 3) return null
+                // values[3] (the scalar part) is optional on older devices; the quaternion is
+                // unit length, so derive it when absent.
+                val w = if (v.size >= 4) v[3] else sqrt(max(0f, 1f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2]))
+                Values.vec(v[0], v[1], v[2], w)
+            }
+            else -> if (v.isNotEmpty()) Values.number(v[0]) else return null
+        }
+        return Reading(source, spec.types.first(), value, spec.unit, wallClockMillis(event.timestamp), event.timestamp)
+    }
+
+    // ---- battery ----
+
+    private fun startBattery() {
+        if (batteryReceiver != null) return
+        lastBattery = null
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val reading = batteryReading(intent) ?: return
+                // ACTION_BATTERY_CHANGED also fires for voltage/temperature; only level and
+                // charging state are part of the event, so drop repeats.
+                if (reading.value == lastBattery) return
+                lastBattery = reading.value
+                latest[SensorCatalog.BATTERY] = reading
+                sink?.onReading(reading)
+            }
+        }
+        batteryReceiver = receiver
+        // Sticky system broadcast: the current state is delivered right away.
+        ContextCompat.registerReceiver(
+            appContext, receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED), null, handler,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    private fun stopBattery() {
+        batteryReceiver?.let { appContext.unregisterReceiver(it) }
+        batteryReceiver = null
+    }
+
+    private fun readBatterySticky(): Reading? {
+        val intent = ContextCompat.registerReceiver(
+            appContext, null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED,
+        ) ?: return latest[SensorCatalog.BATTERY]
+        return batteryReading(intent)?.also { latest[SensorCatalog.BATTERY] = it }
+    }
+
+    private fun batteryReading(intent: Intent): Reading? {
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        if (level < 0 || scale <= 0) return null
+        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        val percent = Math.round(level * 100f / scale)
+        return Reading(
+            SensorCatalog.BATTERY, "state", Values.battery(percent, charging), "%",
+            System.currentTimeMillis(), SystemClock.elapsedRealtimeNanos(),
+        )
+    }
+
+    companion object {
+        const val MIN_RATE_HZ = 1.0
+        const val DEFAULT_RATE_HZ = 50.0
+        private const val FALLBACK_MAX_HZ = 200.0
+        private const val ONE_SHOT_TIMEOUT_MS = 1_000L
+
+        /** Convert a SensorEvent timestamp (elapsedRealtimeNanos timebase) to Unix millis. */
+        fun wallClockMillis(eventNanos: Long): Long =
+            System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() - eventNanos) / 1_000_000
+    }
+}

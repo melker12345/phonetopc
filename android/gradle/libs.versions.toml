@@ -12,7 +12,7 @@ lifecycle = "2.10.0"
 navigation = "2.10.2"
 datastore = "1.2.1"
 junit = "4.13.2"
-slf4j = "2.0.17"
+slf4j = "2.0.20"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
