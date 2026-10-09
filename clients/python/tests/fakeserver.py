@@ -1,8 +1,10 @@
-"""In-process fake phonetopc/1 server for tests (follows spec/PROTOCOL.md draft 0).
+"""In-process fake phonetopc/1 server for tests (follows spec/PROTOCOL.md draft 1).
 
 Every client message is validated against spec/schemas/phonetopc-1.schema.json
 (as a request) and every server message the fake sends is validated too, so the
-fake itself can't drift from the spec. Violations are collected in
+fake itself can't drift from the spec. A response's ``result`` is additionally
+checked against ``$defs/resultByMethod/properties/<method>``, the method being
+looked up from the request with the same id. Violations are collected in
 ``schema_errors`` and checked by the ``server`` fixture at teardown.
 """
 
@@ -13,6 +15,7 @@ import contextlib
 import copy
 import itertools
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,16 @@ _validator_cls = jsonschema.validators.validator_for(SCHEMA)
 MESSAGE_VALIDATOR = _validator_cls(SCHEMA)
 #: Validates a message that must be a client request specifically.
 REQUEST_VALIDATOR = _validator_cls({**SCHEMA, "oneOf": [{"$ref": "#/$defs/request"}]})
+#: Validates the ``result`` of a response, by the method of the request it answers.
+RESULT_VALIDATORS = {
+    method: _validator_cls(
+        {
+            **{k: v for k, v in SCHEMA.items() if k != "oneOf"},
+            "$ref": f"#/$defs/resultByMethod/properties/{method}",
+        }
+    )
+    for method in SCHEMA["$defs"]["resultByMethod"]["properties"]
+}
 
 DEVICE = {
     "id": "a1b2c3d4",
@@ -58,7 +71,7 @@ SENSORS: list[dict[str, Any]] = [
      "mode": "on_change", "available": True},
     {"source": "ui", "types": ["tile_tap"], "unit": "", "shape": "bool",
      "mode": "on_change", "available": True},
-    # Not in the draft-0 catalog: clients must tolerate it.
+    # Not in the spec's catalog: clients must tolerate it.
     {"source": "barometer", "types": ["pressure"], "unit": "hPa", "shape": "number",
      "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 25, "default_rate_hz": 5,
      "available": True},
@@ -75,6 +88,7 @@ ERRORS = {
     "invalid_params": -32602,
     "method_not_found": -32601,
     "invalid_request": -32600,
+    "parse_error": -32700,
 }
 
 
@@ -90,12 +104,72 @@ def sample_value(source: str, n: int) -> Any:
     return float(n)
 
 
+def _is_num(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _distance(a: Any, b: Any) -> float | None:
+    """min_delta distance, or None where min_delta doesn't apply (bool, object)."""
+    if _is_num(a) and _is_num(b):
+        return float(abs(a - b))
+    vectors = isinstance(a, list) and isinstance(b, list) and len(a) == len(b)
+    if vectors and all(map(_is_num, a + b)):
+        return math.dist(a, b)
+    return None
+
+
+#: Required and optional string params, per method.
+_STR_PARAMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "hello": (("protocol",), ()),
+    "subscribe": (("source",), ("type",)),
+    "unsubscribe": (("subscription",), ()),
+    "get": (("source",), ("type",)),
+}
+
+
+def _params_problem(method: str, params: Any) -> str | None:
+    """Why ``params`` are invalid (-32602), or None. Unknown params are ignored."""
+    if not isinstance(params, dict):
+        return "params must be an object"
+    required, optional = _STR_PARAMS.get(method, ((), ()))
+    for key in required:
+        if not isinstance(params.get(key), str):
+            return f"{key} must be a string"
+    for key in optional:
+        if key in params and not isinstance(params[key], str):
+            return f"{key} must be a string"
+    if method == "subscribe":
+        if "rate_hz" in params and not (_is_num(params["rate_hz"]) and params["rate_hz"] > 0):
+            return "rate_hz must be a number > 0"
+        if "min_delta" in params and not (
+            _is_num(params["min_delta"]) and params["min_delta"] >= 0
+        ):
+            return "min_delta must be a number >= 0"
+    return None
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not strict JSON")
+
+
+def _id_key(req_id: Any) -> tuple[str, Any]:
+    # 1 and "1" are different ids.
+    return (type(req_id).__name__, req_id)
+
+
+def _valid_id(req_id: Any) -> bool:
+    """PROTOCOL.md section 2: an integer or a string (not a bool, float or null)."""
+    return isinstance(req_id, str) or (isinstance(req_id, int) and not isinstance(req_id, bool))
+
+
 class Session:
     def __init__(self, server: FakeServer, ws: ServerConnection) -> None:
         self.server = server
         self.ws = ws
         self.hello_done = False
         self.subs: dict[str, dict[str, Any]] = {}
+        #: Method of each request still awaiting its response, by id.
+        self.methods: dict[tuple[str, Any], str] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
 
     def spawn(self, coro: Any) -> None:
@@ -122,6 +196,9 @@ class FakeServer:
         self.auto_stream = True
         #: Forget subscriptions on unsubscribe (-> unknown_subscription).
         self.forget_subscriptions = False
+        #: Send the current value (from ``values``) as seq 0 when subscribing to
+        #: an on_change source, as PROTOCOL.md 4.3 recommends.
+        self.initial_values = True
         #: Leave "mode" out of subscribe results, like a draft 0 server.
         #: (Off-spec for draft 1, so the schema check must be relaxed.)
         self.omit_mode = False
@@ -183,10 +260,18 @@ class FakeServer:
 
     # -- protocol ---------------------------------------------------------
 
-    async def _send(self, session: Session, msg: Any, *, validate: bool = True) -> None:
-        if validate:
-            for err in MESSAGE_VALIDATOR.iter_errors(msg):
-                self.schema_errors.append(f"server sent invalid message {msg}: {err.message}")
+    async def _send(self, session: Session, msg: Any) -> None:
+        for err in MESSAGE_VALIDATOR.iter_errors(msg):
+            self.schema_errors.append(f"server sent invalid message {msg}: {err.message}")
+        if isinstance(msg, dict) and "id" in msg:
+            # Responses don't name their method: find it via the request id.
+            method = session.methods.pop(_id_key(msg["id"]), None)
+            validator = RESULT_VALIDATORS.get(method) if method else None
+            if validator is not None and "result" in msg:
+                for err in validator.iter_errors(msg["result"]):
+                    self.schema_errors.append(
+                        f"server sent invalid {method} result {msg['result']}: {err.message}"
+                    )
         self.sent.append(msg)
         await session.ws.send(json.dumps(msg))
 
@@ -216,9 +301,16 @@ class FakeServer:
     async def _send_event(
         self, session: Session, sub_id: str, sub: dict[str, Any], value: Any
     ) -> None:
+        # min_delta filters before seq is assigned (PROTOCOL.md section 5), and
+        # only applies to number / vec3 / quat values (section 4.3).
+        if "last" in sub and sub.get("min_delta"):
+            d = _distance(value, sub["last"])
+            if d is not None and d < sub["min_delta"]:
+                return
+        sub["last"] = value
         params = self._event_params(sub_id, sub, value)
         sub["seq"] += 1
-        if params["seq"] in self.skip_seqs:
+        if params["seq"] in self.skip_seqs:  # dropped "for backpressure": a seq gap
             return
         await self._send(session, {"jsonrpc": "2.0", "method": "event", "params": params})
 
@@ -239,23 +331,25 @@ class FakeServer:
                     await ws.close(1003, "binary frames are reserved")
                     return
                 try:
-                    msg = json.loads(raw)
+                    msg = json.loads(raw, parse_constant=_reject_constant)
                 except ValueError:
-                    await self._send(
-                        session,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": None,
-                            "error": {"code": -32700, "message": "parse error"},
-                        },
-                    )
+                    await self._error(session, None, "parse_error", "parse error")
                     continue
                 self.received.append(msg)
                 for err in REQUEST_VALIDATOR.iter_errors(msg):
                     self.schema_errors.append(f"client sent invalid request {msg}: {err.message}")
-                if isinstance(msg, list):
-                    await self._error(session, None, "invalid_request", "batches not supported")
+                if not isinstance(msg, dict):
+                    await self._error(session, None, "invalid_request", "not a JSON object")
                     continue
+                if "id" not in msg:
+                    continue  # client notification: ignored, never answered
+                if not _valid_id(msg["id"]) or msg.get("jsonrpc") != "2.0":
+                    await self._error(session, None, "invalid_request", "invalid request")
+                    continue
+                if not isinstance(msg.get("method"), str):
+                    await self._error(session, msg["id"], "invalid_request", "invalid request")
+                    continue
+                session.methods[_id_key(msg["id"])] = msg["method"]
                 session.spawn(self._dispatch(session, msg))
         except Exception:
             pass
@@ -267,15 +361,30 @@ class FakeServer:
     async def _dispatch(self, session: Session, msg: dict[str, Any]) -> None:
         method = msg.get("method")
         req_id = msg.get("id")
-        params = msg.get("params") or {}
+        params = msg.get("params")
+        if params is None:  # absent, or an explicit null (PROTOCOL.md section 2)
+            params = {}
         if method in self.close_on:
             await session.ws.close(1011, "simulated crash")
             return
         delay = self.delays.get(str(method), 0.0)
-        if method == "get":
+        if method == "get" and isinstance(params, dict):
             delay = self.get_delays.get(params.get("source"), delay)
         if delay:
             await asyncio.sleep(delay)
+
+        # Hello gating comes first, even for unknown methods (section 3).
+        if method != "hello" and not session.hello_done:
+            await self._error(session, req_id, "hello_required", "say hello first")
+            return
+        if method not in RESULT_VALIDATORS:  # i.e. not one of the spec's methods
+            await self._error(session, req_id, "method_not_found", f"no method {method!r}")
+            return
+        problem = _params_problem(method, params)
+        if problem:
+            await self._error(session, req_id, "invalid_params", problem)
+            return
+        assert isinstance(params, dict)
 
         if method == "hello":
             if params.get("protocol") not in self.supported_protocols:
@@ -299,9 +408,6 @@ class FakeServer:
                 },
             )
             return
-        if not session.hello_done:
-            await self._error(session, req_id, "hello_required", "say hello first")
-            return
         if method == "list_sensors":
             await self._result(session, req_id, {"sensors": copy.deepcopy(SENSORS)})
         elif method == "subscribe":
@@ -315,8 +421,6 @@ class FakeServer:
             await self._result(session, req_id, {})
         elif method == "get":
             await self._get(session, req_id, params)
-        else:
-            await self._error(session, req_id, "method_not_found", f"no method {method!r}")
 
     def _sensor(self, source: Any) -> dict[str, Any] | None:
         return next((s for s in SENSORS if s["source"] == source), None)
@@ -349,18 +453,27 @@ class FakeServer:
         }
         if self.omit_mode:
             del result["mode"]
-        sub: dict[str, Any] = {"source": source, "seq": 0}
+        sub: dict[str, Any] = {"source": source, "seq": 0, "min_delta": params.get("min_delta")}
         if info["mode"] == "continuous":
             rate = params.get("rate_hz", info["default_rate_hz"])
             rate = min(max(rate, info["min_rate_hz"]), info["max_rate_hz"])
             result["rate_hz"] = rate
             sub["rate_hz"] = rate
-        session.subs[sub_id] = sub
+        # rate_hz is ignored for on_change sources, and left out of the result.
         for _ in range(self.events_before_response):
             await self._send_event(session, sub_id, sub, sample_value(source, sub["seq"]))
+        # Registered before the response so an unsubscribe can't race it. No
+        # event can be sent for it until the response is out: streaming and
+        # the initial value start below, and tests emit() only once the
+        # client has the response (the response must come first, 4.3).
+        session.subs[sub_id] = sub
         await self._result(session, req_id, result)
-        if info["mode"] == "continuous" and self.auto_stream:
-            session.spawn(self._stream(session, sub_id, sub))
+        if info["mode"] == "continuous":
+            if self.auto_stream:
+                session.spawn(self._stream(session, sub_id, sub))
+        elif self.initial_values and source in self.values:
+            # The current value of a stateful on_change source comes as seq 0.
+            await self._send_event(session, sub_id, sub, self.values[source])
 
     async def _get(self, session: Session, req_id: Any, params: dict[str, Any]) -> None:
         source = params.get("source")
@@ -368,6 +481,9 @@ class FakeServer:
             return
         info = self._sensor(source)
         assert info is not None
+        if "type" in params and params["type"] not in info["types"]:
+            await self._error(session, req_id, "invalid_params", "unknown type")
+            return
         if info["mode"] == "continuous":
             value = sample_value(source, 0)
         elif source in self.values:

@@ -219,10 +219,39 @@ async def test_two_subscriptions_same_source(server: FakeServer, phone: Phone) -
     async with phone.subscribe("battery") as a, phone.subscribe("battery") as b:
         assert a.id != b.id
         await server.emit("battery", {"level": 50, "charging": False}, count=3)
-        ga, gb = await take(a, 3), await take(b, 3)
-    assert [e.seq for e in ga] == [0, 1, 2] == [e.seq for e in gb]
+        ga, gb = await take(a, 4), await take(b, 4)
+    # seq 0 is each subscription's initial value, then the emitted events.
+    assert [e.seq for e in ga] == [0, 1, 2, 3] == [e.seq for e in gb]
+    assert ga[0].value == {"level": 82, "charging": True}
+    assert ga[1].value == {"level": 50, "charging": False}
     assert {e.subscription for e in ga} == {a.id}
     assert {e.subscription for e in gb} == {b.id}
+
+
+async def test_on_change_initial_value(server: FakeServer, phone: Phone) -> None:
+    server.values["light"] = 120.0
+    async with phone.subscribe("light") as light, phone.subscribe("ui") as ui:
+        (first,) = await take(light, 1)
+        assert (first.seq, first.value) == (0, 120.0)
+        await server.emit("light", 300.0)
+        await server.emit("ui", True)
+        (second,) = await take(light, 1)
+        assert (second.seq, second.value) == (1, 300.0)
+        # ui has no state, so its first event is the first tap, also seq 0.
+        (tap,) = await take(ui, 1)
+        assert (tap.seq, tap.value) == (0, True)
+    assert light.dropped == 0 and ui.dropped == 0
+
+
+async def test_min_delta_filtering_is_not_a_gap(server: FakeServer, phone: Phone) -> None:
+    # Filtered readings don't consume a seq number (PROTOCOL.md section 5).
+    server.values["light"] = 5.0
+    async with phone.subscribe("light", min_delta=1.0) as events:
+        for v in (5.5, 4.2, 7.0, 7.9, 9.0):
+            await server.emit("light", v)
+        got = await take(events, 3)
+    assert [(e.seq, e.value) for e in got] == [(0, 5.0), (1, 7.0), (2, 9.0)]
+    assert events.dropped == 0
 
 
 async def test_seq_gaps_counted(server: FakeServer, phone: Phone) -> None:
@@ -254,7 +283,8 @@ async def test_overflow_errors_for_on_change(server: FakeServer, phone: Phone) -
     server.auto_stream = False
     async with phone.subscribe("battery", queue_size=2) as events:
         assert events.overflow == "error"
-        await server.emit("battery", count=3)
+        await until(lambda: events.received == 1)  # the initial value
+        await server.emit("battery", count=2)
         await until(lambda: events.received == 3)
         # Queued events are still delivered, then the overflow is raised.
         assert len(await take(events, 2)) == 2
@@ -286,7 +316,10 @@ async def test_overflow_policy_without_mode(server: FakeServer, phone: Phone) ->
         assert ev.mode == "continuous" and ev.overflow == "drop_oldest"
     async with phone.subscribe("ui") as ev:
         assert ev.mode == "on_change" and ev.overflow == "error"
-    server.schema_errors = [e for e in server.schema_errors if "'mode'" not in e]
+    # The fake's result validation (by request method) caught the missing mode.
+    assert len(server.schema_errors) == 2
+    assert all("'mode' is a required property" in e for e in server.schema_errors)
+    server.schema_errors.clear()
 
 
 async def test_events_before_subscribe_response(server: FakeServer, phone: Phone) -> None:
