@@ -1,0 +1,26 @@
+{
+  "description": "Test vectors for SECURITY.md. Keys are test-only and public; never use them for anything else.",
+  "pin": [
+    {
+      "cert": "pc-cert.pem",
+      "pin": "sha256/89Nebgssmdcpo6zU3xFLFXCRqV4YpVYbvJbyq99cMGA"
+    },
+    {
+      "cert": "phone-cert.pem",
+      "pin": "sha256/tQITurCV6l1Rq9Rk0X_kPrHlWaaKPnkI6CGl03GEaBc"
+    }
+  ],
+  "sas": {
+    "pc_pin": "sha256/89Nebgssmdcpo6zU3xFLFXCRqV4YpVYbvJbyq99cMGA",
+    "phone_pin": "sha256/tQITurCV6l1Rq9Rk0X_kPrHlWaaKPnkI6CGl03GEaBc",
+    "npc_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "nphone_b64url": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "commitment": "Yw3NKWbEM2aRElRIu7JbT_QSpJxzLbLIq8G4WBvXEN0",
+    "sha256_hex": "203e187b2de2d4deb18bba8a09c03049ebefd06a98e4c44d7b99fd5902d79084",
+    "code": "940411"
+  },
+  "base64url": {
+    "bytes_hex": "fbff00",
+    "encoded": "-_8A"
+  }
+}

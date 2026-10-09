@@ -109,7 +109,10 @@ For when the user doesn't want to scan, and mDNS works.
 code = decimal( uint32_be( SHA-256( "phonetopc-sas/1" ‖ pc_pin ‖ phone_pin ‖ Npc ‖ Nphone )[0..4] ) mod 1 000 000 ), zero-padded to 6 digits
 ```
 
-where the pins are the ASCII strings (`sha256/…`); the phone uses `pc_pin_seen`, and the PC uses its own pin.
+where the pins are their ASCII strings (`sha256/…`), `Npc` and `Nphone` are the raw 32 bytes (not their base64url
+text), and `‖` is plain concatenation with no separators. The phone uses `pc_pin_seen`, the PC uses its own pin.
+[`conformance/vectors/vectors.json`](conformance/vectors/vectors.json) has worked examples for the pin, the
+commitment and the code; every implementation MUST test against them.
 A man in the middle presents a different PC pin to the phone than the PC's real one, so the codes differ.
 
 - Both screens show the code. The user confirms on **both**: the phone sends `pair_sas_confirm`
