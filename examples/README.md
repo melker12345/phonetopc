@@ -21,7 +21,21 @@ export PHONETOPC_ADDR=ws://192.168.1.20:8765   # or for every script at once
 |---|---|---|
 | [`print_gyro.py`](print_gyro.py) | Hello world: prints gyroscope readings at 50 Hz | none |
 | [`air_mouse.py`](air_mouse.py) | Moves the mouse pointer with the gyroscope; a Quick Settings tile tap sends a left click. `--scale` sets speed in pixels per radian, `--deadzone` sets the rad/s threshold below which movement is ignored | `pip install evdev`, plus write access to `/dev/uinput` (udev rule + `input` group, see the docstring) |
+| [`approve.py`](approve.py) | Fingerprint-gated commands: `python examples/approve.py "Run deploy?" -- ./deploy.sh` runs `./deploy.sh` only after you approve with your fingerprint on the phone, and the phone's signature checks out. Without a command it just sets the exit status (`approve.py "Reset the DB?" && make reset-db`) | `pip install 'phonetopc[approval]'`; a phone with a fingerprint enrolled; secure mode |
 | [`lock_on_tile.py`](lock_on_tile.py) | Locks the PC when you tap the phonetopc Quick Settings tile. Uses `loginctl lock-session`, then `xdg-screensaver lock`, or your own `--command`. Reconnects when the phone drops off | a locker that reacts to logind's `Lock` signal (hypridle, swayidle, xss-lock, GNOME, KDE), or `--command` |
+
+`approve.py` exits with the command's status when it ran, 1 when not approved (denied, cancelled, timed out, ...) and 2 on errors. If you add or remove fingerprints on the phone, its approval key changes and `approve.py` refuses until you run `phonetopc approval-key --accept`. To gate code in your own program instead of a command:
+
+```python
+import phonetopc.sync
+
+def approved(reason: str) -> bool:
+    with phonetopc.sync.connect() as phone:
+        return bool(phone.request_approval(reason))
+
+if approved("Delete 1,204 old backups?"):
+    delete_old_backups()
+```
 
 `air_mouse.py` uses Linux `uinput`, which sits below the display server, so it works the same on Wayland and X11.
 
