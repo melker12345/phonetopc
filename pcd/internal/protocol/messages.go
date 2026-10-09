@@ -150,43 +150,43 @@ func (r *Reading) SetValue(v any) error {
 }
 
 // Number decodes a number value (shape "number").
-func (r *Reading) Number() (float64, error) {
+func (r Reading) Number() (float64, error) {
 	var f float64
 	return f, r.decode(&f)
 }
 
 // Bool decodes a bool value (shape "bool").
-func (r *Reading) Bool() (bool, error) {
+func (r Reading) Bool() (bool, error) {
 	var b bool
 	return b, r.decode(&b)
 }
 
 // Vec3 decodes a vec3 value.
-func (r *Reading) Vec3() ([3]float64, error) {
+func (r Reading) Vec3() ([3]float64, error) {
 	var v [3]float64
 	return v, r.decodeFixed(v[:])
 }
 
 // Quat decodes a quat value as [x, y, z, w].
-func (r *Reading) Quat() ([4]float64, error) {
+func (r Reading) Quat() ([4]float64, error) {
 	var v [4]float64
 	return v, r.decodeFixed(v[:])
 }
 
 // Battery decodes a battery/state value.
-func (r *Reading) Battery() (Battery, error) {
+func (r Reading) Battery() (Battery, error) {
 	var b Battery
 	return b, r.decode(&b)
 }
 
-func (r *Reading) decode(v any) error {
+func (r Reading) decode(v any) error {
 	if err := json.Unmarshal(r.Value, v); err != nil {
 		return fmt.Errorf("%s/%s value: %w", r.Source, r.Type, err)
 	}
 	return nil
 }
 
-func (r *Reading) decodeFixed(dst []float64) error {
+func (r Reading) decodeFixed(dst []float64) error {
 	var s []float64
 	if err := r.decode(&s); err != nil {
 		return err
