@@ -43,14 +43,17 @@ class NetworkMonitor(context: Context, scope: CoroutineScope) {
         awaitClose { if (cm != null) runCatching { cm.unregisterNetworkCallback(callback) } }
     }
 
+    /** Lazy so the first interface scan doesn't run during Application.onCreate. */
     @OptIn(kotlinx.coroutines.FlowPreview::class)
-    val addresses: StateFlow<List<String>> = changes
-        .conflate()
-        .onStart { emit(Unit) }
-        .debounce(DEBOUNCE_MS)
-        .map { localAddresses() }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), localAddresses())
+    val addresses: StateFlow<List<String>> by lazy {
+        changes
+            .conflate()
+            .onStart { emit(Unit) }
+            .debounce(DEBOUNCE_MS)
+            .map { localAddresses() }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), localAddresses())
+    }
 
     companion object {
         private const val DEBOUNCE_MS = 500L
