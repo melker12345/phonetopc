@@ -1,4 +1,4 @@
-"""Hello world: print the phone's gyroscope. Usage: python print_gyro.py [host[:port]]"""
+"""Hello world: print the phone's gyroscope. Usage: python print_gyro.py [host[:port] | ws://...]"""
 
 import asyncio
 import sys
@@ -7,7 +7,9 @@ import phonetopc
 
 
 async def main() -> None:
-    addr = sys.argv[1] if len(sys.argv) > 1 else None  # None: $PHONETOPC_ADDR or 127.0.0.1:8765
+    # None: $PHONETOPC_ADDR, else the phone paired with `phonetopc pair`.
+    # A ws:// URL (e.g. ws://127.0.0.1:8765 for phonetopc-mock) means dev mode.
+    addr = sys.argv[1] if len(sys.argv) > 1 else None
     async with phonetopc.connect(addr, client_name="print_gyro") as phone:
         print(f"connected to {phone.device.name}")
         async with phone.subscribe("gyro", rate_hz=50) as events:

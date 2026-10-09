@@ -13,6 +13,7 @@ Locking tries, in order:
 
 Usage::
 
+    python lock_on_tile.py
     python lock_on_tile.py --addr 192.168.1.20
     python lock_on_tile.py --command 'swaylock -f'
 
@@ -80,8 +81,14 @@ async def main_async(args: argparse.Namespace) -> None:
     while True:
         try:
             await watch(args.addr, chain)
-        except phonetopc.PhonetopcError:
-            raise  # e.g. the tile source is disabled: retrying won't help
+        except (
+            phonetopc.PhonetopcError,  # e.g. tile source disabled, or this PC was revoked
+            phonetopc.PinMismatch,
+            phonetopc.NotPaired,
+            phonetopc.AmbiguousDevice,
+            phonetopc.CredentialStoreError,
+        ):
+            raise  # retrying won't help
         except (phonetopc.Error, OSError) as exc:
             print(f"disconnected ({exc}); retrying in {RECONNECT_S:g} s")
         await asyncio.sleep(RECONNECT_S)
@@ -89,14 +96,18 @@ async def main_async(args: argparse.Namespace) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Lock the PC from the phone's Quick Settings tile.")
-    p.add_argument("--addr", help="phone host[:port] (default: $PHONETOPC_ADDR)")
+    p.add_argument(
+        "--addr",
+        help="phone host[:port], or ws://host:port for a phone in dev mode "
+        "(default: $PHONETOPC_ADDR, else the paired phone)",
+    )
     p.add_argument("--command", help="lock command to run instead of loginctl/xdg-screensaver")
     args = p.parse_args()
     try:
         asyncio.run(main_async(args))
     except KeyboardInterrupt:
         pass
-    except phonetopc.PhonetopcError as exc:
+    except phonetopc.Error as exc:
         sys.exit(f"lock_on_tile: {exc}")
 
 

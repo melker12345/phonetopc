@@ -125,7 +125,11 @@ async def run(args: argparse.Namespace, mouse: AirMouse) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--addr", help="phone host[:port] (default: $PHONETOPC_ADDR)")
+    p.add_argument(
+        "--addr",
+        help="phone host[:port], or ws://host:port for a phone in dev mode "
+        "(default: $PHONETOPC_ADDR, else the paired phone)",
+    )
     p.add_argument("--scale", type=float, default=800.0, help="pixels per radian (800)")
     p.add_argument("--deadzone", type=float, default=0.03, help="ignore rad/s below this (0.03)")
     p.add_argument("--rate", type=float, default=100.0, help="gyro rate in Hz (100)")

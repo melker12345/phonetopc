@@ -1,13 +1,21 @@
 # Examples
 
-Small scripts built on the Python client in [`clients/python`](../clients/python). Install it first:
+Small scripts built on the Python client in [`clients/python`](../clients/python). Install it, and pair your phone once with the Go CLI from [`pcd/`](../pcd):
 
 ```sh
-pip install -e clients/python
-export PHONETOPC_ADDR=192.168.1.20      # your phone's IP (port defaults to 8765)
+pip install -e clients/python           # add [discovery] to find the phone via mDNS
+phonetopc pair                          # scan the QR code with the phone app
+python examples/print_gyro.py           # no address needed: the paired phone, over pinned TLS
 ```
 
-Every script also takes `--addr host[:port]` (`print_gyro.py` takes the address as its only argument). Over USB, run `adb forward tcp:8765 tcp:8765` and use `127.0.0.1`.
+With several paired phones, set the address of the one you want (`--addr host[:port]`; `print_gyro.py` takes it as its only argument) or `PHONETOPC_ADDR`. Over USB, run `adb forward tcp:8765 tcp:8765` and use `127.0.0.1`.
+
+For a phone in dev mode, or the mock phone (`phonetopc-mock`), pass a `ws://` URL, which means plaintext with no pairing:
+
+```sh
+python examples/print_gyro.py ws://127.0.0.1:8765
+export PHONETOPC_ADDR=ws://192.168.1.20:8765   # or for every script at once
+```
 
 | Script | What it does | Extra requirements |
 |---|---|---|
@@ -23,4 +31,5 @@ For a quick look at any sensor without writing code:
 python -m phonetopc list
 python -m phonetopc tail gyro --rate 50
 python -m phonetopc get battery
+python -m phonetopc list --dev --addr 127.0.0.1   # dev mode / the mock
 ```
