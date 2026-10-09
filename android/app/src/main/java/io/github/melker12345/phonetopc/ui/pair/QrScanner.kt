@@ -4,19 +4,23 @@ import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceRequest
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
-import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
@@ -41,7 +45,7 @@ fun QrScanner(onResult: (String) -> Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnResult by rememberUpdatedState(onResult)
-    val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
+    var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val done = remember { AtomicBoolean(false) }
     val bound = remember { AtomicReference<ProcessCameraProvider?>(null) }
@@ -50,7 +54,7 @@ fun QrScanner(onResult: (String) -> Boolean, modifier: Modifier = Modifier) {
         val provider = runCatching { ProcessCameraProvider.awaitInstance(context) }
             .onFailure { Log.w(TAG, "no camera provider", it) }
             .getOrNull() ?: return@LaunchedEffect
-        val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+        val preview = Preview.Builder().build().also { p -> p.setSurfaceProvider { request -> surfaceRequest = request } }
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
@@ -77,7 +81,9 @@ fun QrScanner(onResult: (String) -> Boolean, modifier: Modifier = Modifier) {
         }
     }
 
-    AndroidView(factory = { previewView }, modifier = modifier)
+    Box(modifier) {
+        surfaceRequest?.let { CameraXViewfinder(surfaceRequest = it, contentScale = ContentScale.Crop) }
+    }
 }
 
 /** ZXing over the luminance (Y) plane of a camera frame; QR codes don't care about rotation. */

@@ -62,7 +62,9 @@ dependencies {
     // QR scanning without Google Play Services (works on de-Googled phones and F-Droid).
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
+    // camera-compose's viewfinder, not camera-view: camera-view pulls in camera-video, Media3
+    // and Guava (several MB) that a QR scanner doesn't need.
+    implementation(libs.androidx.camera.compose)
     implementation(libs.zxing.core)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
