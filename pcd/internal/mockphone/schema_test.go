@@ -3,6 +3,7 @@ package mockphone_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,7 +20,9 @@ var specDir = filepath.Join("..", "..", "..", "spec")
 
 // schemas holds the compiled message schema and the per-method result
 // schemas. The top-level schema accepts any "result" in a response, so
-// results are additionally checked against the matching $defs entry.
+// results are additionally checked against
+// $defs/resultByMethod/properties/<method>, found by correlating the
+// response id with the request that used it.
 type schemas struct {
 	message *jsonschema.Schema
 	results map[string]*jsonschema.Schema // by method
@@ -44,14 +47,12 @@ var loadSchemasOnce = sync.OnceValues(func() (*schemas, error) {
 	if s.message, err = c.Compile(id); err != nil {
 		return nil, err
 	}
-	for method, def := range map[string]string{
-		protocol.MethodHello:       "helloResult",
-		protocol.MethodListSensors: "listSensorsResult",
-		protocol.MethodSubscribe:   "subscribeResult",
-		protocol.MethodGet:         "reading",
+	for _, method := range []string{
+		protocol.MethodHello, protocol.MethodListSensors, protocol.MethodSubscribe,
+		protocol.MethodUnsubscribe, protocol.MethodGet,
 	} {
-		if s.results[method], err = c.Compile(id + "#/$defs/" + def); err != nil {
-			return nil, err
+		if s.results[method], err = c.Compile(id + "#/$defs/resultByMethod/properties/" + method); err != nil {
+			return nil, fmt.Errorf("result schema for %s: %w", method, err)
 		}
 	}
 	return s, nil
@@ -109,14 +110,15 @@ func (v *frameValidator) check(dir mockphone.Direction, frame []byte, expectInva
 	}
 	v.checked++
 	if dir == mockphone.ServerToClient && m.Kind() == protocol.KindResponse && m.Result != nil {
-		method := v.methods[string(m.ID)]
-		if rs := v.s.results[method]; rs != nil {
-			res, _ := decodeInstance(m.Result)
-			if err := rs.Validate(res); err != nil {
-				v.t.Errorf("%s result violates schema: %s\n%v", method, m.Result, err)
-			}
-		} else if method == protocol.MethodUnsubscribe && string(m.Result) != "{}" {
-			v.t.Errorf("unsubscribe result %s, want {}", m.Result)
+		method, ok := v.methods[string(m.ID)]
+		rs := v.s.results[method]
+		if !ok || rs == nil {
+			v.t.Errorf("result for id %s does not answer a known request method (%q)", m.ID, method)
+			return
+		}
+		res, _ := decodeInstance(m.Result)
+		if err := rs.Validate(res); err != nil {
+			v.t.Errorf("%s result violates schema: %s\n%v", method, m.Result, err)
 		}
 	}
 }
@@ -215,5 +217,33 @@ func TestClientAndMockFramesMatchSchema(t *testing.T) {
 	t.Logf("validated %d frames", v.checked)
 	if v.checked < 40 {
 		t.Errorf("only %d frames validated", v.checked)
+	}
+}
+
+// TestResultSchemasRejectBadResults makes sure the per-method result schemas
+// are actually applied, so the frame checks above can't pass vacuously.
+func TestResultSchemasRejectBadResults(t *testing.T) {
+	s := loadSchemas(t)
+	for _, c := range []struct {
+		method, result string
+		ok             bool
+	}{
+		{protocol.MethodSubscribe, `{"subscription":"s-1","source":"gyro","types":["rotation"],"mode":"continuous","rate_hz":50}`, true},
+		{protocol.MethodSubscribe, `{"subscription":"s-1","source":"gyro","types":["rotation"],"rate_hz":50}`, false},
+		{protocol.MethodSubscribe, `{"subscription":"s-1","source":"gyro","types":["rotation"],"mode":"sometimes"}`, false},
+		{protocol.MethodUnsubscribe, `{}`, true},
+		{protocol.MethodUnsubscribe, `{"ok":true}`, false},
+		{protocol.MethodGet, `{"source":"battery","type":"state","value":{"level":50,"charging":false},"unit":"%","ts":1,"ts_mono_ns":2,"device":"d"}`, true},
+		{protocol.MethodGet, `{"source":"battery","type":"state","value":50,"unit":"%","ts":1,"ts_mono_ns":2,"device":"d"}`, false},
+		{protocol.MethodListSensors, `{}`, false},
+		{protocol.MethodHello, `{"protocol":"phonetopc/2"}`, false},
+	} {
+		inst, err := decodeInstance([]byte(c.result))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.results[c.method].Validate(inst); (err == nil) != c.ok {
+			t.Errorf("%s result %s: valid = %v, want %v (%v)", c.method, c.result, err == nil, c.ok, err)
+		}
 	}
 }
