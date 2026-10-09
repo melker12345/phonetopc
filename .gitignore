@@ -1,0 +1,30 @@
+# Go
+/pcd/bin/
+*.test
+*.out
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.DS_Store

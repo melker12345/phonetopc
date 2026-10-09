@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/melker12345/phonetopc/spec/schemas/phonetopc-1.schema.json",
+  "title": "phonetopc/1 messages (draft 0)",
+  "description": "Every WebSocket text frame is one of these. See ../PROTOCOL.md.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" },
+    { "$ref": "#/$defs/eventNotification" }
+  ],
+  "$defs": {
+    "id": { "type": ["integer", "string"] },
+
+    "request": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/id" },
+        "method": { "enum": ["hello", "list_sensors", "subscribe", "unsubscribe", "get"] },
+        "params": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "method": { "const": "hello" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/helloParams" } } } },
+        { "if": { "properties": { "method": { "const": "subscribe" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/subscribeParams" } } } },
+        { "if": { "properties": { "method": { "const": "unsubscribe" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/unsubscribeParams" } } } },
+        { "if": { "properties": { "method": { "const": "get" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/getParams" } } } }
+      ]
+    },
+
+    "response": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "anyOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "result": {},
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "oneOf": [{ "required": ["result"] }, { "required": ["error"] }]
+    },
+
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "integer" },
+        "message": { "type": "string" },
+        "data": { "type": "object", "properties": { "name": { "type": "string" } } }
+      }
+    },
+
+    "helloParams": {
+      "type": "object",
+      "required": ["protocol"],
+      "properties": {
+        "protocol": { "type": "string" },
+        "client": {
+          "type": "object",
+          "properties": { "name": { "type": "string" }, "version": { "type": "string" } }
+        }
+      }
+    },
+
+    "helloResult": {
+      "type": "object",
+      "required": ["protocol", "server", "device", "capabilities"],
+      "properties": {
+        "protocol": { "const": "phonetopc/1" },
+        "server": {
+          "type": "object", "required": ["name", "version"],
+          "properties": { "name": { "type": "string" }, "version": { "type": "string" } }
+        },
+        "device": {
+          "type": "object", "required": ["id", "name", "platform"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "manufacturer": { "type": "string" },
+            "model": { "type": "string" },
+            "platform": { "type": "string" },
+            "platform_version": { "type": "string" }
+          }
+        },
+        "capabilities": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "sensorInfo": {
+      "type": "object",
+      "required": ["source", "types", "unit", "shape", "mode", "available"],
+      "properties": {
+        "source": { "type": "string" },
+        "types": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "unit": { "type": "string" },
+        "shape": { "enum": ["number", "bool", "vec3", "quat", "object"] },
+        "mode": { "enum": ["continuous", "on_change"] },
+        "min_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "max_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "default_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "available": { "type": "boolean" }
+      }
+    },
+
+    "listSensorsResult": {
+      "type": "object", "required": ["sensors"],
+      "properties": { "sensors": { "type": "array", "items": { "$ref": "#/$defs/sensorInfo" } } }
+    },
+
+    "subscribeParams": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string" },
+        "type": { "type": "string" },
+        "rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "min_delta": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "subscribeResult": {
+      "type": "object",
+      "required": ["subscription", "source", "types"],
+      "properties": {
+        "subscription": { "type": "string" },
+        "source": { "type": "string" },
+        "types": { "type": "array", "items": { "type": "string" } },
+        "rate_hz": { "type": "number" }
+      }
+    },
+
+    "unsubscribeParams": {
+      "type": "object", "required": ["subscription"],
+      "properties": { "subscription": { "type": "string" } }
+    },
+
+    "getParams": {
+      "type": "object", "required": ["source"],
+      "properties": { "source": { "type": "string" }, "type": { "type": "string" } }
+    },
+
+    "reading": {
+      "type": "object",
+      "required": ["source", "type", "value", "unit", "ts", "ts_mono_ns", "device"],
+      "properties": {
+        "source": { "type": "string" },
+        "type": { "type": "string" },
+        "value": {},
+        "unit": { "type": "string" },
+        "ts": { "type": "integer" },
+        "ts_mono_ns": { "type": "integer" },
+        "device": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "source": { "enum": ["accelerometer", "gyro"] } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/vec3" } } } },
+        { "if": { "properties": { "source": { "const": "game_rotation_vector" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/quat" } } } },
+        { "if": { "properties": { "source": { "enum": ["proximity", "light"] } } },
+          "then": { "properties": { "value": { "type": "number" } } } },
+        { "if": { "properties": { "source": { "const": "battery" } } },
+          "then": { "properties": { "value": {
+            "type": "object", "required": ["level", "charging"],
+            "properties": { "level": { "type": "number", "minimum": 0, "maximum": 100 }, "charging": { "type": "boolean" } } } } } },
+        { "if": { "properties": { "source": { "const": "ui" } } },
+          "then": { "properties": { "value": { "type": "boolean" } } } }
+      ]
+    },
+
+    "eventNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "not": { "required": ["id"] },
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "event" },
+        "params": {
+          "allOf": [
+            { "$ref": "#/$defs/reading" },
+            {
+              "type": "object",
+              "required": ["subscription", "seq"],
+              "properties": {
+                "subscription": { "type": "string" },
+                "seq": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "vec3": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "quat": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+  }
+}
