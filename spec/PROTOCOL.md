@@ -1,16 +1,21 @@
-# phonetopc protocol — version `phonetopc/1` (draft 0)
+# phonetopc protocol — version `phonetopc/1` (draft 1)
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 JSON Schemas for every message live in [`schemas/`](schemas/).
 
-Draft 0 covers milestone M1 from [`plan.md`](../plan.md): plaintext dev mode, discovery by manual address,
+Draft 1 covers milestone M1 from [`plan.md`](../plan.md): plaintext dev mode, discovery by manual address,
 sensor events. Pairing, TLS, tokens and commands are added in later drafts without breaking these messages.
+
+**Changes in draft 1** (clarifications found while building the Go mock, the Android app and the Python client):
+`subscribe` result gains `mode`; ordering guarantee between a `subscribe` response and its events; `on_change`
+subscriptions start with the current value; `seq` and `min_delta` semantics made precise; client notifications
+are ignored; `get` documents `type`; `unsubscribe` result and per-method results added to the schema.
 
 ## 1. Transport
 
 - The phone daemon is the **server**. Clients connect to it.
 - Endpoint: `ws://<phone-ip>:<port>/v1/ws`. Default port: **8765**.
-- Draft 0 is **plaintext dev mode only**: no TLS, no authentication. The phone app MUST make dev mode an explicit, off-by-default setting.
+- Draft 1 is **plaintext dev mode only**: no TLS, no authentication. The phone app MUST make dev mode an explicit, off-by-default setting.
 - Each WebSocket text frame carries exactly one UTF-8 JSON object. Batching multiple messages into one frame (JSON-RPC batch arrays) is NOT supported; a server MUST answer a batch array with error `-32600`.
 - Binary frames are reserved. Servers MUST close the connection with code 1003 on receiving one.
 - The PC daemon `phonetopcd` exposes the **same protocol** to local clients (Unix socket / localhost WS) in a later milestone.
@@ -21,14 +26,17 @@ All messages follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 
 - **Requests** (client → server) have `jsonrpc`, `id`, `method`, and optional `params` (object).
 - **Responses** (server → client) have `jsonrpc`, `id`, and exactly one of `result` or `error`.
-- **Notifications** (server → client) have `jsonrpc`, `method`, `params`, and no `id`. Draft 0 defines one: `event`.
+- **Notifications** (server → client) have `jsonrpc`, `method`, `params`, and no `id`. This draft defines one: `event`.
+- A message from the client **without** `id` is a JSON-RPC notification. This draft defines no client notifications, so servers MUST ignore them and MUST NOT reply. (A client that wants an answer sends an `id`.)
+- `params` MUST be an object if present. An explicit `"params": null` is treated as absent. Any other type gets `-32602`.
+- Frames that are not strict JSON (e.g. bare words, trailing garbage) get `-32700` with `"id": null`. A JSON value that isn't an object gets `-32600` with `"id": null`.
 - Clients MUST ignore unknown fields. Servers MUST ignore unknown fields in `params`.
-- `id` MAY be a number or string. Responses can arrive interleaved with events; clients correlate by `id`.
+- `id` MUST be an integer or a string. Servers SHOULD reject other forms (fractions, exponents, `null`) with `-32600`. Responses can arrive interleaved with events; clients correlate by `id`.
 
 ## 3. Session lifecycle
 
 1. Client opens the WebSocket.
-2. Client MUST send `hello` as its first request. Any other request before a successful `hello` gets error `-32003` (`hello_required`).
+2. Client MUST send `hello` as its first request. Any other request before a successful `hello` gets error `-32003` (`hello_required`), including unknown methods. Sending `hello` again later is allowed and has no effect on subscriptions; a failed `hello` does not undo an earlier successful one.
 3. Client calls `list_sensors`, `subscribe`, `get`, `unsubscribe` as needed.
 4. Closing the socket ends the session. All subscriptions of that session are dropped.
 
@@ -53,7 +61,7 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 
 - If `protocol` is not supported, the server returns error `-32004` (`unsupported_protocol`) with `data.supported` listing the versions it does support.
 - `device.id` is stable across restarts and reinstalls where the platform allows (a random ID generated on first run and stored).
-- `capabilities` lists optional feature groups. Draft 0 defines `events` and `get`. Later drafts add `commands`, `biometric`, etc.
+- `capabilities` lists optional feature groups. This draft defines `events` and `get`. Later drafts add `commands`, `biometric`, etc.
 
 ### 4.2 `list_sensors`
 
@@ -75,15 +83,20 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 
 ```jsonc
 {"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"source":"gyro","type":"rotation","rate_hz":100}}
-{"jsonrpc":"2.0","id":3,"result":{"subscription":"s-7f3a","source":"gyro","types":["rotation"],"rate_hz":100}}
+{"jsonrpc":"2.0","id":3,"result":{"subscription":"s-7f3a","source":"gyro","types":["rotation"],"mode":"continuous","rate_hz":100}}
 ```
 
 | Param | Required | Meaning |
 |---|---|---|
 | `source` | yes | Sensor source name (§6) |
 | `type` | no | Restrict to one event type. Omitted means all types of the source |
-| `rate_hz` | no | Continuous sensors only. Defaults to `default_rate_hz`. Clamped to `[min_rate_hz, max_rate_hz]`; the result reports the effective rate |
-| `min_delta` | no | Suppress events whose value differs from the last *sent* value by less than this (Euclidean distance for vectors, absolute difference for numbers) |
+| `rate_hz` | no | Must be > 0 (else `-32602`). Continuous sensors: defaults to `default_rate_hz`, clamped to `[min_rate_hz, max_rate_hz]`, and the result reports the effective rate. `on_change` sensors: ignored, and the result has no `rate_hz` |
+| `min_delta` | no | Must be ≥ 0. Suppress events whose value differs from the last *sent* value by less than this: absolute difference for `number`, Euclidean distance for `vec3`/`quat`. Ignored for `bool` and `object` values |
+
+The result has `subscription`, `source`, `types` (the types this subscription delivers), `mode` (copied from `list_sensors`), and `rate_hz` for continuous sensors.
+
+- **Ordering:** the server MUST send the `subscribe` response before the first `event` of that subscription. Clients MAY still buffer briefly in case of reordering by intermediaries, but a conforming server never does it.
+- **Initial value:** for an `on_change` source the server SHOULD send the current value as the first event (seq 0) right after the response, if one is known, so clients don't wait for a change to learn the state. Event-like sources with no state (`ui`) send nothing until something happens.
 
 - The server MAY deliver events at a slightly different rate than requested; Android treats rates as hints.
 - A session MAY hold several subscriptions to the same source. Each gets its own `subscription` id and `seq` counter.
@@ -96,11 +109,11 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 {"jsonrpc":"2.0","id":4,"result":{}}
 ```
 
-Error `-32005` if the subscription doesn't exist in this session. After the response, no more events with that id are sent.
+Error `-32005` if the subscription doesn't exist in this session. Events for the subscription MAY still arrive between the request and the response; clients SHOULD discard them. After the response, no more events with that id are sent.
 
 ### 4.5 `get`
 
-One-shot read of the latest value.
+One-shot read of the latest value. Params: `source` (required) and `type` (optional; defaults to the source's first type).
 
 ```jsonc
 {"jsonrpc":"2.0","id":5,"method":"get","params":{"source":"battery"}}
@@ -108,7 +121,7 @@ One-shot read of the latest value.
   "value":{"level":82,"charging":true},"unit":"%","ts":1760000000123,"ts_mono_ns":81234567890123,"device":"a1b2c3d4"}}
 ```
 
-`result` is an event object without `subscription` and `seq`. For a sensor with no value yet the server MAY briefly start the sensor to get one, or return error `-32006` (`no_value`).
+`result` is a reading: an event object without `subscription` and `seq`, with the timestamps of when that value was measured. For a sensor with no value yet the server MAY briefly start the sensor to get one, or return error `-32006` (`no_value`).
 
 ## 5. Events
 
@@ -122,7 +135,7 @@ One-shot read of the latest value.
 | Field | Type | Meaning |
 |---|---|---|
 | `subscription` | string | Subscription that produced this event |
-| `seq` | integer | Starts at 0 per subscription, increments by 1 per event sent. A gap means events were dropped |
+| `seq` | integer | Starts at 0 per subscription. Assigned to every event that passes the subscription's own filters (rate downsampling, `type`, `min_delta`); filtered-out readings don't consume a number. Events then dropped for backpressure keep their number, so **a gap means events were dropped** |
 | `source`, `type` | string | See §6 |
 | `value` | per §6 | |
 | `unit` | string | See §6. `""` when unitless |
@@ -130,9 +143,9 @@ One-shot read of the latest value.
 | `ts_mono_ns` | integer | Monotonic nanoseconds (Android `SensorEvent.timestamp`, i.e. `elapsedRealtimeNanos`). Only differences between values from the same device are meaningful |
 | `device` | string | `device.id` from `hello` |
 
-**Backpressure.** If a client can't keep up, the server MAY drop events of `continuous` sources (visible as `seq` gaps). It MUST NOT drop events of `on_change` sources; if their queue overflows it closes the connection with code 1008.
+**Backpressure.** If a client can't keep up, the server MAY drop events of `continuous` sources (visible as `seq` gaps). It MUST NOT drop events of `on_change` sources; if their queue overflows it closes the connection with code 1008. Servers SHOULD queue the two kinds separately so a backlog of continuous events can't trigger that close.
 
-## 6. Sensor catalog (draft 0)
+## 6. Sensor catalog
 
 | `source` | `type` | `shape` | `value` | `unit` | `mode` |
 |---|---|---|---|---|---|
@@ -141,7 +154,7 @@ One-shot read of the latest value.
 | `game_rotation_vector` | `orientation` | `quat` | `[x, y, z, w]` unit quaternion, no magnetometer | `""` | continuous |
 | `proximity` | `distance` | `number` | distance; many phones report only `0` or max | `cm` | on_change |
 | `light` | `illuminance` | `number` | ambient light | `lx` | on_change |
-| `battery` | `state` | `object` | `{"level": 0–100, "charging": bool}` | `%` | on_change |
+| `battery` | `state` | `object` | `{"level": 0–100, "charging": bool}`; `charging` is true while plugged in and charging or full | `%` | on_change |
 | `ui` | `tile_tap` | `bool` | always `true`; fired by the Quick Settings tile | `""` | on_change |
 
 Axes follow the [Android sensor coordinate system](https://developer.android.com/develop/sensors-and-location/sensors/sensors_overview#sensors-coords) (device frame, not rotated with screen orientation).
@@ -161,8 +174,13 @@ Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `
 | `-32005` | `unknown_subscription` | `unsubscribe` with an id not in this session |
 | `-32006` | `no_value` | `get` has nothing to return yet |
 
-Every error has `message` (human-readable) and SHOULD have `data.name` set to the name above.
+Every error has `message` (human-readable) and SHOULD have `data.name`: the application names above, or `parse_error`, `invalid_request`, `method_not_found`, `invalid_params`, `internal_error` for the standard codes.
 
-## 8. Discovery (draft 0)
+## 8. Discovery
 
-Draft 0 uses a manual address. Servers SHOULD additionally advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available.
+This draft uses a manual address. Servers SHOULD additionally advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available.
+
+## 9. Known gaps (later drafts)
+
+- A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
+- Pairing, TLS, tokens, `command` and biometric challenge-response (see `plan.md` §4).

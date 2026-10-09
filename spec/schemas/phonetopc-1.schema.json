@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/melker12345/phonetopc/spec/schemas/phonetopc-1.schema.json",
-  "title": "phonetopc/1 messages (draft 0)",
+  "title": "phonetopc/1 messages (draft 1)",
   "description": "Every WebSocket text frame is one of these. See ../PROTOCOL.md.",
   "oneOf": [
     { "$ref": "#/$defs/request" },
@@ -124,12 +124,27 @@
 
     "subscribeResult": {
       "type": "object",
-      "required": ["subscription", "source", "types"],
+      "required": ["subscription", "source", "types", "mode"],
       "properties": {
         "subscription": { "type": "string" },
         "source": { "type": "string" },
         "types": { "type": "array", "items": { "type": "string" } },
+        "mode": { "enum": ["continuous", "on_change"] },
         "rate_hz": { "type": "number" }
+      }
+    },
+
+    "unsubscribeResult": { "type": "object", "maxProperties": 0 },
+
+    "resultByMethod": {
+      "description": "Result schema per request method. Responses don't name their method, so validate a result by correlating the response id with its request.",
+      "type": "object",
+      "properties": {
+        "hello": { "$ref": "#/$defs/helloResult" },
+        "list_sensors": { "$ref": "#/$defs/listSensorsResult" },
+        "subscribe": { "$ref": "#/$defs/subscribeResult" },
+        "unsubscribe": { "$ref": "#/$defs/unsubscribeResult" },
+        "get": { "$ref": "#/$defs/reading" }
       }
     },
 
