@@ -29,9 +29,11 @@ export PHONETOPC_ADDR=ws://192.168.1.20:8765   # or for every script at once
 ```python
 import phonetopc.sync
 
+
 def approved(reason: str) -> bool:
     with phonetopc.sync.connect() as phone:
         return bool(phone.request_approval(reason))
+
 
 if approved("Delete 1,204 old backups?"):
     delete_old_backups()
