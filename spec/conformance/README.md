@@ -1,6 +1,6 @@
 # Conformance transcripts
 
-Recorded sessions of `phonetopc/1` (draft 0). Each one is a real exchange with the mock phone
+Recorded sessions of `phonetopc/1` (draft 1). Each one is a real exchange with the mock phone
 (`pcd/cmd/phonetopc-mock`). Use them to check a client or server implementation against concrete
 wire traffic. [`../PROTOCOL.md`](../PROTOCOL.md) is still the normative reference.
 
@@ -52,21 +52,22 @@ informative.
 | `error_framing.jsonl` | `-32700` parse error, `-32600` for a batch array and a wrong `jsonrpc`; a client notification (no `id`) that gets no reply; close 1003 for a binary frame |
 
 Some `c2s` messages in the error transcripts are deliberately invalid, and they don't validate
-against the schema. Examples are an unknown method, `rate_hz: 0`, a batch array, and a notification without `id`.
-Every `s2c` message validates against [`../schemas/phonetopc-1.schema.json`](../schemas/phonetopc-1.schema.json).
+against the schema. Examples are an unknown method, `rate_hz: 0`, a batch array, and a
+notification without `id`. Every `s2c` message validates against
+[`../schemas/phonetopc-1.schema.json`](../schemas/phonetopc-1.schema.json), and every `result`
+also validates against `$defs/resultByMethod/properties/<method>` for the method of the request
+with the same `id`.
 
-## Mock behaviour beyond the spec text
+## Optional behaviour the mock shows
 
-The transcripts show some choices the spec leaves open. The mock makes them as follows:
+Where the spec says SHOULD or MAY, the transcripts show the mock's choice:
 
-- Subscribing to `light`, `proximity` or `battery` sends the current value right away (as `seq` 0),
-  the same way Android reports on-change sensors when a listener registers. `ui` sends nothing until
-  a tap.
-- `min_delta` only applies to `number`, `vec3` and `quat` values. It is ignored for `bool` and
-  `object` values, so repeated `tile_tap: true` events are never suppressed.
-- `rate_hz` is accepted for `on_change` sources but has no effect, and the result leaves `rate_hz`
-  out.
-- Hello gating comes before method lookup. An unknown method sent before `hello` gets `-32003`.
+- Subscribing to `light`, `proximity` or `battery` sends the current value right away as `seq` 0
+  (SHOULD), the same way Android reports on-change sensors when a listener registers. `ui` sends
+  nothing until a tap.
+- `get` on a continuous source samples it on the spot instead of returning `-32006`. `get ui`
+  before any tap returns `-32006`.
+- Every error carries `data.name`, including the standard JSON-RPC codes.
 - A client message without `id` is ignored even if it would be malformed as a request (wrong
   `jsonrpc`, no `method`): there is no reply at all, not even an error.
 

@@ -1,4 +1,4 @@
-// Command phonetopc-mock is a mock phonetopc phone: it serves the draft-0
+// Command phonetopc-mock is a mock phonetopc phone: it serves the draft-1
 // protocol on ws://ADDR/v1/ws with synthetic sensor data, so clients can be
 // developed and tested without a phone.
 package main
@@ -31,7 +31,7 @@ func main() {
 		verbose     = flag.Bool("v", false, "log every frame")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: phonetopc-mock [flags]\n\nServes a mock phonetopc phone (protocol %s, draft 0).\n\n", protocol.Version)
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: phonetopc-mock [flags]\n\nServes a mock phonetopc phone (protocol %s, draft 1).\n\n", protocol.Version)
 		flag.PrintDefaults()
 	}
 	flag.Parse()

@@ -28,7 +28,7 @@ const (
 	ModeOnChange Mode = "on_change"
 )
 
-// Sources in the draft-0 catalog (spec §6).
+// Sources in the sensor catalog (spec §6).
 const (
 	SourceAccelerometer      = "accelerometer"
 	SourceGyro               = "gyro"
@@ -39,7 +39,7 @@ const (
 	SourceUI                 = "ui"
 )
 
-// Event types in the draft-0 catalog.
+// Event types in the sensor catalog.
 const (
 	TypeMotion      = "motion"
 	TypeRotation    = "rotation"
@@ -50,7 +50,7 @@ const (
 	TypeTileTap     = "tile_tap"
 )
 
-// Units in the draft-0 catalog.
+// Units in the sensor catalog.
 const (
 	UnitMetersPerSecond2 = "m/s^2"
 	UnitRadiansPerSecond = "rad/s"
@@ -69,7 +69,7 @@ const (
 	DefaultDefaultRateHz = 50
 )
 
-// Catalog returns the draft-0 sensor catalog (spec §6), all marked
+// Catalog returns the sensor catalog of draft 1 (spec §6), all marked
 // available. The returned slice is a fresh copy and may be modified.
 func Catalog() []SensorInfo {
 	cont := func(source, typ, unit string, shape Shape) SensorInfo {
@@ -114,11 +114,10 @@ var ErrNoDistance = errors.New("min_delta does not apply to this shape")
 // as used by the subscribe min_delta filter (spec §4.3): Euclidean distance
 // for vec3 and quat, absolute difference for number.
 //
-// The spec defines no distance for the "bool" and "object" shapes. Taking
-// "differs by less than min_delta" literally would make every repeated
-// ui/tile_tap (always true) a zero-distance duplicate and suppress it, so
-// instead min_delta does not apply to those shapes: ValueDistance returns
-// ErrNoDistance and the event is always sent.
+// min_delta is ignored for the "bool" and "object" shapes (otherwise every
+// repeated ui/tile_tap, always true, would be suppressed as a duplicate).
+// For those ValueDistance returns ErrNoDistance and the event is always
+// sent.
 func ValueDistance(shape Shape, a, b json.RawMessage) (float64, error) {
 	switch shape {
 	case ShapeNumber:

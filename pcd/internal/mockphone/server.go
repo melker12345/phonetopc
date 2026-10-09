@@ -1,5 +1,5 @@
 // Package mockphone implements a mock phonetopc phone server: the full
-// draft-0 protocol (spec/PROTOCOL.md) over WebSocket, backed by synthetic but
+// draft-1 protocol (spec/PROTOCOL.md) over WebSocket, backed by synthetic but
 // plausible sensor data. It is used by the phonetopc-mock command and by
 // tests, so that clients can be developed without a phone.
 package mockphone
@@ -155,7 +155,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Draft 0 is unauthenticated dev mode, and the mock serves fake data,
+		// Draft 1 is unauthenticated dev mode, and the mock serves fake data,
 		// so allow any Origin (browser-based clients).
 		InsecureSkipVerify: true,
 	})

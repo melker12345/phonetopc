@@ -1,6 +1,6 @@
 # pcd: phonetopc on the PC (Go)
 
-The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 0, see
+The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 1, see
 [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)).
 
 | Path | What |
@@ -48,7 +48,7 @@ What the mock simulates:
 - Proximity toggles about every 15 s.
 - The battery drains by 1% a minute, and starts charging when it reaches 15%.
 
-The mock implements all of draft 0, including the error codes, ping/pong keepalive and
+The mock implements all of draft 1, including the error codes, ping/pong keepalive and
 backpressure. It is the reference for the transcripts in [`../spec/conformance`](../spec/conformance).
 
 ## Use the CLI
