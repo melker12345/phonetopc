@@ -2,6 +2,8 @@ package io.github.melker12345.phonetopc
 
 import android.app.Application
 import android.content.Context
+import io.github.melker12345.phonetopc.approval.AppVisibility
+import io.github.melker12345.phonetopc.approval.ApprovalNotifications
 import io.github.melker12345.phonetopc.data.PairedPcRepository
 import io.github.melker12345.phonetopc.data.SettingsRepository
 import io.github.melker12345.phonetopc.sensors.AndroidSensorSource
@@ -28,6 +30,9 @@ class PhonetopcApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        AppVisibility.install(this)
+        // Exists from the start, so users can adjust it in system settings before a request.
+        ApprovalNotifications.ensureChannel(this)
     }
 }
 

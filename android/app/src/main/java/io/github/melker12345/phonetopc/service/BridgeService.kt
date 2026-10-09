@@ -13,7 +13,10 @@ import androidx.core.content.ContextCompat
 import io.github.melker12345.phonetopc.BuildConfig
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.appGraph
+import io.github.melker12345.phonetopc.approval.AndroidApprover
+import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.DeviceIdentity
+import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
 import io.github.melker12345.phonetopc.data.PhoneKey
 import io.github.melker12345.phonetopc.protocol.BridgeHub
 import io.github.melker12345.phonetopc.protocol.SecureAccess
@@ -136,11 +139,20 @@ class BridgeService : Service() {
                     onAuthenticated = { pc -> graph.appScope.launch { graph.pairedPcs.touch(pc.id) } },
                 )
             }
+            // APPROVAL.md: secure mode only. Create or check the approval key now, off the
+            // main thread, so the first hello doesn't wait for key generation.
+            val approvals = if (!secure) {
+                null
+            } else {
+                withContext(Dispatchers.IO) { ApprovalKey.status(applicationContext, fresh = true) }
+                ApprovalService(AndroidApprover(applicationContext), onError = { e -> Log.w(TAG, "approval failed", e) })
+            }
             val newHub = BridgeHub(
                 source = source,
                 serverInfo = ServerInfo("phonetopc-android", BuildConfig.VERSION_NAME),
                 deviceInfoProvider = { DeviceIdentity.info(applicationContext, deviceId) },
                 security = security,
+                approvals = approvals,
             )
             val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)
             val started = withContext(Dispatchers.IO) {

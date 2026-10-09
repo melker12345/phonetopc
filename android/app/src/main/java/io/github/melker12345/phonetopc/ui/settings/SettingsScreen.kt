@@ -71,10 +71,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.melker12345.phonetopc.BuildConfig
 import io.github.melker12345.phonetopc.R
+import io.github.melker12345.phonetopc.approval.ApprovalNotifications
 import io.github.melker12345.phonetopc.data.AppSettings
+import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.SettingsRepository
 import io.github.melker12345.phonetopc.protocol.PROTOCOL_VERSION
 import io.github.melker12345.phonetopc.protocol.security.Pins
@@ -93,6 +96,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val deviceId by vm.deviceId.collectAsStateWithLifecycle()
     val phoneKey by vm.phoneKey.collectAsStateWithLifecycle()
+    val approval by vm.approval.collectAsStateWithLifecycle()
     val s = settings ?: AppSettings()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -127,6 +131,17 @@ fun SettingsScreen(vm: MainViewModel) {
             item { SectionHeader(stringResource(R.string.settings_section_keep_alive), Modifier.padding(top = 16.dp)) }
             item { KeepAliveGroup() }
             item { VendorGuideCard(Vendor.detect()) }
+
+            item { SectionHeader(stringResource(R.string.settings_section_approvals), Modifier.padding(top = 16.dp)) }
+            item {
+                Text(
+                    stringResource(R.string.settings_approvals_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                )
+            }
+            item { ApprovalsGroup(approval, devMode = s.devMode, refresh = vm::refreshApproval) }
 
             item { SectionHeader(stringResource(R.string.settings_section_about), Modifier.padding(top = 16.dp)) }
             item { AboutGroup(deviceId, phoneKey) }
@@ -372,6 +387,92 @@ fun VendorGuideCard(vendor: Vendor, modifier: Modifier = Modifier) {
     }
 }
 
+// ---- approvals ----
+
+/** APPROVAL.md: whether approvals are possible, and the approval key's pin. */
+@Composable
+private fun ApprovalsGroup(status: ApprovalKey.Status?, devMode: Boolean, refresh: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    // Fingerprints may have been added or removed in system settings meanwhile.
+    LifecycleResumeEffect(Unit) {
+        refresh()
+        onPauseOrDispose { }
+    }
+    val notificationsOk = rememberOnResume(ApprovalNotifications::canShow)
+    val available = status as? ApprovalKey.Status.Available
+    Group {
+        ListItem(
+            colors = transparentItem,
+            leadingContent = {
+                IconBadge(if (available != null) Icons.Rounded.CheckCircle else Icons.Rounded.Fingerprint, size = 36.dp)
+            },
+            headlineContent = { Text(stringResource(R.string.settings_approval_status)) },
+            supportingContent = {
+                val text = when (status) {
+                    null -> "…"
+                    is ApprovalKey.Status.Available -> stringResource(
+                        if (devMode) R.string.settings_approval_secure_only else R.string.settings_approval_available,
+                    )
+                    is ApprovalKey.Status.Unavailable -> stringResource(
+                        when (status.problem) {
+                            ApprovalKey.Problem.NO_HARDWARE -> R.string.settings_approval_no_hardware
+                            ApprovalKey.Problem.NONE_ENROLLED -> R.string.settings_approval_none_enrolled
+                            ApprovalKey.Problem.HW_UNAVAILABLE -> R.string.settings_approval_hw_unavailable
+                            ApprovalKey.Problem.SECURITY_UPDATE_REQUIRED -> R.string.settings_approval_update_required
+                            ApprovalKey.Problem.OTHER -> R.string.settings_approval_other
+                        },
+                    )
+                }
+                Text(text)
+            },
+            trailingContent = if ((status as? ApprovalKey.Status.Unavailable)?.problem == ApprovalKey.Problem.NONE_ENROLLED) {
+                {
+                    FilledTonalButton(onClick = { SystemSettings.enrollBiometric(context) }) {
+                        Text(stringResource(R.string.settings_approval_enroll))
+                    }
+                }
+            } else {
+                null
+            },
+        )
+        if (available != null && !notificationsOk) {
+            ListItem(
+                colors = transparentItem,
+                leadingContent = { IconBadge(Icons.Rounded.Notifications, size = 36.dp) },
+                headlineContent = { Text(stringResource(R.string.settings_notifications)) },
+                supportingContent = { Text(stringResource(R.string.settings_approval_notifications_off)) },
+            )
+        }
+        if (available != null) {
+            val pin = available.info.pin
+            ListItem(
+                colors = transparentItem,
+                leadingContent = { IconBadge(Icons.Rounded.Key, size = 36.dp) },
+                headlineContent = { Text(stringResource(R.string.settings_approval_key)) },
+                supportingContent = {
+                    Column {
+                        Text(Pins.shortHex(pin), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleMedium)
+                        Text(pin, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.settings_approval_key_summary), style = MaterialTheme.typography.bodySmall)
+                        if (available.strongBox) {
+                            Text(stringResource(R.string.settings_approval_key_strongbox), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                trailingContent = {
+                    IconButton(onClick = {
+                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("phonetopc approval key", pin))) }
+                    }) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.settings_copy_approval_pin))
+                    }
+                },
+            )
+        }
+    }
+}
+
 // ---- about ----
 
 @Composable
@@ -383,7 +484,7 @@ private fun AboutGroup(deviceId: String?, phoneKey: PhoneKeyInfo?) {
             colors = transparentItem,
             leadingContent = { IconBadge(Icons.Rounded.Info, size = 36.dp) },
             headlineContent = { Text(stringResource(R.string.settings_version)) },
-            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 2)") },
+            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 3)") },
         )
         // SECURITY.md §2: the pin a PC stores for this phone, for comparing by eye.
         ListItem(

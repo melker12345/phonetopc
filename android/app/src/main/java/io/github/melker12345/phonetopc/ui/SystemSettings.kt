@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.biometric.BiometricManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +46,21 @@ object SystemSettings {
     fun notificationsGranted(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    /** Opens fingerprint enrollment (strong biometrics), or the security screen on old Androids. */
+    fun enrollBiometric(context: Context) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+                .putExtra(Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED, BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        } else {
+            Intent(Settings.ACTION_SECURITY_SETTINGS)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            runCatching { context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+        }
+    }
 
     fun openUrl(context: Context, url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }

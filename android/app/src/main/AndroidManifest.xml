@@ -51,6 +51,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Fingerprint approval (APPROVAL.md): a transparent host for the biometric prompt, in
+             its own task. Not showWhenLocked: from a locked phone the user unlocks first. -->
+        <activity
+            android:name=".approval.ApprovalActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.approval"
+            android:theme="@style/Theme.Phonetopc.Approval" />
+
+        <receiver
+            android:name=".approval.ApprovalActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.BridgeService"
             android:exported="false"

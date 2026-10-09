@@ -17,6 +17,15 @@
     <string name="action_stop">Stop</string>
 
     <!-- Auto-start fallback -->
+    <!-- Fingerprint approval (APPROVAL.md §4.2) -->
+    <string name="approval_channel_name">Approval requests</string>
+    <string name="approval_channel_description">A paired PC asks you to confirm something with your fingerprint.</string>
+    <string name="approval_notification_title">%1$s asks for approval</string>
+    <string name="approval_notification_public_title">A PC asks for approval</string>
+    <string name="approval_notification_public_text">Unlock your phone to see what it is.</string>
+    <string name="approval_approve">Approve</string>
+    <string name="approval_deny">Deny</string>
+
     <string name="auto_start_channel_name">Couldn\'t start automatically</string>
     <string name="auto_start_channel_description">Shown when Android doesn\'t let phonetopc restart the server after an update or reboot.</string>
     <string name="auto_start_title">Tap to start phonetopc</string>
@@ -182,6 +191,23 @@
     <string name="settings_notifications_ok">The status notification is visible</string>
     <string name="settings_notifications_off">Allow them to see status and Pause/Stop controls</string>
     <string name="settings_vendor_more">More on dontkillmyapp.com</string>
+    <string name="settings_section_approvals">Approvals</string>
+    <string name="settings_approvals_hint">Paired PCs can ask you to confirm an action with your fingerprint. Your phone then signs the answer with a key that only works right after a fingerprint check.</string>
+    <string name="settings_approval_status">Fingerprint approval</string>
+    <string name="settings_approval_available">Available</string>
+    <string name="settings_approval_secure_only">Available, but only while developer mode is off</string>
+    <string name="settings_approval_no_hardware">This phone has no strong (Class 3) biometric sensor</string>
+    <string name="settings_approval_none_enrolled">Add a fingerprint in system settings to use approvals</string>
+    <string name="settings_approval_hw_unavailable">The fingerprint sensor is unavailable right now</string>
+    <string name="settings_approval_update_required">Android needs a security update before the sensor can be used</string>
+    <string name="settings_approval_other">Not available on this phone</string>
+    <string name="settings_approval_enroll">Set up</string>
+    <string name="settings_approval_notifications_off">Notifications are off, so requests can only appear while phonetopc is open. Others are answered \"unavailable\".</string>
+    <string name="settings_approval_key">Approval key</string>
+    <string name="settings_approval_key_summary">A PC shows the same key the first time it sees it. It changes when you add or remove fingerprints; the PC then asks you to accept the new one.</string>
+    <string name="settings_approval_key_strongbox">Kept in StrongBox, the phone\'s separate security chip.</string>
+    <string name="settings_copy_approval_pin">Copy approval key</string>
+
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
     <string name="settings_device_id">Device ID</string>

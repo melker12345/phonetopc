@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.melker12345.phonetopc.appGraph
 import io.github.melker12345.phonetopc.data.AppSettings
+import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.PairedPc
 import io.github.melker12345.phonetopc.data.PhoneKey
 import io.github.melker12345.phonetopc.service.BridgeStatus
@@ -40,6 +41,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _phoneKey = MutableStateFlow<PhoneKeyInfo?>(null)
     val phoneKey: StateFlow<PhoneKeyInfo?> = _phoneKey.asStateFlow()
+
+    private val _approval = MutableStateFlow<ApprovalKey.Status?>(null)
+
+    /** Settings › Approvals: whether approvals are possible, and the approval key. `null` while checking. */
+    val approval: StateFlow<ApprovalKey.Status?> = _approval.asStateFlow()
+
+    /** Re-checks biometrics and the approval key (creating or replacing it if needed). */
+    fun refreshApproval() {
+        viewModelScope.launch {
+            _approval.value = withContext(Dispatchers.IO) {
+                runCatching { ApprovalKey.status(getApplication(), fresh = true) }
+                    .getOrElse { ApprovalKey.Status.Unavailable(ApprovalKey.Problem.OTHER) }
+            }
+        }
+    }
 
     init {
         viewModelScope.launch { _deviceId.value = graph.settings.deviceId() }
