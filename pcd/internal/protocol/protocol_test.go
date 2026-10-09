@@ -137,7 +137,9 @@ func TestMessageKind(t *testing.T) {
 func TestValidRequestID(t *testing.T) {
 	for in, want := range map[string]bool{
 		`1`: true, `-5`: true, `0`: true, `"abc"`: true, `""`: true,
-		`1.5`: false, `1e3`: false, `null`: false, `true`: false, `[]`: false, `{}`: false, ``: false,
+		`9007199254740991`: true, `-9007199254740991`: true,
+		`9007199254740992`: false, `-9007199254740992`: false, `99999999999999999999`: false,
+		`1.5`: false, `1.0`: false, `1e3`: false, `null`: false, `true`: false, `[]`: false, `{}`: false, ``: false,
 	} {
 		if got := ValidRequestID(json.RawMessage(in)); got != want {
 			t.Errorf("ValidRequestID(%s) = %v, want %v", in, got, want)

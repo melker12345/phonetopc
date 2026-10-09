@@ -111,9 +111,13 @@ func ParseIntID(id json.RawMessage) (int64, bool) {
 	return n, err == nil
 }
 
+// MaxSafeID is the largest magnitude of an integer request id: 2^53-1, so
+// that every JSON library represents the id exactly (spec §2).
+const MaxSafeID = 1<<53 - 1
+
 // ValidRequestID reports whether id is acceptable as a request id: a JSON
-// string or an integer (the schema's {"type": ["integer", "string"]}).
-// Fractional numbers, null, booleans, arrays and objects are rejected.
+// string or an integer in [-MaxSafeID, MaxSafeID]. Fractions, exponents,
+// out-of-range integers, null, booleans, arrays and objects are rejected.
 func ValidRequestID(id json.RawMessage) bool {
 	id = bytes.TrimSpace(id)
 	if len(id) == 0 {
@@ -131,7 +135,11 @@ func ValidRequestID(id json.RawMessage) bool {
 		// JSON Schema "integer" accepts 1.0 too, but JSON-RPC ids SHOULD NOT
 		// have fractional parts and echoing such ids back is error-prone, so
 		// only plain integer literals are accepted.
-		return !bytes.ContainsAny(id, ".eE")
+		if bytes.ContainsAny(id, ".eE") {
+			return false
+		}
+		i, err := strconv.ParseInt(string(id), 10, 64)
+		return err == nil && i >= -MaxSafeID && i <= MaxSafeID
 	}
 	return false
 }

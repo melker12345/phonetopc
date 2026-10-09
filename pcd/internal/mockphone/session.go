@@ -262,15 +262,16 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		return nil, nil
 	}
 	if !protocol.ValidRequestID(id) {
-		return fail(nil, protocol.CodeInvalidRequest, "id must be an integer or a string")
+		return fail(nil, protocol.CodeInvalidRequest, "id must be a string or an integer within ±(2^53-1)")
 	}
 	var version string
 	if json.Unmarshal(fields["jsonrpc"], &version) != nil || version != protocol.JSONRPCVersion {
 		return fail(id, protocol.CodeInvalidRequest, `jsonrpc must be "2.0"`)
 	}
+	// Any string passes this step, even ""; it is then an unknown method.
 	var method string
-	if json.Unmarshal(fields["method"], &method) != nil || method == "" {
-		return fail(id, protocol.CodeInvalidRequest, "method must be a non-empty string")
+	if m := bytes.TrimSpace(fields["method"]); len(m) == 0 || m[0] != '"' || json.Unmarshal(m, &method) != nil {
+		return fail(id, protocol.CodeInvalidRequest, "method must be a string")
 	}
 	params := fields["params"]
 
@@ -349,22 +350,29 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	return s.srv.helloResult(), nil
 }
 
-// lookup resolves source and an optional type, returning the spec's errors.
+// lookup resolves source and an optional type against the catalog. This is
+// step 8 of the order of checks (spec §2), after params were validated:
+// unknown source, then a type the source doesn't have, then availability.
 func (s *session) lookup(source, typ string) (protocol.SensorInfo, *protocol.Error) {
-	if source == "" {
-		return protocol.SensorInfo{}, protocol.NewError(protocol.CodeInvalidParams, "params.source is required")
-	}
 	info, ok := s.srv.sensor(source)
 	if !ok {
 		return info, protocol.NewError(protocol.CodeUnknownSource, "unknown source %q", source)
 	}
-	if !info.Available {
-		return info, protocol.NewError(protocol.CodeSourceUnavailable, "source %q is not available on this device", source)
-	}
 	if typ != "" && !info.HasType(typ) {
 		return info, protocol.NewError(protocol.CodeInvalidParams, "source %q has no type %q (types: %s)", source, typ, strings.Join(info.Types, ", "))
 	}
+	if !info.Available {
+		return info, protocol.NewError(protocol.CodeSourceUnavailable, "source %q is not available on this device", source)
+	}
 	return info, nil
+}
+
+// requireSource checks that the required source param is present.
+func requireSource(source string) *protocol.Error {
+	if source == "" {
+		return protocol.NewError(protocol.CodeInvalidParams, "params.source is required")
+	}
+	return nil
 }
 
 func (s *session) subscribe(params json.RawMessage) (any, func(), *protocol.Error) {
@@ -372,17 +380,20 @@ func (s *session) subscribe(params json.RawMessage) (any, func(), *protocol.Erro
 	if err := decodeParams(params, &p); err != nil {
 		return nil, nil, err
 	}
-	info, rpcErr := s.lookup(p.Source, p.Type)
-	if rpcErr != nil {
-		return nil, nil, rpcErr
+	if err := requireSource(p.Source); err != nil {
+		return nil, nil, err
 	}
-	// rate_hz is validated even for on_change sources, where it is then
-	// ignored (spec §4.3: "Continuous sensors only").
+	// rate_hz is validated for any source, even on_change ones where it is
+	// then ignored (spec §4.3), and before the catalog lookup (spec §2).
 	if p.RateHz != nil && !(*p.RateHz > 0) {
 		return nil, nil, protocol.NewError(protocol.CodeInvalidParams, "params.rate_hz must be > 0")
 	}
 	if p.MinDelta != nil && !(*p.MinDelta >= 0) {
 		return nil, nil, protocol.NewError(protocol.CodeInvalidParams, "params.min_delta must be >= 0")
+	}
+	info, rpcErr := s.lookup(p.Source, p.Type)
+	if rpcErr != nil {
+		return nil, nil, rpcErr
 	}
 
 	types := info.Types
@@ -434,6 +445,9 @@ func (s *session) unsubscribe(params json.RawMessage) (any, *protocol.Error) {
 func (s *session) get(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.GetParams
 	if err := decodeParams(params, &p); err != nil {
+		return nil, err
+	}
+	if err := requireSource(p.Source); err != nil {
 		return nil, err
 	}
 	info, rpcErr := s.lookup(p.Source, p.Type)
