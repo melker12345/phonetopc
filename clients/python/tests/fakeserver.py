@@ -6,6 +6,11 @@ spec/conformance/vectors/ (or the PC one, to provoke a pin mismatch), checks
 ``hello.auth.token`` against ``tokens``, answers ``-32010`` and closes with 1008
 on a bad token, and reports ``pc`` in the ``hello`` result (SECURITY.md 5).
 
+Fingerprint approval (APPROVAL.md) works in secure mode after
+:meth:`FakeServer.enable_approval`, with a software P-256 key (needs the
+``cryptography`` package). ``approval_mode`` picks the outcome, and
+``approval_tamper`` / ``approval_result_hook`` let tests forge bad answers.
+
 Every client message is validated against spec/schemas/phonetopc-1.schema.json
 (as a request) and every server message the fake sends is validated too, so the
 fake itself can't drift from the spec. A response's ``result`` is additionally
@@ -17,14 +22,19 @@ looked up from the request with the same id. Violations are collected in
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import copy
+import hashlib
 import hmac
 import itertools
 import json
 import math
 import ssl
 import time
+import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -193,8 +203,9 @@ class Session:
         self.server = server
         self.ws = ws
         self.hello_done = False
-        #: Token this session authenticated with (secure mode).
+        #: Token this session authenticated with (secure mode), and its PC.
         self.token: str | None = None
+        self.pc: dict[str, str] | None = None
         self.subs: dict[str, dict[str, Any]] = {}
         #: Method of each request still awaiting its response, by id.
         self.methods: dict[tuple[str, Any], str] = {}
@@ -242,6 +253,22 @@ class FakeServer:
         #: Close the connection instead of answering these methods.
         self.close_on: set[str] = set()
 
+        # Fingerprint approval (APPROVAL.md), secure mode only; see enable_approval().
+        #: "approve", "hang" (never answer), or a ``why`` to answer with
+        #: ("denied", "cancelled", "timeout", "busy", "lockout", "unavailable").
+        #: ``None``: no approval capability.
+        self.approval_mode: str | None = None
+        #: Seconds the "user" takes before the answer.
+        self.approval_delay = 0.0
+        #: Changes the message before it is signed (forges a signature over other data).
+        self.approval_tamper: Callable[[bytes], bytes] | None = None
+        #: Changes the result before it is sent (e.g. drop or corrupt the signature).
+        self.approval_result_hook: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+        #: Messages signed so far.
+        self.approval_signed: list[bytes] = []
+        self._approval_key: Any = None
+        self._approval_pending = False
+
         self.received: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []
         self.schema_errors: list[str] = []
@@ -280,6 +307,83 @@ class FakeServer:
 
     def _on_http(self, connection: ServerConnection, request: Any) -> None:
         self.http_requests.append(request.path)
+
+    # -- approval -----------------------------------------------------------
+
+    def enable_approval(self, mode: str = "approve") -> None:
+        """Give the phone an approval key (a software one; the real phone's needs a fingerprint)."""
+        if self._approval_key is None:
+            self.rotate_approval_key()
+        self.approval_mode = mode
+
+    def rotate_approval_key(self) -> None:
+        """A new approval key, as after fingerprint enrollment changed on the phone."""
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        self._approval_key = ec.generate_private_key(ec.SECP256R1())
+
+    @property
+    def approval_info(self) -> dict[str, str]:
+        """``hello.approval``: the key (base64url DER SPKI) and its pin."""
+        from cryptography.hazmat.primitives import serialization
+
+        spki = self._approval_key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return {
+            "key": _b64url(spki),
+            "pin": "sha256/" + _b64url(hashlib.sha256(spki).digest()),
+        }
+
+    def _sign(self, message: bytes) -> str:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        if self.approval_tamper is not None:
+            message = self.approval_tamper(message)
+        self.approval_signed.append(message)
+        return _b64url(self._approval_key.sign(message, ec.ECDSA(hashes.SHA256())))
+
+    async def _request_approval(
+        self, session: Session, req_id: Any, params: dict[str, Any]
+    ) -> None:
+        problem = _approval_params_problem(params)
+        if problem:
+            await self._error(session, req_id, "invalid_params", problem)
+            return
+        mode = self.approval_mode
+        if mode is None or self._approval_key is None:
+            await self._result(session, req_id, {"approved": False, "why": "unavailable"})
+            return
+        if self._approval_pending or mode == "busy":  # one approval at a time per phone
+            await self._result(session, req_id, {"approved": False, "why": "busy"})
+            return
+        self._approval_pending = True
+        try:
+            if mode == "hang":
+                await asyncio.Event().wait()
+            if self.approval_delay:
+                await asyncio.sleep(self.approval_delay)
+            result: dict[str, Any]
+            if mode == "approve":
+                assert session.pc is not None
+                message = "\n".join(
+                    [
+                        "phonetopc-approval/1",
+                        DEVICE["id"],
+                        session.pc["id"],
+                        params["nonce"],
+                        _b64url(hashlib.sha256(params["reason"].encode()).digest()),
+                    ]
+                ).encode()
+                result = {"approved": True, "signature": self._sign(message)}
+            else:
+                result = {"approved": False, "why": mode}
+        finally:
+            self._approval_pending = False
+        if self.approval_result_hook is not None:
+            result = self.approval_result_hook(result)
+        await self._result(session, req_id, result)
 
     async def revoke(self, token: str) -> None:
         """Forget ``token`` and close its sessions with 1008, like the phone app does."""
@@ -471,7 +575,11 @@ class FakeServer:
                     await session.ws.close(1008, "unauthorized")
                     return
                 session.token = token
+                session.pc = pc
                 result["pc"] = pc
+                if self.approval_mode is not None and self._approval_key is not None:
+                    result["capabilities"].append("approval")
+                    result["approval"] = self.approval_info
             session.hello_done = True
             await self._result(session, req_id, result)
             return
@@ -491,6 +599,11 @@ class FakeServer:
             await self._result(session, req_id, {})
         elif method == "get":
             await self._get(session, req_id, params)
+        elif method == "request_approval":
+            if not self.secure:  # APPROVAL.md section 1: secure mode only
+                await self._error(session, req_id, "method_not_found", "no method in dev mode")
+                return
+            await self._request_approval(session, req_id, params)
 
     def _check_token(self, token: Any) -> dict[str, str] | None:
         if not isinstance(token, str):
@@ -582,6 +695,35 @@ class FakeServer:
                 "device": DEVICE["id"],
             },
         )
+
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _approval_params_problem(params: dict[str, Any]) -> str | None:
+    """APPROVAL.md section 4 param rules, or None."""
+    reason = params.get("reason")
+    if not isinstance(reason, str):
+        return "reason must be a string"
+    trimmed = reason.strip()
+    if not 1 <= len(trimmed) <= 200:
+        return "reason must be 1-200 characters"
+    if any(unicodedata.category(c) == "Cc" for c in trimmed):
+        return "reason must not contain control characters"
+    nonce = params.get("nonce")
+    try:
+        raw = base64.urlsafe_b64decode(nonce + "=" * (-len(nonce) % 4))  # type: ignore[operator]
+    except (TypeError, ValueError, binascii.Error):
+        return "nonce must be base64url"
+    if len(raw) != 32 or _b64url(raw) != nonce:
+        return "nonce must be 32 bytes"
+    timeout_ms = params.get("timeout_ms", 30000)
+    if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool):
+        return "timeout_ms must be an integer"
+    if not 5000 <= timeout_ms <= 120000:
+        return "timeout_ms must be 5000-120000"
+    return None
 
 
 def device_entry(server: FakeServer | None = None, **fields: Any) -> dict[str, Any]:
