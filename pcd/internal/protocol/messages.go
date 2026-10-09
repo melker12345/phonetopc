@@ -15,6 +15,20 @@ type ClientInfo struct {
 type HelloParams struct {
 	Protocol string      `json:"protocol"`
 	Client   *ClientInfo `json:"client,omitempty"`
+	// Auth carries the pairing token in secure mode (SECURITY.md §5).
+	Auth *Auth `json:"auth,omitempty"`
+}
+
+// Auth is the auth member of hello params.
+type Auth struct {
+	Token string `json:"token"`
+}
+
+// PCInfo identifies a paired PC: in the hello result (which pairing the
+// server recognised) and in pairing messages.
+type PCInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // ServerInfo identifies the server implementation.
@@ -39,6 +53,8 @@ type HelloResult struct {
 	Server       ServerInfo `json:"server"`
 	Device       DeviceInfo `json:"device"`
 	Capabilities []string   `json:"capabilities"`
+	// PC is set in secure mode: the pairing the server recognised.
+	PC *PCInfo `json:"pc,omitempty"`
 }
 
 // SensorInfo describes one source in list_sensors.

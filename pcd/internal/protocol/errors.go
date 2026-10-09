@@ -25,11 +25,23 @@ const (
 	CodeUnsupportedProtocol ErrorCode = -32004
 	CodeUnknownSubscription ErrorCode = -32005
 	CodeNoValue             ErrorCode = -32006
+	CodeUnauthorized        ErrorCode = -32010 // SECURITY.md §5
+)
+
+// Pairing error codes (SECURITY.md §4.5). Pairing also uses
+// CodeUnsupportedProtocol.
+const (
+	CodeBadSecret   ErrorCode = -32020
+	CodeRejected    ErrorCode = -32021
+	CodeOutOfOrder  ErrorCode = -32022
+	CodeSASMismatch ErrorCode = -32023
+	CodeExpired     ErrorCode = -32024
 )
 
 // Name returns the symbolic name used in error.data.name.
 //
-// The spec only defines names for the application codes (-32001..-32006).
+// The spec defines names for the application codes (PROTOCOL.md §7 and
+// SECURITY.md §4.5).
 // For the standard JSON-RPC codes we use the snake_case form of the names in
 // the JSON-RPC 2.0 specification so that every error can carry data.name.
 func (c ErrorCode) Name() string {
@@ -56,6 +68,18 @@ func (c ErrorCode) Name() string {
 		return "unknown_subscription"
 	case CodeNoValue:
 		return "no_value"
+	case CodeUnauthorized:
+		return "unauthorized"
+	case CodeBadSecret:
+		return "bad_secret"
+	case CodeRejected:
+		return "rejected"
+	case CodeOutOfOrder:
+		return "out_of_order"
+	case CodeSASMismatch:
+		return "sas_mismatch"
+	case CodeExpired:
+		return "expired"
 	}
 	return ""
 }
