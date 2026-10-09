@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.ktor.server.websockets)
 
     testImplementation(libs.junit)
+    testImplementation(project(":pairing")) // its pinned wss:// client
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.client.cio)
     testImplementation(libs.ktor.client.websockets)

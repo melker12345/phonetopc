@@ -2,12 +2,12 @@ package io.github.melker12345.phonetopc.server
 
 import io.github.melker12345.phonetopc.protocol.BridgeHub
 import io.github.melker12345.phonetopc.protocol.CloseCodes
+import io.github.melker12345.phonetopc.protocol.CloseRequest
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.origin
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
@@ -19,7 +19,9 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -27,8 +29,14 @@ const val DEFAULT_PORT = 8765
 const val WS_PATH = "/v1/ws"
 
 /**
- * WebSocket endpoint `ws://<host>:<port>/v1/ws` (spec §1) on the Ktor CIO engine.
- * One [io.github.melker12345.phonetopc.protocol.Session] per connection; any number of clients.
+ * WebSocket endpoint `/v1/ws` (spec §1) on the Ktor CIO engine. One
+ * [io.github.melker12345.phonetopc.protocol.Session] per connection; any number of clients.
+ *
+ * - **Dev mode** ([tls] `null`): `ws://<host>:<port>`, no authentication (draft 1).
+ * - **Secure mode**: `wss://<host>:<port>` (SECURITY.md §3). CIO can't serve TLS, so it listens
+ *   on a loopback port behind a [TlsFrontend] on the public one. Give the [BridgeHub] a
+ *   [io.github.melker12345.phonetopc.protocol.SecureAccess] so `hello` needs a token.
+ *   Connections without a successful `hello` within [helloTimeout] are closed with 1008.
  */
 class PhonetopcServer(
     private val hub: BridgeHub,
@@ -36,29 +44,70 @@ class PhonetopcServer(
     private val host: String = "0.0.0.0",
     private val pingPeriod: Duration = 15.seconds,
     private val pingTimeout: Duration = 30.seconds,
+    private val tls: TlsIdentity? = null,
+    private val helloTimeout: Duration = 10.seconds,
 ) {
     private var server: EmbeddedServer<*, *>? = null
+    private var frontend: TlsFrontend? = null
+
+    val secure: Boolean get() = tls != null
 
     /** Binds and starts serving. Blocking; call off the main thread. Throws if the port is taken. */
     fun start() {
         check(server == null) { "already started" }
-        server = embeddedServer(CIO, port = port, host = host) {
-            phonetopcModule(hub, pingPeriod, pingTimeout)
+        if (tls == null) {
+            server = embeddedServer(CIO, port = port, host = host) {
+                phonetopcModule(hub, pingPeriod, pingTimeout)
+            }.start(wait = false)
+            return
+        }
+        var front: TlsFrontend? = null
+        val backend = embeddedServer(CIO, port = 0, host = LOOPBACK) {
+            phonetopcModule(hub, pingPeriod, pingTimeout, helloTimeout) { loopbackPort -> front?.peerFor(loopbackPort) }
         }.start(wait = false)
+        try {
+            val backendPort = runBlocking { backend.engine.resolvedConnectors().first().port }
+            front = TlsFrontend(tls, host, port, backendPort, handshakeTimeoutMillis = helloTimeout.inWholeMilliseconds.toInt())
+            front.start()
+        } catch (e: Exception) {
+            backend.stop(0, 500)
+            throw e
+        }
+        server = backend
+        frontend = front
     }
 
-    /** The actually bound port (useful with port 0 in tests). */
-    suspend fun boundPort(): Int =
-        requireNotNull(server) { "not started" }.engine.resolvedConnectors().first().port
+    /** The actually bound public port (useful with port 0 in tests). */
+    suspend fun boundPort(): Int {
+        frontend?.let { return it.boundPort }
+        return requireNotNull(server) { "not started" }.engine.resolvedConnectors().first().port
+    }
 
     /** Stops the server, closing every connection. Blocking. */
     fun stop() {
+        frontend?.stop()
+        frontend = null
         server?.stop(gracePeriodMillis = 200, timeoutMillis = 2_000)
         server = null
     }
+
+    private companion object {
+        const val LOOPBACK = "127.0.0.1"
+    }
 }
 
-fun Application.phonetopcModule(hub: BridgeHub, pingPeriod: Duration, pingTimeout: Duration) {
+/**
+ * @param helloTimeout secure mode: close connections that haven't completed `hello` in time.
+ * @param peerFor secure mode: the real client behind a loopback connection from the
+ *   [TlsFrontend]; connections it doesn't know are refused.
+ */
+fun Application.phonetopcModule(
+    hub: BridgeHub,
+    pingPeriod: Duration,
+    pingTimeout: Duration,
+    helloTimeout: Duration? = null,
+    peerFor: ((loopbackPort: Int) -> Peer?)? = null,
+) {
     install(WebSockets) {
         this.pingPeriod = pingPeriod
         this.timeout = pingTimeout
@@ -66,16 +115,29 @@ fun Application.phonetopcModule(hub: BridgeHub, pingPeriod: Duration, pingTimeou
         masking = false
     }
     routing {
-        webSocket(WS_PATH) { serve(hub) }
+        webSocket(WS_PATH) { serve(hub, helloTimeout, peerFor) }
     }
 }
 
 /** Requests are tiny; anything bigger is a misbehaving client. */
 private const val MAX_FRAME_BYTES = 64L * 1024
 
-private suspend fun DefaultWebSocketServerSession.serve(hub: BridgeHub) {
-    val origin = call.request.origin
-    val session = hub.openSession("${origin.remoteAddress}:${origin.remotePort}")
+private suspend fun DefaultWebSocketServerSession.serve(
+    hub: BridgeHub,
+    helloTimeout: Duration?,
+    peerFor: ((Int) -> Peer?)?,
+) {
+    val local = call.request.local
+    val peer = if (peerFor == null) {
+        Peer(local.remoteAddress, local.remotePort)
+    } else {
+        peerFor(local.remotePort) ?: run {
+            // A loopback connection that didn't come through the TLS frontend.
+            close(CloseReason(CloseCodes.POLICY_VIOLATION, "use wss://"))
+            return
+        }
+    }
+    val session = hub.openSession(peer.toString(), peer.host)
     try {
         coroutineScope {
             val writer = launch {
@@ -87,6 +149,13 @@ private suspend fun DefaultWebSocketServerSession.serve(hub: BridgeHub) {
             val closer = launch {
                 val request = session.closeRequest.await()
                 close(CloseReason(request.code, request.reason))
+            }
+            // SECURITY.md §5: drop connections that don't authenticate promptly.
+            val helloTimer = helloTimeout?.let { timeout ->
+                launch {
+                    delay(timeout)
+                    if (!session.helloDone) session.requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "hello timeout"))
+                }
             }
             try {
                 for (frame in incoming) {
@@ -103,6 +172,7 @@ private suspend fun DefaultWebSocketServerSession.serve(hub: BridgeHub) {
             } finally {
                 writer.cancel()
                 closer.cancel()
+                helloTimer?.cancel()
             }
         }
     } finally {
