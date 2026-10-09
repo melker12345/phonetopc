@@ -1,7 +1,8 @@
 # Conformance material
 
-Conformance material for `phonetopc/1` (draft 2) lives here.
-[`../PROTOCOL.md`](../PROTOCOL.md) is still the normative reference.
+Conformance material for `phonetopc/1` (draft 3) lives here.
+[`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md) and
+[`../APPROVAL.md`](../APPROVAL.md) are still the normative reference.
 
 - [`server-cases.json`](server-cases.json): a language-neutral suite of single-request cases that
   every **server** implementation runs in its own tests. It pins down how a server answers
@@ -9,8 +10,12 @@ Conformance material for `phonetopc/1` (draft 2) lives here.
 - [`secure-server-cases.json`](secure-server-cases.json): the same kind of suite for **secure
   mode** ([`../SECURITY.md`](../SECURITY.md) §5): authenticated `hello`, `-32010` followed by close
   1008, and the hello timeout. See [Secure server cases](#secure-server-cases-secure-server-casesjson).
+- [`approval-server-cases.json`](approval-server-cases.json): `request_approval`
+  ([`../APPROVAL.md`](../APPROVAL.md)) in secure mode: `hello.approval`, every params rule, and
+  signatures that verify. See [Approval server cases](#approval-server-cases-approval-server-casesjson).
 - [`vectors/`](vectors/): test vectors for pins, base64url, the SAS commitment and the SAS code
-  (`vectors.json`), with the test certificates and keys they refer to.
+  (`vectors.json`), and for approval signatures (`approval.json`), with the test certificates and
+  keys they refer to.
 - `*.jsonl` **transcripts**: recorded sessions with the mock phone (`pcd/cmd/phonetopc-mock`),
   for checking a client or server against concrete wire traffic.
 
@@ -131,6 +136,41 @@ above, with these differences:
 So an unauthenticated client learns nothing but `-32010`. SECURITY.md draft 3 settled this order
 and adds: any failing `hello` after a successful one (`-32010`, `-32602` or `-32004`) closes the
 connection with 1008 after the error response (`rehello_*` cases).
+
+## Approval server cases (`approval-server-cases.json`)
+
+A JSON object with a `fixture` and a `cases` array, run exactly like the
+[secure server cases](#secure-server-cases-secure-server-casesjson) (`wss://` with the pin checked,
+`"hello": true` sends the authenticated conformance hello, a fresh connection per case). The
+dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_dev_mode` case of
+`server-cases.json`.
+
+**Server fixture**, in addition to the secure one (same key, pin and paired PC):
+
+- The phone can do approvals with the key `fixture.approval_key` (`vectors/approval-key.pem`, the
+  test key of `vectors/approval.json`), so `hello.approval` is `fixture.approval`. On Android this
+  needs a test hook that signs with a software key instead of the Keystore one.
+- `fixture.decision` is `"approve"`: a test hook stands in for the user and approves every
+  request at once, without a biometric prompt. Denial, timeouts, `busy` and cancellation depend on
+  timing or a user and are left to each implementation's own tests.
+- The cases run one after another, never in parallel: a phone allows one approval at a time.
+
+**`expect`** gains two optional members:
+
+| Member | Meaning |
+|---|---|
+| `"result_capabilities": [...]` | With `"result"`: `result.capabilities` contains each of these |
+| `"approval_valid": true` | With `"result"`: `result.approved` is `true`, and `result.signature` verifies (APPROVAL.md §5) with `fixture.approval.key` over the message built from the runner's own values: `device.id` of the case's hello, `fixture.pcs[0].id`, and the `nonce` and `reason` of `send.params` exactly as sent |
+
+**Choices the cases make.**
+
+- Params are checked before availability and before `busy`: an invalid request is `-32602` even
+  when the phone couldn't show it.
+- "Whitespace" for the leading/trailing rule is Unicode `White_Space`; the cases only use ASCII
+  space, newline and, inside a reason, U+00A0, so they don't depend on the exact set.
+- `timeout_ms` must be a JSON integer: `5000.5` and `"30000"` are `-32602`. The cases don't test
+  spellings like `5000.0` or `5e3`.
+- Code points, not UTF-16 units, count: 200 emoji are allowed, 201 are not.
 
 ## Transcripts
 
