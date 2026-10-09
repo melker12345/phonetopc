@@ -61,12 +61,18 @@ class BridgeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                // From the UI toggle or the notification's Stop: the user no longer wants it.
+                setDesiredRunning(false)
                 shutdown()
                 return START_NOT_STICKY
             }
-            ACTION_PAUSE -> hub?.setPaused(true)
+            ACTION_PAUSE -> hub?.setPaused(true) // paused is still "running" as far as intent goes
             ACTION_RESUME -> hub?.setPaused(false)
-            else -> startBridge() // ACTION_START, or a sticky restart with a null intent
+            ACTION_START -> {
+                if (!intent.getBooleanExtra(EXTRA_AUTO_START, false)) setDesiredRunning(true)
+                startBridge()
+            }
+            else -> startBridge() // a sticky restart with a null intent
         }
         return START_STICKY
     }
@@ -161,6 +167,8 @@ class BridgeService : Service() {
         scope.launch {
             graph.settings.settings.collect { s ->
                 if (!s.devMode) {
+                    // Turning developer mode off is an explicit stop, so don't bring it back later.
+                    setDesiredRunning(false)
                     shutdown()
                     return@collect
                 }
@@ -170,6 +178,12 @@ class BridgeService : Service() {
                 }
             }
         }
+    }
+
+    /** Persisted on the app scope so it survives the service stopping right after. */
+    private fun setDesiredRunning(desired: Boolean) {
+        val graph = appGraph
+        graph.appScope.launch { graph.settings.setDesiredRunning(desired) }
     }
 
     private fun updateNotification(address: String?) {
@@ -242,6 +256,9 @@ class BridgeService : Service() {
         const val ACTION_STOP = "io.github.melker12345.phonetopc.action.STOP"
         const val ACTION_PAUSE = "io.github.melker12345.phonetopc.action.PAUSE"
         const val ACTION_RESUME = "io.github.melker12345.phonetopc.action.RESUME"
+
+        /** Boolean extra on [ACTION_START]: started by the system (update/boot), not the user. */
+        const val EXTRA_AUTO_START = "io.github.melker12345.phonetopc.extra.AUTO_START"
 
         private const val TAG = "BridgeService"
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L

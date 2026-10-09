@@ -21,6 +21,14 @@ data class AppSettings(
     /** Sources the user has turned off; they are reported as `available: false`. */
     val disabledSources: Set<String> = emptySet(),
     val onboardingDone: Boolean = false,
+    /**
+     * The user wants the server running: set when they start it, cleared when they stop it
+     * (UI, notification Stop, or turning developer mode off). Pause keeps it set. Used to bring
+     * the service back after an app update or a reboot.
+     */
+    val desiredRunning: Boolean = false,
+    /** "Start on boot": also bring the server back after a reboot, not just after an update. */
+    val startOnBoot: Boolean = false,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
@@ -46,6 +54,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun setOnboardingDone(done: Boolean) = store.edit { it[ONBOARDING_DONE] = done }
 
+    suspend fun setDesiredRunning(desired: Boolean) = store.edit { it[DESIRED_RUNNING] = desired }
+
+    suspend fun setStartOnBoot(enabled: Boolean) = store.edit { it[START_ON_BOOT] = enabled }
+
     /** Random id generated on first run and kept for the lifetime of the install (spec §4.1). */
     suspend fun deviceId(): String {
         store.data.first()[DEVICE_ID]?.let { return it }
@@ -61,6 +73,8 @@ class SettingsRepository(context: Context) {
         port = this[PORT] ?: DEFAULT_PORT,
         disabledSources = this[DISABLED_SOURCES].orEmpty(),
         onboardingDone = this[ONBOARDING_DONE] ?: false,
+        desiredRunning = this[DESIRED_RUNNING] ?: false,
+        startOnBoot = this[START_ON_BOOT] ?: false,
     )
 
     companion object {
@@ -71,6 +85,8 @@ class SettingsRepository(context: Context) {
         private val PORT = intPreferencesKey("port")
         private val DISABLED_SOURCES = stringSetPreferencesKey("disabled_sources")
         private val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        private val DESIRED_RUNNING = booleanPreferencesKey("desired_running")
+        private val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         private val DEVICE_ID = stringPreferencesKey("device_id")
 
         private fun newDeviceId(): String {
