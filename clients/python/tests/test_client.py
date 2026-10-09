@@ -290,13 +290,16 @@ async def test_overflow_policy_without_mode(server: FakeServer, phone: Phone) ->
 
 
 async def test_events_before_subscribe_response(server: FakeServer, phone: Phone) -> None:
+    # Off-spec since draft 1 (the response comes first). The client doesn't
+    # buffer such events; they are lost, but visibly so, as a seq gap.
     server.auto_stream = False
     server.events_before_response = 2
     async with phone.subscribe("light") as events:
         await server.emit("light", 7.0)
-        got = await take(events, 3)
-    assert [e.seq for e in got] == [0, 1, 2]
-    assert events.dropped == 0
+        got = await take(events, 1)
+        assert [e.seq for e in got] == [2]
+        assert events.dropped_remote == 2
+        assert (await phone.get("battery")).source == "battery"  # connection is fine
 
 
 async def test_unsubscribe_unknown_is_ignored(server: FakeServer, phone: Phone) -> None:

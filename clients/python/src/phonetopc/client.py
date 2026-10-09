@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import itertools
 import json
 import logging
@@ -77,10 +78,6 @@ DEFAULT_REQUEST_TIMEOUT = 10.0
 #: ``drop_oldest`` for continuous sensors and ``error`` for everything else
 #: (the server never drops on_change events, so neither does the client).
 Overflow = Literal["auto", "drop_oldest", "error"]
-
-# Events for subscription ids we don't know (yet) are parked here, bounded.
-# See Phone._dispatch_event for why.
-_MAX_EARLY_IDS = 16
 
 _UNSET: Any = object()
 
@@ -362,11 +359,6 @@ class Phone:
         self._ids = itertools.count(1)
         self._pending: dict[int, _Pending] = {}
         self._subs: dict[str, Subscription] = {}
-        # Ids being unsubscribed: late events for them are dropped silently.
-        self._dead_ids: set[str] = set()
-        self._early: collections.OrderedDict[str, collections.deque[Event]] = (
-            collections.OrderedDict()
-        )
         self._tasks: set[asyncio.Task[Any]] = set()
         self._reader: asyncio.Task[None] | None = None
         self._closed = False
@@ -544,13 +536,8 @@ class Phone:
                 self._pending.pop(req_id, None)
 
     async def _unsubscribe(self, sub_id: str) -> None:
-        self._dead_ids.add(sub_id)
-        try:
+        with contextlib.suppress(UnknownSubscription, ConnectionClosed):
             await self._call("unsubscribe", {"subscription": sub_id})
-        except (UnknownSubscription, ConnectionClosed):
-            pass
-        finally:
-            self._dead_ids.discard(sub_id)
 
     async def _unsubscribe_quietly(self, sub_id: str) -> None:
         try:
@@ -570,8 +557,6 @@ class Phone:
         sub_id = sub.id
         assert sub_id is not None
         self._subs[sub_id] = sub
-        for ev in self._early.pop(sub_id, ()):
-            sub._push(ev)
 
     def _detach(self, sub: Subscription) -> None:
         sub_id = sub.id
@@ -673,17 +658,14 @@ class Phone:
         if sub is not None:
             sub._push(ev)
             return
-        if sub_id in self._dead_ids:
-            return
-        # The spec doesn't say whether events may precede the subscribe
-        # response on the wire. Park them (bounded) so a subscription that is
-        # registered a moment later still sees them, in order.
-        early = self._early.get(sub_id)
-        if early is None:
-            while len(self._early) >= _MAX_EARLY_IDS:
-                self._early.popitem(last=False)
-            early = self._early[sub_id] = collections.deque(maxlen=self.queue_size)
-        early.append(ev)
+        # Not (or no longer) ours: a subscription being unsubscribed (PROTOCOL.md
+        # 4.4 says to discard these) or an orphan from a timed-out subscribe.
+        # No early-event buffer is needed: the server sends the subscribe
+        # response before the first event (4.3), and the response attaches the
+        # subscription inside this reader task before the next frame is read.
+        # Should a non-conforming server send events first anyway, they are
+        # lost here and show up as a seq gap (dropped_remote).
+        logger.debug("ignoring event for unknown subscription %r", sub_id)
 
     def _closed_error(self) -> ConnectionClosed:
         """A fresh copy of ``closed_reason`` (exceptions shouldn't be re-raised
@@ -705,7 +687,6 @@ class Phone:
         subs, self._subs = self._subs, {}
         for sub in subs.values():
             sub._end(self._closed_error())
-        self._early.clear()
         self._closed_event.set()
 
 

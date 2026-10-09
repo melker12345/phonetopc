@@ -113,7 +113,8 @@ class FakeServer:
         self.get_delays: dict[str, float] = {}
         #: Values for "get"; missing on_change sources answer no_value.
         self.values: dict[str, Any] = {"battery": {"level": 82, "charging": True}}
-        #: Send the first event(s) of a new subscription *before* its response.
+        #: Send the first event(s) of a new subscription *before* its response
+        #: (off-spec since draft 1, which requires the response first).
         self.events_before_response = 0
         #: seq numbers that are counted but not sent (simulated server drops).
         self.skip_seqs: set[int] = set()
