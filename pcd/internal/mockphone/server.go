@@ -56,10 +56,11 @@ type Options struct {
 	// within PingTimeout. Defaults 15s and 30s (spec §3).
 	PingInterval, PingTimeout time.Duration
 
-	// QueueSize is the per-session outgoing message queue length. When it is
-	// full, events of continuous sources are dropped (seq gaps) and an
-	// overflow of on_change events closes the session with 1008 (spec §5).
-	// Default 1024.
+	// QueueSize is the per-session outgoing message queue length. Events of
+	// continuous sources may fill only three quarters of it; beyond that
+	// they are dropped (seq gaps). The rest is reserved for on_change events
+	// and responses, and an overflow of on_change events closes the session
+	// with 1008 (spec §5). Default 1024.
 	QueueSize int
 
 	// Tap, if set, is called with every text frame received and sent, in the

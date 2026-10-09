@@ -194,15 +194,32 @@ func (s *session) send(v any) bool {
 	}
 }
 
-// trySend queues an event without waiting. It reports false if the queue is
-// full.
-func (s *session) trySend(b []byte) bool {
+// trySend queues an event without waiting. It reports false if there is no
+// room for it.
+//
+// Spec §5 asks servers to keep a backlog of continuous events from causing
+// the on_change overflow close. Responses and events share one FIFO here (so
+// a response always precedes the events it announces), so instead continuous
+// events may only fill continuousLimit slots and the rest of the queue is
+// reserved for on_change events and responses. The length check and the send
+// are not atomic, so concurrent generators can overshoot the limit by a few
+// slots; that only eats into the reserve.
+func (s *session) trySend(b []byte, continuous bool) bool {
+	if continuous && len(s.out) >= continuousLimit(cap(s.out)) {
+		return false
+	}
 	select {
 	case s.out <- b:
 		return true
 	default:
 		return false
 	}
+}
+
+// continuousLimit is how many slots of a queue of size n continuous events
+// may occupy: three quarters, but at least one.
+func continuousLimit(n int) int {
+	return max(1, n-n/4)
 }
 
 func (s *session) stopAll() {
@@ -519,7 +536,7 @@ func (sub *subscription) emit(r protocol.Reading) {
 		sub.sess.srv.logf("mock: marshal event: %v", err)
 		return
 	}
-	if sub.sess.trySend(b) {
+	if sub.sess.trySend(b, sub.info.Mode == protocol.ModeContinuous) {
 		sub.seq++
 		sub.last = r.Value
 		return
