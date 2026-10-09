@@ -121,6 +121,9 @@ class FakeServer:
         self.auto_stream = True
         #: Forget subscriptions on unsubscribe (-> unknown_subscription).
         self.forget_subscriptions = False
+        #: Leave "mode" out of subscribe results, like a draft 0 server.
+        #: (Off-spec for draft 1, so the schema check must be relaxed.)
+        self.omit_mode = False
         #: Close the connection instead of answering these methods.
         self.close_on: set[str] = set()
 
@@ -341,7 +344,10 @@ class FakeServer:
             "subscription": sub_id,
             "source": source,
             "types": [params.get("type", info["types"][0])],
+            "mode": info["mode"],
         }
+        if self.omit_mode:
+            del result["mode"]
         sub: dict[str, Any] = {"source": source, "seq": 0}
         if info["mode"] == "continuous":
             rate = params.get("rate_hz", info["default_rate_hz"])

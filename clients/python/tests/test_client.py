@@ -264,15 +264,29 @@ async def test_overflow_errors_for_on_change(server: FakeServer, phone: Phone) -
         await server.wait_for_request("unsubscribe")
 
 
-async def test_overflow_policy_from_list_sensors(server: FakeServer, phone: Phone) -> None:
+async def test_overflow_policy_from_mode(server: FakeServer, phone: Phone) -> None:
     server.auto_stream = False
-    async with phone.subscribe("barometer") as ev:
-        assert ev.overflow == "drop_oldest"  # unknown source, but rate_hz in result
-    await phone.list_sensors()
-    async with phone.subscribe("barometer") as ev:
-        assert ev.overflow == "drop_oldest"
+    async with phone.subscribe("barometer") as ev:  # not in the spec's catalog
+        assert ev.info is not None and ev.info.mode == "continuous"
+        assert ev.mode == "continuous" and ev.overflow == "drop_oldest"
+    async with phone.subscribe("ui") as ev:
+        assert ev.mode == "on_change" and ev.overflow == "error"
     async with phone.subscribe("battery", overflow="drop_oldest") as ev:
         assert ev.overflow == "drop_oldest"
+    async with phone.subscribe("gyro", overflow="error") as ev:
+        assert ev.overflow == "error"
+
+
+async def test_overflow_policy_without_mode(server: FakeServer, phone: Phone) -> None:
+    # A draft 0 server sends no mode: infer it from rate_hz (continuous only).
+    server.auto_stream = False
+    server.omit_mode = True
+    async with phone.subscribe("barometer") as ev:
+        assert ev.info is not None and ev.info.mode is None
+        assert ev.mode == "continuous" and ev.overflow == "drop_oldest"
+    async with phone.subscribe("ui") as ev:
+        assert ev.mode == "on_change" and ev.overflow == "error"
+    server.schema_errors = [e for e in server.schema_errors if "'mode'" not in e]
 
 
 async def test_events_before_subscribe_response(server: FakeServer, phone: Phone) -> None:

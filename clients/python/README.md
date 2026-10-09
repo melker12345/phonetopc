@@ -83,7 +83,7 @@ Requests can run concurrently: one reader task matches responses to requests by 
 
 An async context manager and async iterator of `Event`. Leaving the `async with` block sends `unsubscribe`.
 
-- `id`, `rate_hz` (effective rate reported by the server), `info` (`SubscribeResult`)
+- `id`, `mode` (`"continuous"` or `"on_change"`), `rate_hz` (effective rate reported by the server, continuous sensors only), `info` (`SubscribeResult`)
 - `dropped`: total events lost. That's `dropped_remote` (gaps in `seq`, meaning the server dropped them) plus `dropped_local` (discarded because the local queue was full)
 - `received`, `qsize()`, `closed`, `closed_reason`
 
@@ -92,7 +92,7 @@ The local queue holds `queue_size` events. When it's full:
 - **continuous sensors** (gyro, accelerometer, ...): the oldest event is dropped and counted. Fresh data matters more than complete data.
 - **on_change sensors** (battery, ui, ...): the protocol never drops these, so the client doesn't either. Iteration raises `SubscriptionOverflow` after the queued events, and the subscription is closed.
 
-Pass `overflow="drop_oldest"` or `overflow="error"` to choose the policy yourself. With `"auto"` the client decides from `list_sensors()` data (if you called it), then the spec's sensor catalog, then whether the server reported a rate.
+Pass `overflow="drop_oldest"` or `overflow="error"` to choose the policy yourself. With `"auto"` the client goes by the `mode` the server reports in the `subscribe` result. (Draft 0 servers didn't send `mode`; then a reported `rate_hz` means continuous.)
 
 When the connection is lost, pending calls raise `ConnectionClosed` and every subscription's iterator ends; check `phone.closed_reason` or `events.closed_reason` to see why.
 

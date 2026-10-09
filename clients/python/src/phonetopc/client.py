@@ -74,20 +74,9 @@ DEFAULT_REQUEST_TIMEOUT = 10.0
 #: ``"drop_oldest"`` discards the oldest queued event and counts it in
 #: ``dropped``; ``"error"`` ends the subscription with
 #: :class:`~phonetopc.errors.SubscriptionOverflow`; ``"auto"`` picks
-#: ``drop_oldest`` for continuous sensors and ``error`` for on_change ones.
+#: ``drop_oldest`` for continuous sensors and ``error`` for everything else
+#: (the server never drops on_change events, so neither does the client).
 Overflow = Literal["auto", "drop_oldest", "error"]
-
-# Sensor modes from the draft-0 catalog (PROTOCOL.md section 6). Used to pick
-# the overflow policy when list_sensors() hasn't been called.
-_CATALOG_MODES: Mapping[str, str] = {
-    "accelerometer": CONTINUOUS,
-    "gyro": CONTINUOUS,
-    "game_rotation_vector": CONTINUOUS,
-    "proximity": ON_CHANGE,
-    "light": ON_CHANGE,
-    "battery": ON_CHANGE,
-    "ui": ON_CHANGE,
-}
 
 # Events for subscription ids we don't know (yet) are parked here, bounded.
 # See Phone._dispatch_event for why.
@@ -215,6 +204,20 @@ class Subscription:
         return self.info.rate_hz if self.info else None
 
     @property
+    def mode(self) -> str | None:
+        """Sensor mode (``"continuous"`` / ``"on_change"``); ``None`` until started.
+
+        Taken from the ``subscribe`` result. Draft 0 servers didn't send it;
+        then it is inferred from ``rate_hz``, which servers report for
+        continuous sensors only.
+        """
+        if self.info is None:
+            return None
+        if self.info.mode is not None:
+            return self.info.mode
+        return CONTINUOUS if self.info.rate_hz is not None else ON_CHANGE
+
+    @property
     def dropped(self) -> int:
         """Total events lost: server-side (``seq`` gaps) plus local queue overflow."""
         return self.dropped_remote + self.dropped_local
@@ -292,12 +295,7 @@ class Subscription:
         info = SubscribeResult.from_json(result)
         self.info = info
         if self._overflow_arg == "auto":
-            mode = self._phone._mode_of(info.source)
-            if mode is None:
-                # Unknown source and no list_sensors() data: the spec only
-                # reports an effective rate for continuous sensors.
-                mode = CONTINUOUS if info.rate_hz is not None else ON_CHANGE
-            self.overflow = "drop_oldest" if mode == CONTINUOUS else "error"
+            self.overflow = "drop_oldest" if self.mode == CONTINUOUS else "error"
         self._phone._attach(self)
         return info
 
@@ -369,7 +367,6 @@ class Phone:
         self._early: collections.OrderedDict[str, collections.deque[Event]] = (
             collections.OrderedDict()
         )
-        self._sensors: dict[str, SensorInfo] | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
         self._reader: asyncio.Task[None] | None = None
         self._closed = False
@@ -422,9 +419,7 @@ class Phone:
         result = await self._call("list_sensors")
         if not isinstance(result, dict) or not isinstance(result.get("sensors"), list):
             raise ProtocolError(f"list_sensors: malformed result {result!r}")
-        sensors = [SensorInfo.from_json(s) for s in result["sensors"]]
-        self._sensors = {s.source: s for s in sensors}
-        return sensors
+        return [SensorInfo.from_json(s) for s in result["sensors"]]
 
     async def get(self, source: str, type: str | None = None) -> Event:
         """``get``: one-shot read of the latest value of ``source``."""
@@ -570,11 +565,6 @@ class Phone:
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-
-    def _mode_of(self, source: str) -> str | None:
-        if self._sensors is not None and source in self._sensors:
-            return self._sensors[source].mode
-        return _CATALOG_MODES.get(source)
 
     def _attach(self, sub: Subscription) -> None:
         sub_id = sub.id
