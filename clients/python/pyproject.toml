@@ -33,7 +33,10 @@ dependencies = ["websockets>=13.0,<18"]
 # Find paired phones via mDNS (_phonetopc._tcp). Without it, the addresses
 # stored at pairing time are tried.
 discovery = ["zeroconf>=0.100"]
+# Fingerprint approval (Phone.request_approval): ECDSA P-256 signature checks.
+approval = ["cryptography>=42"]
 dev = [
+    "cryptography>=42",
     "pytest>=7",
     "pytest-asyncio>=0.23",
     "jsonschema>=4.18",

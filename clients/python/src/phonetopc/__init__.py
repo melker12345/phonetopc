@@ -17,11 +17,15 @@ Pair the phone once with ``phonetopc pair`` (the Go CLI), then::
 For a phone in dev mode (plaintext, no pairing) use
 ``phonetopc.connect("192.168.1.20", dev=True)``. Scripts that don't want
 asyncio can use :mod:`phonetopc.sync`.
+
+``await phone.request_approval("Run deploy?")`` asks for a fingerprint on the
+phone and verifies the phone's signature (``pip install 'phonetopc[approval]'``).
 """
 
 from __future__ import annotations
 
 from ._version import __version__
+from .approval import ApprovalResult
 from .client import (
     DEFAULT_ADDR,
     DEFAULT_PATH,
@@ -36,6 +40,11 @@ from .client import (
 )
 from .errors import (
     AmbiguousDevice,
+    ApprovalDependencyMissing,
+    ApprovalError,
+    ApprovalKeyChanged,
+    ApprovalNotSupported,
+    ApprovalVerificationError,
     ConnectionClosed,
     CredentialStoreError,
     Error,
@@ -62,6 +71,7 @@ from .errors import (
 from .models import (
     CONTINUOUS,
     ON_CHANGE,
+    ApprovalInfo,
     DeviceInfo,
     Event,
     HelloResult,
@@ -81,6 +91,13 @@ __all__ = [
     "ON_CHANGE",
     "PROTOCOL",
     "AmbiguousDevice",
+    "ApprovalDependencyMissing",
+    "ApprovalError",
+    "ApprovalInfo",
+    "ApprovalKeyChanged",
+    "ApprovalNotSupported",
+    "ApprovalResult",
+    "ApprovalVerificationError",
     "ConnectionClosed",
     "CredentialStoreError",
     "DeviceInfo",

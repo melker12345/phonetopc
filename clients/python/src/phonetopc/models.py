@@ -17,6 +17,7 @@ from .errors import ProtocolError
 __all__ = [
     "CONTINUOUS",
     "ON_CHANGE",
+    "ApprovalInfo",
     "DeviceInfo",
     "Event",
     "HelloResult",
@@ -134,10 +135,28 @@ class PCInfo:
 
 
 @dataclass(frozen=True)
+class ApprovalInfo:
+    """``hello`` ``result.approval`` (APPROVAL.md section 1): the phone's approval key.
+
+    ``key`` is the base64url DER ``SubjectPublicKeyInfo``, ``pin`` its pin.
+    """
+
+    key: str
+    pin: str
+
+    @classmethod
+    def from_json(cls, data: Any) -> ApprovalInfo:
+        w = "hello.approval"
+        obj = _obj(data, w)
+        return cls(key=_str(obj, "key", w), pin=_str(obj, "pin", w))
+
+
+@dataclass(frozen=True)
 class HelloResult:
     """Result of the ``hello`` handshake.
 
-    ``pc`` is set in secure mode only (SECURITY.md section 5).
+    ``pc`` is set in secure mode only (SECURITY.md section 5); ``approval``
+    only when the phone can do fingerprint approvals (APPROVAL.md section 1).
     """
 
     protocol: str
@@ -145,6 +164,7 @@ class HelloResult:
     device: DeviceInfo
     capabilities: tuple[str, ...]
     pc: PCInfo | None = None
+    approval: ApprovalInfo | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -157,6 +177,9 @@ class HelloResult:
             device=DeviceInfo.from_json(obj.get("device")),
             capabilities=_str_list(obj, "capabilities", w),
             pc=PCInfo.from_json(obj["pc"]) if obj.get("pc") is not None else None,
+            approval=(
+                ApprovalInfo.from_json(obj["approval"]) if obj.get("approval") is not None else None
+            ),
             raw=obj,
         )
 

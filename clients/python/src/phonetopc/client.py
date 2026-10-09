@@ -1,4 +1,4 @@
-"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md and SECURITY.md, draft 2).
+"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md, SECURITY.md, APPROVAL.md).
 
 One :class:`Phone` owns one WebSocket and one reader task. The reader
 correlates responses with pending requests by ``id`` and routes ``event``
@@ -30,11 +30,15 @@ import websockets.exceptions
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as _ws_connect
 
-from . import discovery
+from . import approval, discovery
 from ._tls import PinCheckFailed, pinned_context, verify_transport
 from ._version import __version__
 from .errors import (
     AmbiguousDevice,
+    ApprovalError,
+    ApprovalKeyChanged,
+    ApprovalNotSupported,
+    ApprovalVerificationError,
     ConnectionClosed,
     NotPaired,
     PhoneUnreachable,
@@ -48,6 +52,7 @@ from .errors import (
 from .models import (
     CONTINUOUS,
     ON_CHANGE,
+    ApprovalInfo,
     DeviceInfo,
     Event,
     HelloResult,
@@ -56,11 +61,14 @@ from .models import (
     ServerInfo,
     SubscribeResult,
 )
+from .pin import pin_from_spki, pins_equal
 from .store import (
     PairedDevice,
+    accept_approval_key,
     find_by_address,
     load_devices,
     normalize_host,
+    pin_approval_key,
     remember_address,
     select_device,
 )
@@ -478,6 +486,130 @@ class Phone:
             queue_size=queue_size if queue_size is not None else self.queue_size,
             overflow=overflow,
         )
+
+    # -- fingerprint approval (APPROVAL.md) -------------------------------
+
+    async def request_approval(
+        self, reason: str, timeout: float = approval.DEFAULT_APPROVAL_TIMEOUT
+    ) -> approval.ApprovalResult:
+        """Ask the user to confirm ``reason`` with a fingerprint on the phone.
+
+        Returns an :class:`~phonetopc.approval.ApprovalResult`, which is truthy
+        only if the user approved *and* the phone's signature verified against
+        the accepted approval key, over this request's fresh nonce, ``reason``
+        and the ids of this session. Otherwise ``result.why`` says why not
+        (``"denied"``, ``"cancelled"``, ``"timeout"``, ``"busy"``,
+        ``"lockout"``, ``"unavailable"``).
+
+        ``reason`` is shown on the phone (1-200 characters after trimming, no
+        control characters; it is sent trimmed). ``timeout`` is how long the
+        phone waits for the user, 5-120 seconds; the client waits 5 s longer.
+
+        Raises :class:`~phonetopc.errors.ApprovalDependencyMissing` (an
+        :class:`ImportError`) without ``cryptography``,
+        :class:`~phonetopc.errors.ApprovalNotSupported` in dev mode,
+        :class:`~phonetopc.errors.ApprovalKeyChanged` if the phone's approval
+        key isn't the accepted one (nothing is sent then),
+        :class:`~phonetopc.errors.ApprovalVerificationError` for an
+        ``approved: true`` without a valid signature, and
+        :class:`~phonetopc.errors.RequestTimeout` if no answer came in time.
+        """
+        reason = approval.check_reason(reason)
+        if not approval.MIN_APPROVAL_TIMEOUT <= timeout <= approval.MAX_APPROVAL_TIMEOUT:
+            raise ValueError(
+                f"timeout must be {approval.MIN_APPROVAL_TIMEOUT:g}-"
+                f"{approval.MAX_APPROVAL_TIMEOUT:g} seconds, got {timeout!r}"
+            )
+        # Never send a request whose answer we couldn't verify.
+        approval.require_crypto()
+        info = await self._trusted_approval_key()
+        if info is None:
+            return approval.ApprovalResult(approved=False, why="unavailable")
+        pc = self.hello.pc
+        if pc is None:
+            raise ProtocolError("secure hello result has no 'pc': can't build the signed message")
+        # Our own copies of everything that is signed (APPROVAL.md section 5).
+        nonce = approval.new_nonce()
+        message = approval.approval_message(self.device.id, pc.id, nonce, reason)
+        timeout_ms = round(timeout * 1000)
+        result = await self._call(
+            "request_approval",
+            {"reason": reason, "nonce": nonce, "timeout_ms": timeout_ms},
+            timeout=timeout_ms / 1000 + approval.APPROVAL_GRACE,
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("approved"), bool):
+            raise ProtocolError(f"request_approval: malformed result {result!r}")
+        if result["approved"]:
+            signature = result.get("signature")
+            if not isinstance(signature, str):
+                raise ApprovalVerificationError(
+                    "the phone answered approved but sent no signature; treated as not approved"
+                )
+            if not approval.verify_signature(info.key, message, signature):
+                raise ApprovalVerificationError(
+                    "the phone answered approved but its signature doesn't verify for this "
+                    "request; treated as not approved"
+                )
+            return approval.ApprovalResult(approved=True, raw=result)
+        why = result.get("why")
+        return approval.ApprovalResult(
+            approved=False, why=why if isinstance(why, str) else None, raw=result
+        )
+
+    async def accept_approval_key(self) -> bool:
+        """Trust this phone's current approval key, replacing the stored one.
+
+        The explicit acceptance of APPROVAL.md section 3, for when the key
+        changed (``phonetopc approval-key --accept`` does the same). Returns
+        ``True`` if the stored key changed.
+        """
+        paired = self._approval_pairing()
+        info = self._approval_info()
+        if info is None:
+            raise ApprovalError(
+                f"{paired.label()} has no approval key (no strong biometric enrolled?)"
+            )
+        return await asyncio.to_thread(accept_approval_key, paired.id, info.pin)
+
+    @property
+    def approval_key(self) -> str | None:
+        """Pin of the phone's approval key in this session (``hello``), if it has one."""
+        info = self.hello.approval
+        return info.pin if info is not None else None
+
+    def _approval_pairing(self) -> PairedDevice:
+        paired = self.paired_device
+        if paired is None:
+            raise ApprovalNotSupported(
+                "fingerprint approval needs a secure connection to a paired phone; "
+                "dev mode has no approval (pair with `phonetopc pair`)"
+            )
+        return paired
+
+    def _approval_info(self) -> ApprovalInfo | None:
+        """``hello.approval`` after checking that its pin really is the key's pin."""
+        info = self.hello.approval
+        if info is None or "approval" not in self.capabilities:
+            return None
+        try:
+            spki = approval.b64url_decode(info.key)
+        except ValueError:
+            raise ProtocolError("hello.approval.key is not base64url") from None
+        if not pins_equal(pin_from_spki(spki), info.pin):
+            raise ProtocolError("hello.approval.pin is not the pin of hello.approval.key")
+        return info
+
+    async def _trusted_approval_key(self) -> ApprovalInfo | None:
+        """The session's approval key if it is the accepted one (pinned on first sight)."""
+        paired = self._approval_pairing()
+        info = self._approval_info()
+        if info is None:
+            return None
+        # Locked read-modify-write of devices.json: off the event loop.
+        accepted = await asyncio.to_thread(pin_approval_key, paired.id, info.pin)
+        if not pins_equal(accepted, info.pin):
+            raise ApprovalKeyChanged(paired.label(), accepted, info.pin)
+        return info
 
     # -- lifecycle --------------------------------------------------------
 

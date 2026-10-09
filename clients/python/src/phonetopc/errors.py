@@ -11,6 +11,11 @@ from typing import Any
 
 __all__ = [
     "AmbiguousDevice",
+    "ApprovalDependencyMissing",
+    "ApprovalError",
+    "ApprovalKeyChanged",
+    "ApprovalNotSupported",
+    "ApprovalVerificationError",
     "ConnectionClosed",
     "CredentialStoreError",
     "Error",
@@ -129,6 +134,48 @@ class PhoneUnreachable(Error, OSError):
     def __init__(self, message: str, attempts: list[tuple[str, BaseException]]) -> None:
         super().__init__(message)
         self.attempts = attempts
+
+
+# -- fingerprint approval (APPROVAL.md) -------------------------------------------
+
+
+class ApprovalError(Error):
+    """Base class of approval problems that are not a plain "no" from the user."""
+
+
+class ApprovalNotSupported(ApprovalError):
+    """Approval needs a secure connection to a paired phone; dev mode has none."""
+
+
+class ApprovalKeyChanged(ApprovalError):
+    """The phone's approval key isn't the one accepted before (APPROVAL.md section 3).
+
+    Usually fingerprints were added or removed on the phone, which replaces
+    its approval key. The request was not sent. Trust the new key explicitly
+    with ``phonetopc approval-key --accept``.
+    """
+
+    def __init__(self, device: str, stored: str, actual: str) -> None:
+        super().__init__(
+            f"the approval key of {device} changed (accepted {stored}, the phone now has "
+            f"{actual}). Fingerprints changed on the phone? run `phonetopc approval-key "
+            "--accept` (or `python -m phonetopc approval-key --accept`) to trust the new key. "
+            "The approval request was not sent."
+        )
+        self.device = device
+        self.stored = stored
+        self.actual = actual
+
+
+class ApprovalVerificationError(ApprovalError):
+    """The phone answered ``approved: true``, but without a valid signature.
+
+    This is a failure, never an approval (APPROVAL.md section 4.1).
+    """
+
+
+class ApprovalDependencyMissing(Error, ImportError):
+    """Verifying approvals needs the ``cryptography`` package (``phonetopc[approval]``)."""
 
 
 class PhonetopcError(Error):

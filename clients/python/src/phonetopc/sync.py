@@ -19,6 +19,7 @@ import threading
 from collections.abc import Coroutine, Iterator, Mapping
 from typing import Any, TypeVar
 
+from .approval import DEFAULT_APPROVAL_TIMEOUT, ApprovalResult
 from .client import DEFAULT_QUEUE_SIZE, DEFAULT_REQUEST_TIMEOUT, Overflow, Phone, Subscription
 from .client import connect as _async_connect
 from .models import DeviceInfo, Event, HelloResult, PCInfo, SensorInfo
@@ -136,6 +137,20 @@ class SyncPhone:
 
     def call(self, method: str, params: Mapping[str, Any] | None = None) -> Any:
         return self._runner.run(self._phone.call(method, params))
+
+    def request_approval(
+        self, reason: str, timeout: float = DEFAULT_APPROVAL_TIMEOUT
+    ) -> ApprovalResult:
+        """Blocking :meth:`Phone.request_approval <phonetopc.Phone.request_approval>`."""
+        return self._runner.run(self._phone.request_approval(reason, timeout))
+
+    def accept_approval_key(self) -> bool:
+        """Blocking :meth:`Phone.accept_approval_key <phonetopc.Phone.accept_approval_key>`."""
+        return self._runner.run(self._phone.accept_approval_key())
+
+    @property
+    def approval_key(self) -> str | None:
+        return self._phone.approval_key
 
     def list_sensors(self) -> list[SensorInfo]:
         return self._runner.run(self._phone.list_sensors())
