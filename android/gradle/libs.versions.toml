@@ -13,6 +13,7 @@ navigation = "2.9.7"
 datastore = "1.2.1"
 camerax = "1.6.2"
 zxing = "3.5.4"
+biometric = "1.1.0"
 junit = "4.13.2"
 slf4j = "2.0.20"
 
@@ -49,6 +50,7 @@ androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.r
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 androidx-camera-compose = { module = "androidx.camera:camera-compose", version.ref = "camerax" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
 

@@ -66,6 +66,8 @@ dependencies {
     // and Guava (several MB) that a QR scanner doesn't need.
     implementation(libs.androidx.camera.compose)
     implementation(libs.zxing.core)
+    // Fingerprint approval (APPROVAL.md): BiometricPrompt with a CryptoObject, back to API 26.
+    implementation(libs.androidx.biometric)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
