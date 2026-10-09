@@ -1,5 +1,5 @@
 // Package protocol defines the wire types of the phonetopc/1 protocol
-// (draft 1, see spec/PROTOCOL.md and spec/schemas/phonetopc-1.schema.json).
+// (draft 2, see spec/PROTOCOL.md, spec/SECURITY.md and spec/schemas/phonetopc-1.schema.json).
 //
 // The package has no I/O. It is shared by the client library, the mock phone
 // server and (later) the phonetopcd daemon, so it only contains message
