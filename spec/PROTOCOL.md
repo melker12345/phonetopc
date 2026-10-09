@@ -1,10 +1,12 @@
-# phonetopc protocol — version `phonetopc/1` (draft 2)
+# phonetopc protocol — version `phonetopc/1` (draft 3)
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 JSON Schemas for every message live in [`schemas/`](schemas/).
 
 This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
-tokens (milestone M2). Commands and fingerprint approval come in later drafts without breaking these messages.
+tokens (milestone M2). [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
+
+**Changes in draft 3:** `request_approval`, capability `approval` and `hello.approval`; see `APPROVAL.md`.
 
 **Changes in draft 2:** secure mode (`wss://` with a pinned certificate) is the default; `hello` gains `auth`
 and its result gains `pc`; new error `-32010`; mDNS TXT gains `tls=1`. See `SECURITY.md`.
@@ -195,4 +197,4 @@ This draft uses a manual address. Servers SHOULD additionally advertise `_phonet
 ## 9. Known gaps (later drafts)
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
-- `command` and biometric challenge-response (see `plan.md` §4.3).
+- `command` (vibrate, notify, …) for PC → phone actions other than approval.

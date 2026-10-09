@@ -1,0 +1,71 @@
+{
+  "description": "Approval test vectors for APPROVAL.md \u00a75. Test-only key; never use it for anything else. ECDSA signatures are randomized, so implementations verify these, they don't reproduce them.",
+  "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+  "pin": "sha256/iTLkIw3_BVnZB-gfY05UCdj8f0jvVcl9dmaD7vkcdWw",
+  "message_utf8": "phonetopc-approval/1\n635f3a01db1859bc\n81d7d5f3b885fd1d\nZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM\n5XkfdFNl7cpRGp003eSPS_BRaab0DMUYkvpZuKwhTTY",
+  "message_hex": "70686f6e65746f70632d617070726f76616c2f310a363335663361303164623138353962630a383164376435663362383835666431640a5a47566d5a326870616d7473625735766348467963335231646e6434655870376648312d66344342676f4d0a35586b6664464e6c376370524770303033655350535f425261616230444d55596b76705a754b7768545459",
+  "valid": {
+    "phone_id": "635f3a01db1859bc",
+    "pc_id": "81d7d5f3b885fd1d",
+    "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+    "reason": "Run deploy.sh on arch-desktop?",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+    "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU"
+  },
+  "invalid": [
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "name": "wrong nonce"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop!",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "name": "wrong reason"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "0000000000000000",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "name": "wrong pc id"
+    },
+    {
+      "phone_id": "0000000000000000",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "name": "wrong phone id"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnQ",
+      "name": "corrupted signature"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhV-KIH2QyThW0fjd-QvQmAGUl0VmLGWbmDFbGSMdp_xQas0_xUimpM8J3vrdyrDkyT4Su6W1XiFs7jKijSRKQg",
+      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "name": "different key"
+    }
+  ]
+}

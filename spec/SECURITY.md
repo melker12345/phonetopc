@@ -1,7 +1,13 @@
-# phonetopc security — pairing, TLS and tokens (draft 2)
+# phonetopc security — pairing, TLS and tokens (draft 3)
 
 This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md). It is milestone M2 of [`plan.md`](../plan.md).
 The key words MUST, SHOULD and MAY are used as in RFC 2119.
+
+**Changes in draft 3** (from the first three implementations and the first real pairing): default pairing port
+8766; results of `pair_qr` and `pair_sas_confirm`; long-pending pairing answers; order of checks for pairing and
+for secure `hello`; close codes; the listener survives refusals; re-pairing closes old sessions; exact QR encoding;
+trying several addresses; locking and updating `devices.json`; the stored `approval_key`. Fingerprint approval
+itself is in [`APPROVAL.md`](APPROVAL.md).
 
 ## 1. Goals and threat model
 
@@ -53,12 +59,22 @@ Pairing creates trust between one phone and one PC. It runs **once**. Afterwards
 
 ### 4.1 Roles and channel
 
-- The PC runs `phonetopc pair`, which opens a short-lived **pairing listener**: a TLS WebSocket server on an
-  ephemeral port, path `/v1/pair`, using the PC's long-term certificate. It closes after one successful pairing,
-  on Ctrl-C, or after 5 minutes.
+- The PC runs `phonetopc pair`, which opens a short-lived **pairing listener**: a TLS WebSocket server, path
+  `/v1/pair`, using the PC's long-term certificate. It closes after one successful pairing, on Ctrl-C, or after
+  5 minutes (close code 1001 for an idle phone connection).
+- Default port **8766**, so users can open it once in a firewall; implementations SHOULD allow choosing another
+  port and SHOULD print a firewall hint if a host firewall is detected. If 8766 is busy, a random port MAY be used.
 - The phone is the **client** of the pairing listener. Messages are JSON-RPC 2.0 like `PROTOCOL.md` §2, but with
   the methods below, and protocol name `phonetopc-pair/1`.
-- The pairing listener accepts one pairing at a time and SHOULD rate-limit failed attempts (e.g. 5 per minute).
+- The pairing listener accepts one pairing at a time; a second phone connecting meanwhile is closed with 1013.
+  It SHOULD rate-limit failed attempts to 5 per minute per address; once over the limit, connections are closed
+  with 1013, and after an error response that exceeds it, with 1008.
+- After `-32020`, `-32021` or `-32023` the listener stays open for another attempt; all three count as failures.
+- **Long answers:** the answers to `pair_qr` and `pair_sas_confirm` wait for the PC user. Phones MUST allow at
+  least 5 minutes for them.
+- **Order of checks** for each pairing request: (1)–(4) as in `PROTOCOL.md` §2; (5) unknown method → `-32601`;
+  (6) method not valid at this step → `-32022`, without changing the state; (7) invalid params, including
+  wrongly sized secrets, nonces or tokens → `-32602`; (8) unknown `protocol` → `-32004`; (9) method-specific errors.
 - The PC offers **both** ways in at once; the user picks on the phone.
 
 ### 4.2 Way A — QR code (no discovery needed)
@@ -70,8 +86,12 @@ phonetopc://pair?v=1&id=<pc id>&n=<pc name, percent-encoded>&h=<host1>,<host2>&p
 ```
 
 - `h` lists every LAN address of the PC (IPv4 and IPv6, link-local excluded). `s` is 16 random bytes, base64url.
+- **Encoding:** producers percent-encode `n` as UTF-8 per RFC 3986 (space is `%20`), write the commas in `h`
+  literally, and write IPv6 addresses without brackets. Consumers decode each value before splitting `h` on
+  commas, and MUST also accept `+` for space, `%2C` for comma and bracketed IPv6.
+- Container and VM bridge interfaces (docker, veth, virbr, …) SHOULD be left out of `h`.
 - The phone scans it, connects to `wss://<h>:<p>/v1/pair` trying each host in order, and **verifies the PC's pin**
-  equals `pin`. The QR is the trust anchor: the phone now knows it talks to that PC.
+  equals `pin`; a host with a different pin is skipped like an unreachable one. The QR is the trust anchor: the phone now knows it talks to that PC.
 - The phone sends `pair_qr`; the secret proves to the PC that it's the phone that scanned the QR:
 
 ```jsonc
@@ -84,7 +104,7 @@ phonetopc://pair?v=1&id=<pc id>&n=<pc name, percent-encoded>&h=<host1>,<host2>&p
 - The PC compares `secret` in constant time. On mismatch: error `-32020` and the listener stays open.
 - On match, the PC asks its user to confirm (`Pair with "Melker's S25 Ultra"? [Y/n]`), because a QR on screen
   might be photographed by someone else. Refusal: `-32021`.
-- On confirmation, the phone's last step is issuing the token, see §4.4.
+- On confirmation the PC answers `{"pc": {"id", "name"}}`; the phone's last step is issuing the token, see §4.4.
 
 ### 4.3 Way B — network discovery and a 6-digit code
 
@@ -116,8 +136,9 @@ commitment and the code; every implementation MUST test against them.
 A man in the middle presents a different PC pin to the phone than the PC's real one, so the codes differ.
 
 - Both screens show the code. The user confirms on **both**: the phone sends `pair_sas_confirm`
-  `{"match": true|false}`; the PC asks `Does the phone show 123 456? [y/N]`.
-  If either says no: error `-32023`, and both sides discard everything.
+  `{"match": true|false}`; the PC asks `Does the phone show 123 456? [y/N]` and answers `{}` once its user said
+  yes. If either says no: error `-32023`, and both sides discard everything.
+- If the phone's commitment check fails, it sends `pair_sas_confirm {"match": false}` and then aborts.
 - If both confirm, the phone stores `pc_pin_seen` as the PC's pin and continues with §4.4.
 
 ### 4.4 Finishing: the token
@@ -135,7 +156,8 @@ Both ways end with the phone issuing a token to the PC:
   only after that answer, and shows it under *Paired devices*.
 - `pair_finish` is only valid after a successful `pair_qr` confirmation or a mutual SAS confirmation;
   otherwise `-32022`.
-- Re-pairing a PC that the phone already knows (same PC id) replaces its old token.
+- Re-pairing a PC that the phone already knows (same PC id) replaces its old token, and the phone closes sessions
+  that used the old token with 1008.
 
 ### 4.5 Pairing errors
 
@@ -159,10 +181,15 @@ In secure mode, `hello` gains an `auth` member:
 ```
 
 - The server compares the token in constant time against the tokens of paired PCs.
+- **Order of checks** for a secure `hello`: params shape (`-32602`), then `auth` (any problem, including a
+  malformed `auth`, is `-32010`), then `protocol` (`-32004`). Checking auth before the protocol version means an
+  unauthenticated client learns nothing.
 - Missing, unknown or revoked token: error `-32010` (`unauthorized`), then the server closes the connection
   with code 1008. Before a successful `hello`, the `-32003` rule of `PROTOCOL.md` §3 still applies.
-- The server SHOULD close connections that haven't sent a successful `hello` within 10 seconds, and SHOULD
-  rate-limit failed `hello`s per source address.
+- The server SHOULD close connections that haven't sent a successful `hello` within 10 seconds (code 1008), and
+  SHOULD rate-limit failed `hello`s to 5 per minute per source address; a limited address is closed with 1013,
+  even with a valid token. Conformance runners need the limit off or at least 20 per minute.
+- A failed `hello` after a successful one also closes the connection with 1008.
 - The `hello` result gains `pc: {"id", "name"}`: which pairing the server recognised.
 - Revoking a PC on the phone closes its open sessions immediately with code 1008.
 - In dev mode, `auth` is ignored.
@@ -187,15 +214,23 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
       "token": "Zm9vYmFy…",
       "port": 8765,
       "addresses": ["192.168.1.153"],
-      "paired_at": "2026-10-09T16:40:00Z"
+      "paired_at": "2026-10-09T16:40:00Z",
+      "approval_key": "sha256/…"
     }
   ]
 }
 ```
 
-- Writers MUST replace the file atomically (write a temp file, then rename).
+- `id`, `name`, `pin` and `token` are required. `port` defaults to 8765, `addresses` to `[]`; `paired_at` and
+  `approval_key` (see `APPROVAL.md` §3) are optional. Readers MUST keep unknown fields when rewriting.
+- **Writing:** take an exclusive `flock` on the file `.lock` in the same directory, re-read `devices.json`, change
+  it, write a temp file in the same directory with mode `0600`, rename it over `devices.json`, release the lock.
+  On platforms without `flock`, skip the lock.
 - **Finding a paired phone:** browse mDNS for `_phonetopc._tcp` with TXT `id` equal to the device id; if that
-  fails, try `addresses` in order. Clients SHOULD update `addresses` when they find the phone somewhere new.
+  fails, try `addresses` in order. Every attempt verifies the pin; a pin mismatch at one address does not stop the
+  others, and is reported only if no address works. Once connected, move the working address to the front of
+  `addresses` (never storing loopback addresses, e.g. from `adb forward`), and update `port` only from mDNS.
+- If `hello.device.id` differs from the stored id, clients SHOULD warn; the pin already proved the key.
 - In milestone M3, `phonetopcd` becomes the main user of this file, and scripts talk to the daemon instead.
 
 ## 7. Error codes added to PROTOCOL.md §7
@@ -206,6 +241,5 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
 
 ## 8. What this doesn't solve yet
 
-- Fingerprint approval (plan §4.3) builds on the pins and ids above, in a later draft.
 - A phone with many PCs, or a PC with many phones, works, but there's no UI for choosing a default yet beyond
   "the only one" or `--device`.
