@@ -81,9 +81,20 @@ class PinMismatch(Error):
 
     Either the phone app was reinstalled or reset (new key: pair again), or
     something else is answering at that address. Nothing was sent to it.
+
+    When several addresses were tried, this is raised only if none of them
+    worked (SECURITY.md section 6); ``address``/``actual`` describe the first
+    mismatch and ``attempts`` lists ``(address, error)`` for every address tried.
     """
 
-    def __init__(self, device: str, address: str, expected: str, actual: str) -> None:
+    def __init__(
+        self,
+        device: str,
+        address: str,
+        expected: str,
+        actual: str,
+        attempts: list[tuple[str, BaseException]] | None = None,
+    ) -> None:
         super().__init__(
             f"phone identity changed: the phone at {address} is not the {device!r} you paired "
             f"(expected key {expected}, got {actual}). If you reinstalled or reset the phone "
@@ -94,6 +105,7 @@ class PinMismatch(Error):
         self.address = address
         self.expected = expected
         self.actual = actual
+        self.attempts: list[tuple[str, BaseException]] = attempts or []
 
 
 class NotPaired(Error, LookupError):

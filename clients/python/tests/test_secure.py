@@ -257,19 +257,49 @@ async def test_phone_in_dev_mode(server: FakeServer, write_store: StoreWriter) -
 
 
 async def test_pin_mismatch(pc_cert_server: FakeServer, write_store: StoreWriter) -> None:
-    # The stored pin is the phone's; this server has another key. A second, good
-    # address must not be tried: a mismatch is a hard failure (SECURITY.md 3).
+    # The stored pin is the phone's; this server has another key. The next
+    # address is still tried (draft 3), but it doesn't answer either, so the
+    # mismatch is what gets reported.
     write_store(device_entry(pc_cert_server, addresses=["127.0.0.1", "127.0.0.3"]))
     with pytest.raises(phonetopc.PinMismatch) as info:
-        await phonetopc.connect()
+        await phonetopc.connect(open_timeout=2)
     err = info.value
     assert "phone identity changed" in str(err) and "phonetopc pair" in str(err)
     assert err.expected == PINS["phone"] and err.actual == PINS["pc"]
     assert err.address == f"wss://127.0.0.1:{pc_cert_server.port}/v1/ws"
+    assert [url for url, _ in err.attempts] == [
+        f"wss://127.0.0.1:{pc_cert_server.port}/v1/ws",
+        f"wss://127.0.0.3:{pc_cert_server.port}/v1/ws",
+    ]
     # Nothing was sent: not even the WebSocket upgrade request, let alone the token.
     await asyncio.sleep(0.05)
     assert pc_cert_server.http_requests == []
     assert pc_cert_server.received == []
+
+
+async def test_pin_mismatch_at_one_address_doesnt_stop_the_others(
+    secure_server: FakeServer,
+    pc_cert_server: FakeServer,
+    write_store: StoreWriter,
+    monkeypatch: pytest.MonkeyPatch,
+    no_loopback_skip: None,
+) -> None:
+    # mDNS (stale, say) points at a device with another key; the stored address
+    # is the real phone. The mismatch is skipped like an unreachable address.
+    path = write_store(device_entry(secure_server, addresses=["127.0.0.1"]))
+
+    async def fake_locate(device_id: str, timeout: float = 2.0) -> discovery.Located:
+        return discovery.Located(("127.0.0.1",), pc_cert_server.port)
+
+    monkeypatch.setattr(discovery, "locate", fake_locate)
+    async with phonetopc.connect() as phone:
+        assert phone.url == f"wss://127.0.0.1:{secure_server.port}/v1/ws"
+        assert phone.pc is not None
+    await asyncio.sleep(0.05)
+    assert pc_cert_server.http_requests == [] and pc_cert_server.received == []
+    # The working address was not from mDNS, so the stored port stays.
+    stored = json.loads(path.read_text())["devices"][0]
+    assert stored["port"] == secure_server.port and stored["addresses"] == ["127.0.0.1"]
 
 
 async def test_pin_rechecked_before_hello(

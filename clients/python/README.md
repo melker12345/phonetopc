@@ -54,7 +54,7 @@ More complete scripts are in [`examples/`](../../examples).
 
 The phone serves exactly one of two modes ([SECURITY.md](../../spec/SECURITY.md) section 3):
 
-- **Secure mode** (the default): `wss://`. The client checks that the phone's TLS public key matches the pin stored at pairing time, *before sending anything*, and then authenticates with the stored token in `hello`. There is no fallback to plaintext or to any other check: a phone with a different key raises `PinMismatch`.
+- **Secure mode** (the default): `wss://`. The client checks that the phone's TLS public key matches the pin stored at pairing time, *before sending anything*, and then authenticates with the stored token in `hello`. There is no fallback to plaintext or to any other check: a device with a different key is never talked to, and if no address reaches the paired key, `PinMismatch` is raised.
 - **Dev mode**: plaintext `ws://`, no authentication, for development. It is an explicit, off-by-default setting in the phone app. Only use it on a network you trust. Select it with `dev=True` (`--dev`) or a `ws://` URL. The mock phone (`phonetopc-mock`) speaks dev mode too.
 
 ### Which phone, at which address
@@ -77,7 +77,7 @@ Without an address, a secure connection finds the phone like this:
 
 When the phone answers somewhere new (a new DHCP lease, say), the client moves that address to the front of its stored `addresses`. Loopback addresses (adb forward) are never stored.
 
-The pin is always checked, so connecting to an address "just to see" can't leak the token to a different phone.
+The pin is always checked, so connecting to an address "just to see" can't leak the token to a different phone. A device with a different key at one address (say, a stale DHCP lease now held by someone else) is skipped like an unreachable address; `PinMismatch` is raised only if no address works.
 
 Over USB: `adb forward tcp:8765 tcp:8765`, then `connect("127.0.0.1")` (secure, the paired phone), or `connect(dev=True)` for a phone in dev mode.
 
@@ -87,17 +87,17 @@ When something is wrong, the exception says what to do:
 |---|---|
 | Nothing paired yet | `NotPaired`: "no paired phone: run `phonetopc pair`" |
 | Several paired phones, none chosen | `AmbiguousDevice`: "pass device=" |
-| The phone's key changed (app reinstalled or reset, or another device at that address) | `PinMismatch`: "phone identity changed ... re-pair with `phonetopc pair`". Nothing was sent to it |
+| The phone's key changed (app reinstalled or reset, or another device at that address), and no address had the paired key | `PinMismatch`: "phone identity changed ... re-pair with `phonetopc pair`". Nothing was sent to it |
 | The phone revoked this PC | `Unauthorized` (`-32010`): "run `phonetopc pair`" |
 | No address worked | `PhoneUnreachable` (an `OSError`), listing each address tried and why, with hints such as "if the phone is in dev mode, pass dev=True" |
 
 ### The credential store
 
-`phonetopc pair` saves pairings in `$XDG_CONFIG_HOME/phonetopc/devices.json` (default `~/.config/phonetopc/devices.json`), in the format of [SECURITY.md](../../spec/SECURITY.md) section 6. The Python client only reads pairings and never creates them. It writes to the file only to update a device's `addresses` (and its `port` when mDNS reports a new one). Those writes are atomic (temp file + rename), keep every other field, and always use mode `0600`.
+`phonetopc pair` saves pairings in `$XDG_CONFIG_HOME/phonetopc/devices.json` (default `~/.config/phonetopc/devices.json`), in the format of [SECURITY.md](../../spec/SECURITY.md) section 6. The Python client only reads pairings and never creates them. It writes to the file only to update a device's `addresses` (and its `port` when mDNS reports a new one) and to record its approval key (see [fingerprint approval](#fingerprint-approval)). Each write takes an exclusive `flock` on `.lock` in the same directory (skipped where `fcntl` doesn't exist), re-reads the file, and replaces it atomically (temp file + rename) with mode `0600`, keeping every other field, including ones this client doesn't know.
 
 The file holds secret tokens, so it should be mode `0600`. If other users can read it, the client still works but issues an `InsecurePermissionsWarning`. Fix it with `chmod 600 ~/.config/phonetopc/devices.json`.
 
-`phonetopc.load_devices()` returns the pairings as `PairedDevice` objects (`id`, `name`, `pin`, `token`, `port`, `addresses`, `paired_at`). The token is left out of their `repr`.
+`phonetopc.load_devices()` returns the pairings as `PairedDevice` objects (`id`, `name`, `pin`, `token`, `port`, `addresses`, `paired_at`, `approval_key`). The token is left out of their `repr`.
 
 ## API overview
 
@@ -158,7 +158,7 @@ All exceptions derive from `phonetopc.Error`.
 | `SubscriptionOverflow` | An on_change subscription's queue overflowed |
 | `ProtocolError` | The server sent a malformed message |
 | `NotPaired`, `AmbiguousDevice` | No pairing fits, or several do (both are also `LookupError`s) |
-| `PinMismatch` (`.expected`, `.actual`, `.address`) | The phone's TLS key isn't the paired one |
+| `PinMismatch` (`.expected`, `.actual`, `.address`, `.attempts`) | The phone's TLS key isn't the paired one at any address tried |
 | `PhoneUnreachable` (`.attempts`) | Secure mode: no address worked (also an `OSError`) |
 | `CredentialStoreError` | `devices.json` is unreadable, malformed or of an unknown version |
 

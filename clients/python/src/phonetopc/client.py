@@ -952,21 +952,32 @@ class _Connect:
                     [],
                 )
 
+        # Every attempt verifies the pin before anything is sent. A mismatch at
+        # one address (a stale DHCP lease now held by another device, say) does
+        # not stop the others; it is reported only if no address works
+        # (SECURITY.md section 6, draft 3).
         attempts: list[tuple[str, BaseException]] = []
+        mismatches: list[PinMismatch] = []
         for host, port, path in candidates:
             url = _join_url("wss", host, port, path)
             try:
                 ws = await self._connect_pinned(url, paired)
-            except PinMismatch:
-                raise
+            except PinMismatch as exc:
+                logger.warning("%s", exc)
+                attempts.append((url, exc))
+                mismatches.append(exc)
+                continue
             except _ATTEMPT_ERRORS as exc:
                 logger.debug("could not connect to %s: %r", url, exc)
                 attempts.append((url, exc))
                 continue
             phone = await self._start(ws, url, paired)
-            from_mdns = located is not None and host in located.addresses
+            from_mdns = located is not None and host in located.addresses and port == located.port
             _remember(paired, host, port, from_mdns=from_mdns)
             return phone
+        if mismatches:
+            first = mismatches[0]
+            raise PinMismatch(first.device, first.address, first.expected, first.actual, attempts)
         raise self._unreachable(paired, attempts, located)
 
     async def _connect_pinned(self, url: str, paired: PairedDevice) -> ClientConnection:
