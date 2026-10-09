@@ -1,11 +1,12 @@
 # phonetopc for Python
 
-The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md) and [security spec](../../spec/SECURITY.md), draft 2).
+The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md), [security spec](../../spec/SECURITY.md) and [approval spec](../../spec/APPROVAL.md), draft 3).
 
 - **Secure by default:** TLS pinned to the phone's key, plus a per-PC token, using the pairing made by `phonetopc pair`
+- **Fingerprint approval:** ask for a fingerprint on the phone before your program does something, with the phone's signature verified on the PC
 - asyncio API with typed events, plus a small blocking wrapper
 - One dependency: [`websockets`](https://websockets.readthedocs.io/); TLS pinning uses only the standard library
-- Optional mDNS discovery with [`zeroconf`](https://pypi.org/project/zeroconf/)
+- Optional mDNS discovery with [`zeroconf`](https://pypi.org/project/zeroconf/), optional approval verification with [`cryptography`](https://pypi.org/project/cryptography/)
 - Python 3.9+, fully typed (`py.typed`)
 
 ## Install
@@ -15,6 +16,7 @@ From a checkout of the repo:
 ```sh
 pip install -e clients/python                  # or:
 pip install -e 'clients/python[discovery]'     # also find the phone via mDNS when its IP changes
+pip install -e 'clients/python[approval]'      # fingerprint approval (request_approval)
 ```
 
 ## Quickstart
@@ -46,6 +48,7 @@ python -m phonetopc tail gyro --rate 50   # stream events (--json for JSON lines
 python -m phonetopc get battery
 python -m phonetopc list --device "Pixel 8"         # pick one of several paired phones
 python -m phonetopc list --dev --addr 192.168.1.20  # a phone in dev mode (plaintext)
+python -m phonetopc approval-key [--accept]         # show (or trust) the phone's approval key
 ```
 
 More complete scripts are in [`examples/`](../../examples).
@@ -99,6 +102,39 @@ The file holds secret tokens, so it should be mode `0600`. If other users can re
 
 `phonetopc.load_devices()` returns the pairings as `PairedDevice` objects (`id`, `name`, `pin`, `token`, `port`, `addresses`, `paired_at`, `approval_key`). The token is left out of their `repr`.
 
+## Fingerprint approval
+
+`request_approval` asks the user to confirm something with a fingerprint on the phone ([APPROVAL.md](../../spec/APPROVAL.md)). It needs secure mode and `pip install 'phonetopc[approval]'`.
+
+```python
+import phonetopc.sync
+
+def approved(reason: str) -> bool:
+    with phonetopc.sync.connect() as phone:   # the paired phone
+        return bool(phone.request_approval(reason))
+
+if approved("Run deploy.sh on arch-desktop?"):
+    ...
+```
+
+Or with asyncio: `result = await phone.request_approval("Run deploy?", timeout=30.0)`. The result is an `ApprovalResult`: `result.approved` (and `bool(result)`), and `result.why` when not approved: `"denied"`, `"cancelled"`, `"timeout"`, `"busy"` (another approval is pending), `"lockout"` (too many failed fingerprints) or `"unavailable"` (no fingerprint enrolled, or the phone can't do approvals). [`examples/approve.py`](../../examples/approve.py) runs a command only when approved.
+
+A "yes" counts only if it is proven. The phone signs its answer with a key in its Keystore that works only right after a fingerprint, and the client checks that signature itself, over a fresh random nonce, the exact `reason` it sent and the ids of this session, all from its own copies. So `result.approved` is `True` only after that check passed; an `approved: true` without a valid signature raises `ApprovalVerificationError` instead.
+
+`reason` is shown on the phone: 1-200 characters after trimming, without control characters (it is sent trimmed). `timeout` is how long the phone waits for the user, 5-120 seconds; the client waits 5 seconds longer for the answer, then raises `RequestTimeout`.
+
+**The approval key.** The first time a phone offers approvals, the client stores the pin of its approval key as `approval_key` in `devices.json`. The phone replaces that key when fingerprints are added or removed. Until you accept the new one, `request_approval` raises `ApprovalKeyChanged` ("fingerprints changed on the phone? run `phonetopc approval-key --accept`") and sends nothing. `python -m phonetopc approval-key --accept` and `await phone.accept_approval_key()` do the same as the Go command. Re-pairing clears the stored key.
+
+| Situation | Result |
+|---|---|
+| Approved, signature verified | `ApprovalResult(approved=True)` |
+| Denied, cancelled, timed out on the phone, busy, lockout, unavailable | `ApprovalResult(approved=False, why=...)` |
+| `approved: true` with a missing or invalid signature | `ApprovalVerificationError` |
+| Approval key differs from the accepted one | `ApprovalKeyChanged` (nothing sent) |
+| `cryptography` not installed | `ApprovalDependencyMissing`, an `ImportError`: "pip install 'phonetopc[approval]'" (nothing sent) |
+| Dev mode | `ApprovalNotSupported` (nothing sent) |
+| No answer within `timeout` + 5 s | `RequestTimeout` |
+
 ## API overview
 
 ### `phonetopc.connect(addr=None, *, device=None, dev=False, client_name=..., request_timeout=10.0, open_timeout=10.0, queue_size=256, **ws_kwargs)`
@@ -114,6 +150,8 @@ Opens the WebSocket (see [which phone, at which address](#which-phone-at-which-a
 | `await list_sensors()` | `list[SensorInfo]`, including sources this client doesn't know about |
 | `await get(source, type=None)` | One-shot read, returns an `Event` (with `subscription`/`seq` set to `None`) |
 | `subscribe(source, *, type=None, rate_hz=None, min_delta=None, queue_size=None, overflow="auto")` | Returns a `Subscription`; `async with` it to start |
+| `await request_approval(reason, timeout=30.0)` | Fingerprint approval, returns an `ApprovalResult` (see [above](#fingerprint-approval)) |
+| `approval_key`, `await accept_approval_key()` | Pin of the phone's approval key in this session (`None` if it has none); trust that key after it changed |
 | `await call(method, params=None, timeout=...)` | Raw JSON-RPC call, for methods newer than this client |
 | `closed`, `closed_reason`, `await wait_closed()`, `await close()` | Connection state |
 
@@ -142,7 +180,7 @@ When the connection is lost, pending calls raise `ConnectionClosed` and every su
 
 A frozen dataclass: `source`, `type`, `value`, `unit`, `ts` (Unix ms), `ts_mono_ns` (phone monotonic clock, use it for deltas), `device`, `subscription`, `seq`, and `.datetime` (`ts` as an aware UTC `datetime`).
 
-`DeviceInfo`, `ServerInfo`, `HelloResult`, `PCInfo`, `SensorInfo` and `SubscribeResult` are frozen dataclasses too. Unknown fields from newer servers are kept in `.raw`.
+`DeviceInfo`, `ServerInfo`, `HelloResult`, `PCInfo`, `ApprovalInfo` (`hello.approval`), `SensorInfo` and `SubscribeResult` are frozen dataclasses too. Unknown fields from newer servers are kept in `.raw`.
 
 ### Errors
 
@@ -161,6 +199,8 @@ All exceptions derive from `phonetopc.Error`.
 | `PinMismatch` (`.expected`, `.actual`, `.address`, `.attempts`) | The phone's TLS key isn't the paired one at any address tried |
 | `PhoneUnreachable` (`.attempts`) | Secure mode: no address worked (also an `OSError`) |
 | `CredentialStoreError` | `devices.json` is unreadable, malformed or of an unknown version |
+| `ApprovalError` | Base of: `ApprovalKeyChanged` (`.stored`, `.actual`), `ApprovalVerificationError`, `ApprovalNotSupported` |
+| `ApprovalDependencyMissing` | `cryptography` is missing (also an `ImportError`) |
 
 In dev mode, failing to open the socket raises the usual `OSError` / `TimeoutError`.
 
@@ -173,6 +213,8 @@ import phonetopc.sync
 
 with phonetopc.sync.connect() as phone:   # same arguments as phonetopc.connect
     print(phone.get("battery").value)
+    if phone.request_approval("Print gyro readings?"):
+        print("approved")
     with phone.subscribe("gyro", rate_hz=50) as events:
         for ev in events:
             print(ev.value)
@@ -189,6 +231,6 @@ ruff check src tests
 mypy                   # strict
 ```
 
-The tests never touch your real `devices.json` (each test gets an empty `XDG_CONFIG_HOME`) and never use real mDNS, except `test_real_mdns`: it runs when `zeroconf` is installed and multicast works, and `PHONETOPC_TEST_MDNS=1` turns "multicast doesn't work here" from a skip into a failure. Secure-mode tests use the test-vector certificates in [`spec/conformance/vectors/`](../../spec/conformance/vectors), and pins are checked against `vectors.json`.
+The tests never touch your real `devices.json` (each test gets an empty `XDG_CONFIG_HOME`) and never use real mDNS, except `test_real_mdns`: it runs when `zeroconf` is installed and multicast works, and `PHONETOPC_TEST_MDNS=1` turns "multicast doesn't work here" from a skip into a failure. Secure-mode tests use the test-vector certificates in [`spec/conformance/vectors/`](../../spec/conformance/vectors), and pins are checked against `vectors.json`. Approval verification is checked against `approval.json` (the valid signature and every tampered variant), and the fake phone signs approvals with a software key. Tests that need `cryptography` (in the `dev` extra) are skipped without it.
 
 The tests validate every request the client sends against [`spec/schemas/phonetopc-1.schema.json`](../../spec/schemas/phonetopc-1.schema.json), and replay any transcripts in `spec/conformance/*.jsonl` through the client's message handling.
