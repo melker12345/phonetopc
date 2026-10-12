@@ -69,8 +69,11 @@ class PhonetopcServer(
         val backend = embeddedServer(CIO, port = 0, host = LOOPBACK) {
             phonetopcModule(
                 hub, pingPeriod, pingTimeout, helloTimeout,
-                peerFor = { loopbackPort -> front?.peerFor(loopbackPort) },
-                drop = { loopbackPort -> front?.drop(loopbackPort) },
+                object : Relays {
+                    override fun peerFor(loopbackPort: Int) = front?.peerFor(loopbackPort)
+                    override fun authenticated(loopbackPort: Int) { front?.authenticated(loopbackPort) }
+                    override fun drop(loopbackPort: Int) { front?.drop(loopbackPort) }
+                },
             )
         }.start(wait = false)
         try {
@@ -110,18 +113,15 @@ class PhonetopcServer(
 
 /**
  * @param helloTimeout secure mode: close connections that haven't completed `hello` in time.
- * @param peerFor secure mode: the real client behind a loopback connection from the
- *   [TlsFrontend]; connections it doesn't know are refused.
- * @param drop secure mode: drops the real client behind a loopback connection, for one that
- *   doesn't take its close frame.
+ * @param relays secure mode: the [TlsFrontend] in front. Loopback connections it doesn't know
+ *   are refused.
  */
 fun Application.phonetopcModule(
     hub: BridgeHub,
     pingPeriod: Duration,
     pingTimeout: Duration,
     helloTimeout: Duration? = null,
-    peerFor: ((loopbackPort: Int) -> Peer?)? = null,
-    drop: ((loopbackPort: Int) -> Unit)? = null,
+    relays: Relays? = null,
 ) {
     install(WebSockets) {
         this.pingPeriod = pingPeriod
@@ -136,7 +136,7 @@ fun Application.phonetopcModule(
         }
     }
     routing {
-        webSocket(WS_PATH) { serve(hub, helloTimeout, peerFor, drop) }
+        webSocket(WS_PATH) { serve(hub, helloTimeout, relays) }
     }
 }
 
@@ -152,14 +152,13 @@ private val CLOSE_GRACE = 1.seconds
 private suspend fun DefaultWebSocketServerSession.serve(
     hub: BridgeHub,
     helloTimeout: Duration?,
-    peerFor: ((Int) -> Peer?)?,
-    drop: ((Int) -> Unit)?,
+    relays: Relays?,
 ) {
     val local = call.request.local
-    val peer = if (peerFor == null) {
+    val peer = if (relays == null) {
         Peer(local.remoteAddress, local.remotePort)
     } else {
-        peerFor(local.remotePort) ?: run {
+        relays.peerFor(local.remotePort) ?: run {
             // A loopback connection that didn't come through the TLS frontend.
             close(CloseReason(CloseCodes.POLICY_VIOLATION, "use wss://"))
             return
@@ -185,7 +184,7 @@ private suspend fun DefaultWebSocketServerSession.serve(
                     close(CloseReason(request.code, request.reason))
                     awaitCancellation()
                 }
-                drop?.invoke(local.remotePort)
+                relays?.drop(local.remotePort)
                 this@serve.cancel()
             }
             // SECURITY.md §5: drop connections that don't authenticate promptly. The session
@@ -196,10 +195,18 @@ private suspend fun DefaultWebSocketServerSession.serve(
                     if (!session.helloDone) session.requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "hello timeout"))
                 }
             }
+            var authenticated = false
             try {
                 for (frame in incoming) {
                     when (frame) {
-                        is Frame.Text -> session.handleText(frame.readText())
+                        is Frame.Text -> {
+                            session.handleText(frame.readText())
+                            // Paired PCs don't count against their address's limit.
+                            if (!authenticated && session.pc != null) {
+                                authenticated = true
+                                relays?.authenticated(local.remotePort)
+                            }
+                        }
                         is Frame.Binary -> {
                             // Spec §1: binary frames are reserved.
                             close(CloseReason(CloseCodes.UNSUPPORTED_DATA, "binary frames are not supported"))
