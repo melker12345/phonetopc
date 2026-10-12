@@ -53,6 +53,8 @@ All messages follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 
 Servers SHOULD send WebSocket pings every 15 s and close sessions that don't answer within 30 s. Clients SHOULD reply to pings (most libraries do automatically).
 
+**Resource limits.** A server MAY close with 1008 a connection that sends more than 16 frames before a successful `hello`, or that has more than 256 responses it hasn't been able to send (a client that writes but never reads). After asking to close, a server ignores further frames and MAY drop a connection that hasn't taken its close frame within about 1 s.
+
 ## 4. Methods
 
 ### 4.1 `hello`
