@@ -2,8 +2,10 @@ package io.github.melker12345.phonetopc.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -65,6 +67,31 @@ object SystemSettings {
     fun openUrl(context: Context, url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
+
+    /** This app's page in system settings, where a permanently denied permission can be granted. */
+    fun openAppDetails(context: Context) {
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
+        }
+    }
+
+    fun openLocationSettings(context: Context) {
+        runCatching { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+    }
+
+    fun openNfcSettings(context: Context) {
+        try {
+            context.startActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+        } catch (_: ActivityNotFoundException) {
+            runCatching { context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
+        }
+    }
+}
+
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** Re-evaluates [read] every time the screen resumes (e.g. coming back from system settings). */

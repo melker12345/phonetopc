@@ -1,5 +1,9 @@
 package io.github.melker12345.phonetopc.sensors
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -32,6 +36,54 @@ object SensorValues {
         val r4 = 1.0 - 2.0 * (x * x + z * z)
         return normalizeDegrees(Math.toDegrees(atan2(r1, r4)))
     }
+
+    /**
+     * A `location`/`position` value (spec §6). The optional members are left out when `null`,
+     * i.e. when the fix doesn't have them. Returns `null` for a fix the value can't describe:
+     * no accuracy (a required member) or coordinates out of range.
+     */
+    fun position(
+        lat: Double,
+        lon: Double,
+        accuracyM: Float?,
+        altitudeM: Double? = null,
+        speedMps: Float? = null,
+        bearingDeg: Float? = null,
+    ): JsonElement? {
+        if (accuracyM == null || !accuracyM.isFinite() || accuracyM < 0) return null
+        if (!lat.isFinite() || !lon.isFinite() || abs(lat) > 90 || abs(lon) > 180) return null
+        return buildJsonObject {
+            put("lat", lat)
+            put("lon", lon)
+            put("accuracy_m", accuracyM)
+            if (altitudeM != null && altitudeM.isFinite()) put("altitude_m", altitudeM)
+            if (speedMps != null && speedMps.isFinite() && speedMps >= 0) put("speed_mps", speedMps)
+            if (bearingDeg != null && bearingDeg.isFinite()) put("bearing_deg", normalizeDegrees(bearingDeg.toDouble()))
+        }
+    }
+
+    /**
+     * Whether a new fix should replace the last one sent, when several providers (GPS and
+     * network) report at once: a coarse network fix must not interrupt a stream of GPS fixes.
+     * A fix from the same provider, an at least as accurate one, or any fix once the last is
+     * [STALE_FIX_NS] old wins.
+     */
+    fun isBetterFix(
+        accuracyM: Float,
+        elapsedNs: Long,
+        provider: String?,
+        lastAccuracyM: Float?,
+        lastElapsedNs: Long?,
+        lastProvider: String?,
+    ): Boolean {
+        if (lastAccuracyM == null || lastElapsedNs == null) return true
+        if (elapsedNs < lastElapsedNs) return false // older than what was sent
+        if (provider == lastProvider) return true
+        if (accuracyM <= lastAccuracyM) return true
+        return elapsedNs - lastElapsedNs >= STALE_FIX_NS
+    }
+
+    const val STALE_FIX_NS = 10_000_000_000L
 
     /** [deg] mapped to `[0, 360)`. Rounds to 0.01° first so a value can't come out as 360. */
     fun normalizeDegrees(deg: Double): Double {

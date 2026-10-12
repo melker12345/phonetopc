@@ -75,6 +75,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun hardwarePresent(source: String) = graph.sensorSource.hardwarePresent(source)
 
+    fun locationPermitted() = graph.sensorSource.locationPermitted()
+
+    fun locationEnabled() = graph.sensorSource.locationEnabled()
+
     fun startServer() = graph.bridge.start()
     fun stopServer() = graph.bridge.stop()
     fun setPaused(paused: Boolean) = graph.bridge.setPaused(paused)

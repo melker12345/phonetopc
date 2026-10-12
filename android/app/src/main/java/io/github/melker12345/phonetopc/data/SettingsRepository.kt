@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import io.github.melker12345.phonetopc.protocol.SensorCatalog
 import io.github.melker12345.phonetopc.server.DEFAULT_PORT
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -21,8 +22,11 @@ data class AppSettings(
      */
     val devMode: Boolean = false,
     val port: Int = DEFAULT_PORT,
-    /** Sources the user has turned off; they are reported as `available: false`. */
-    val disabledSources: Set<String> = emptySet(),
+    /**
+     * Sources the user has turned off, or never turned on if they are off by default
+     * ([SourceToggles.OFF_BY_DEFAULT]); they are reported as `available: false`.
+     */
+    val disabledSources: Set<String> = SourceToggles.OFF_BY_DEFAULT,
     val onboardingDone: Boolean = false,
     /**
      * The user wants the server running: set when they start it, cleared when they stop it
@@ -33,6 +37,19 @@ data class AppSettings(
     /** "Start on boot": also bring the server back after a reboot, not just after an update. */
     val startOnBoot: Boolean = false,
 )
+
+/** The per-sensor allow toggles of Settings › Sensors. */
+object SourceToggles {
+    /** Privacy-sensitive sources the user has to turn on first. */
+    val OFF_BY_DEFAULT: Set<String> = setOf(SensorCatalog.LOCATION)
+
+    /**
+     * The effective set of turned-off sources, from the stored sets: [turnedOff] holds sources
+     * the user turned off, [turnedOn] off-by-default sources the user turned on.
+     */
+    fun disabled(turnedOff: Set<String>, turnedOn: Set<String>): Set<String> =
+        (turnedOff - OFF_BY_DEFAULT) + (OFF_BY_DEFAULT - turnedOn)
+}
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -51,8 +68,14 @@ class SettingsRepository(context: Context) {
     }
 
     suspend fun setSourceEnabled(source: String, enabled: Boolean) = store.edit {
-        val current = it[DISABLED_SOURCES].orEmpty()
-        it[DISABLED_SOURCES] = if (enabled) current - source else current + source
+        // Off-by-default sources remember being turned on; the others being turned off.
+        if (source in SourceToggles.OFF_BY_DEFAULT) {
+            val on = it[ENABLED_SOURCES].orEmpty()
+            it[ENABLED_SOURCES] = if (enabled) on + source else on - source
+        } else {
+            val off = it[DISABLED_SOURCES].orEmpty()
+            it[DISABLED_SOURCES] = if (enabled) off - source else off + source
+        }
     }
 
     suspend fun setOnboardingDone(done: Boolean) = store.edit { it[ONBOARDING_DONE] = done }
@@ -74,7 +97,7 @@ class SettingsRepository(context: Context) {
     private fun Preferences.toSettings() = AppSettings(
         devMode = this[DEV_MODE] ?: false,
         port = this[PORT] ?: DEFAULT_PORT,
-        disabledSources = this[DISABLED_SOURCES].orEmpty(),
+        disabledSources = SourceToggles.disabled(this[DISABLED_SOURCES].orEmpty(), this[ENABLED_SOURCES].orEmpty()),
         onboardingDone = this[ONBOARDING_DONE] ?: false,
         desiredRunning = this[DESIRED_RUNNING] ?: false,
         startOnBoot = this[START_ON_BOOT] ?: false,
@@ -87,6 +110,7 @@ class SettingsRepository(context: Context) {
         private val DEV_MODE = booleanPreferencesKey("dev_mode")
         private val PORT = intPreferencesKey("port")
         private val DISABLED_SOURCES = stringSetPreferencesKey("disabled_sources")
+        private val ENABLED_SOURCES = stringSetPreferencesKey("enabled_sources")
         private val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         private val DESIRED_RUNNING = booleanPreferencesKey("desired_running")
         private val START_ON_BOOT = booleanPreferencesKey("start_on_boot")

@@ -64,6 +64,13 @@ class BridgeController(private val context: Context) {
 
     fun setPaused(paused: Boolean) = send(if (paused) BridgeService.ACTION_PAUSE else BridgeService.ACTION_RESUME)
 
+    /**
+     * Let a running server pick up a changed location permission: re-declare its foreground
+     * service type. Call while the app is in the foreground (Android refuses to add type
+     * location from the background).
+     */
+    fun refreshForeground() = send(BridgeService.ACTION_REFRESH)
+
     private fun send(action: String) {
         if (!_status.value.active) return
         // The service is already in the foreground, so a plain startService is allowed.

@@ -1,9 +1,7 @@
 package io.github.melker12345.phonetopc.ui.pair
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Settings
@@ -67,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import io.github.melker12345.phonetopc.ui.findActivity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -259,12 +258,6 @@ private fun CameraRationale(denied: Boolean, permanentlyDenied: Boolean, onAllow
     } else {
         Button(onClick = onAllow) { Text(stringResource(R.string.pair_camera_allow)) }
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
 
 // ---- way B: browse ----

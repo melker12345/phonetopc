@@ -80,6 +80,7 @@ import io.github.melker12345.phonetopc.data.AppSettings
 import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.SettingsRepository
 import io.github.melker12345.phonetopc.protocol.PROTOCOL_VERSION
+import io.github.melker12345.phonetopc.protocol.SensorCatalog
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.ui.MainViewModel
 import io.github.melker12345.phonetopc.ui.PhoneKeyInfo
@@ -87,6 +88,7 @@ import io.github.melker12345.phonetopc.ui.SensorUiCatalog
 import io.github.melker12345.phonetopc.ui.SystemSettings
 import io.github.melker12345.phonetopc.ui.components.IconBadge
 import io.github.melker12345.phonetopc.ui.components.SectionHeader
+import io.github.melker12345.phonetopc.ui.findActivity
 import io.github.melker12345.phonetopc.ui.rememberOnResume
 import kotlinx.coroutines.launch
 
@@ -126,7 +128,7 @@ fun SettingsScreen(vm: MainViewModel) {
                     modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
                 )
             }
-            item { SensorsGroup(s.disabledSources, vm::hardwarePresent, vm::setSourceEnabled) }
+            item { SensorsGroup(s.disabledSources, vm) }
 
             item { SectionHeader(stringResource(R.string.settings_section_keep_alive), Modifier.padding(top = 16.dp)) }
             item { KeepAliveGroup() }
@@ -277,22 +279,34 @@ private fun PortDialog(current: Int, onDismiss: () -> Unit, onSave: (Int) -> Uni
 // ---- sensors ----
 
 @Composable
-private fun SensorsGroup(
-    disabled: Set<String>,
-    hardwarePresent: (String) -> Boolean,
-    onToggle: (String, Boolean) -> Unit,
-) {
+private fun SensorsGroup(disabled: Set<String>, vm: MainViewModel) {
+    val context = LocalContext.current
+    // The permission dialog and system settings pause the activity, so these pick up changes.
+    val locationPermitted = rememberOnResume { vm.locationPermitted() }
+    val locationOn = rememberOnResume { vm.locationEnabled() }
+    var locationDenied by rememberSaveable { mutableStateOf(false) }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        locationDenied = result.values.none { it }
+    }
+    val askLocation = {
+        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+
     Group {
         SensorUiCatalog.forEach { sensor ->
-            val present = remember(sensor.source) { hardwarePresent(sensor.source) }
+            val present = remember(sensor.source) { vm.hardwarePresent(sensor.source) }
             val enabled = present && sensor.source !in disabled
+            val isLocation = sensor.source == SensorCatalog.LOCATION
             ListItem(
                 colors = transparentItem,
                 modifier = Modifier.toggleable(
                     value = enabled,
                     enabled = present,
                     role = Role.Switch,
-                    onValueChange = { onToggle(sensor.source, it) },
+                    onValueChange = { on ->
+                        vm.setSourceEnabled(sensor.source, on)
+                        if (on && isLocation && !locationPermitted) askLocation()
+                    },
                 ),
                 leadingContent = { IconBadge(sensor.icon, size = 36.dp) },
                 headlineContent = { Text(stringResource(sensor.label)) },
@@ -301,6 +315,30 @@ private fun SensorsGroup(
                 },
                 trailingContent = { Switch(checked = enabled, onCheckedChange = null, enabled = present) },
             )
+            if (isLocation && enabled && (!locationPermitted || !locationOn)) {
+                // Turned on, but Android won't let it through yet: say why and offer the fix.
+                val permanentlyDenied = locationDenied &&
+                    context.findActivity()?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) == false
+                ListItem(
+                    colors = transparentItem,
+                    leadingContent = { IconBadge(Icons.Rounded.Warning, size = 36.dp) },
+                    headlineContent = { Text(stringResource(R.string.settings_location_unavailable)) },
+                    supportingContent = {
+                        Text(stringResource(if (!locationPermitted) R.string.settings_location_permission else R.string.settings_location_off))
+                    },
+                    trailingContent = {
+                        FilledTonalButton(onClick = {
+                            when {
+                                !locationPermitted && permanentlyDenied -> SystemSettings.openAppDetails(context)
+                                !locationPermitted -> askLocation()
+                                else -> SystemSettings.openLocationSettings(context)
+                            }
+                        }) {
+                            Text(stringResource(if (!locationPermitted) R.string.allow else R.string.settings_turn_on))
+                        }
+                    },
+                )
+            }
         }
     }
 }

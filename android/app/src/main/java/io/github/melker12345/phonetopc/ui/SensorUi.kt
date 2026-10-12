@@ -7,6 +7,7 @@ import androidx.compose.material.icons.rounded.BatteryFull
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SensorOccupied
@@ -36,6 +37,7 @@ val SensorUiCatalog: List<SensorUi> = listOf(
     SensorUi(SensorCatalog.PROXIMITY, R.string.sensor_proximity, R.string.sensor_proximity_desc, Icons.Rounded.SensorOccupied),
     SensorUi(SensorCatalog.LIGHT, R.string.sensor_light, R.string.sensor_light_desc, Icons.Rounded.LightMode),
     SensorUi(SensorCatalog.BATTERY, R.string.sensor_battery, R.string.sensor_battery_desc, Icons.Rounded.BatteryFull),
+    SensorUi(SensorCatalog.LOCATION, R.string.sensor_location, R.string.sensor_location_desc, Icons.Rounded.LocationOn),
     SensorUi(SensorCatalog.UI, R.string.sensor_tile, R.string.sensor_tile_desc, Icons.Rounded.TouchApp),
 )
 

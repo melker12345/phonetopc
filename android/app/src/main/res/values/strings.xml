@@ -103,6 +103,8 @@
     <string name="sensor_light_desc">Brightness around the phone</string>
     <string name="sensor_battery">Battery</string>
     <string name="sensor_battery_desc">Level and charging state</string>
+    <string name="sensor_location">Location</string>
+    <string name="sensor_location_desc">Where the phone is. Off until you turn it on</string>
     <string name="sensor_tile">Quick Settings tile</string>
     <string name="sensor_tile_desc">Taps on the “PC button” tile</string>
     <string name="sensor_unknown">Sensor</string>
@@ -192,6 +194,10 @@
     <string name="settings_section_sensors">Sensors</string>
     <string name="settings_sensors_hint">Turned-off sensors are reported to PCs as unavailable.</string>
     <string name="settings_sensor_missing">Not available on this phone</string>
+    <string name="settings_location_unavailable">Location isn\'t shared yet</string>
+    <string name="settings_location_permission">phonetopc needs location access. PCs see the location as unavailable until then.</string>
+    <string name="settings_location_off">Location is off in system settings.</string>
+    <string name="settings_turn_on">Turn on</string>
     <string name="settings_section_keep_alive">Keep running in the background</string>
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_ok">Unrestricted. Android won\'t pause phonetopc.</string>

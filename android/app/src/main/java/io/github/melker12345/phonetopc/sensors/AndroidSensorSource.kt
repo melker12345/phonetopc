@@ -8,11 +8,15 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationListenerCompat
+import io.github.melker12345.phonetopc.data.SourceToggles
 import io.github.melker12345.phonetopc.protocol.Demand
 import io.github.melker12345.phonetopc.protocol.Reading
 import io.github.melker12345.phonetopc.protocol.ReadingSink
@@ -29,8 +33,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * [SensorSource] backed by SensorManager, the sticky battery broadcast and the Quick
- * Settings tile. Hardware listeners exist only while the hub demands the source; the hub
+ * [SensorSource] backed by SensorManager, the sticky battery broadcast, LocationManager and
+ * the Quick Settings tile. Hardware listeners exist only while the hub demands the source; the hub
  * passes the highest rate any subscription asked for and downsamples per subscription.
  */
 class AndroidSensorSource(context: Context) : SensorSource {
@@ -42,7 +46,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
     @Volatile private var sink: ReadingSink? = null
 
     /** Set from the user's per-sensor allow toggles. Call `hub.refreshAvailability()` after changing. */
-    @Volatile var disabledSources: Set<String> = emptySet()
+    @Volatile var disabledSources: Set<String> = SourceToggles.OFF_BY_DEFAULT
 
     private val latest = ConcurrentHashMap<String, Reading>()
     private val listeners = HashMap<String, SensorEventListener>() // guarded by `this`
@@ -51,6 +55,19 @@ class AndroidSensorSource(context: Context) : SensorSource {
     private val liveSources: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private var batteryReceiver: BroadcastReceiver? = null // guarded by `this`
     @Volatile private var lastBattery: JsonElement? = null
+
+    private val location = LocationTracker(appContext)
+    private var locationListener: LocationListenerCompat? = null // guarded by `this`
+    @Volatile private var lastFix: Location? = null // the last fix sent
+
+    /** Location permission granted and location switched on; see [recheckAvailability]. */
+    @Volatile private var locationUsable = false
+
+    /**
+     * Called (on any thread) when a source's availability changed outside the app, e.g. the
+     * user switched location off. The service calls `hub.refreshAvailability()`.
+     */
+    @Volatile var onAvailabilityChanged: (() -> Unit)? = null
 
     private val hardware: Map<String, Sensor> = buildMap {
         fun add(source: String, type: Int) {
@@ -74,6 +91,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
         val info = when {
             spec.source == SensorCatalog.BATTERY || spec.source == SensorCatalog.UI ->
                 SensorInfo.of(spec, available = true)
+            spec.source == SensorCatalog.LOCATION -> SensorInfo.of(spec, available = location.present)
             sensor == null -> SensorInfo.of(spec, available = false)
             spec.mode == SensorMode.CONTINUOUS -> {
                 // minDelay is the fastest period in µs. With HIGH_SAMPLING_RATE_SENSORS declared
@@ -93,14 +111,46 @@ class AndroidSensorSource(context: Context) : SensorSource {
         spec.source to info
     }
 
+    init {
+        locationUsable = location.usable()
+        // Location switched on or off in system settings. (Revoking the permission kills the
+        // process; granting it is picked up by recheckAvailability() when the app resumes.)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) = recheckAvailability()
+        }
+        val filter = IntentFilter().apply {
+            addAction(LocationManager.MODE_CHANGED_ACTION)
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+        }
+        ContextCompat.registerReceiver(appContext, receiver, filter, null, handler, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
     /** Hardware presence per source, for the settings screen. */
     fun hardwarePresent(source: String): Boolean = baseInfo[source]?.available == true
+
+    /** Location permission (fine or approximate) is granted. */
+    fun locationPermitted(): Boolean = location.permitted()
+
+    /** Location is switched on in system settings. */
+    fun locationEnabled(): Boolean = location.enabled()
+
+    /**
+     * Re-reads availability that can change behind the app's back (location permission and
+     * switch) and calls [onAvailabilityChanged] if it changed. Cheap; call it e.g. on resume.
+     */
+    fun recheckAvailability() {
+        val usable = location.usable()
+        if (usable == locationUsable) return
+        locationUsable = usable
+        onAvailabilityChanged?.invoke()
+    }
 
     override fun describe(): List<SensorInfo> {
         val disabled = disabledSources
         return SensorCatalog.all.map { spec ->
             val info = baseInfo.getValue(spec.source)
-            if (spec.source in disabled) info.copy(available = false) else info
+            val off = spec.source in disabled || (spec.source == SensorCatalog.LOCATION && !locationUsable)
+            if (off) info.copy(available = false) else info
         }
     }
 
@@ -112,6 +162,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
     override fun setDemand(source: String, demand: Demand?) {
         when (source) {
             SensorCatalog.BATTERY -> if (demand != null) startBattery() else stopBattery()
+            SensorCatalog.LOCATION -> if (demand != null) startLocation() else stopLocation()
             SensorCatalog.UI -> Unit // tile taps are pushed by the tile service
             else -> {
                 liveSources.remove(source)
@@ -137,6 +188,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
         return when (source) {
             SensorCatalog.BATTERY -> readBatterySticky()
             SensorCatalog.UI -> null // event-like: no state to report
+            SensorCatalog.LOCATION -> if (source in liveSources) latest[source] else null
             else -> if (source in liveSources) latest[source] else null
         }
     }
@@ -146,6 +198,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
         return when (source) {
             SensorCatalog.BATTERY -> readBatterySticky()
             SensorCatalog.UI -> latest[source]
+            SensorCatalog.LOCATION -> readLocation()
             else -> latest[source] ?: readOnce(source)
         }
     }
@@ -207,6 +260,60 @@ class AndroidSensorSource(context: Context) : SensorSource {
         return Reading(source, spec.types.first(), value, spec.unit, wallClockMillis(event.timestamp), event.timestamp)
     }
 
+    // ---- location ----
+
+    private fun startLocation() {
+        if (locationListener != null) return
+        latest.remove(SensorCatalog.LOCATION)
+        lastFix = null
+        val listener = LocationListenerCompat { fix -> onFix(fix) }
+        if (!location.start(listener, handler.looper)) return
+        locationListener = listener
+        liveSources += SensorCatalog.LOCATION
+        // Unlike a sensor, LocationManager doesn't report the current state on registering, and
+        // a first GPS fix can take a while. A recent last-known fix (with its own timestamp)
+        // stands in until then.
+        handler.post {
+            if (lastFix == null) location.lastKnown(INITIAL_FIX_MAX_AGE_MS)?.let { onFix(it) }
+        }
+    }
+
+    private fun stopLocation() {
+        liveSources -= SensorCatalog.LOCATION
+        locationListener?.let { location.stop(it) }
+        locationListener = null
+    }
+
+    /** On [handler]. */
+    private fun onFix(fix: Location) {
+        if (SensorCatalog.LOCATION !in liveSources || !fix.hasAccuracy()) return
+        val last = lastFix
+        val better = SensorValues.isBetterFix(
+            fix.accuracy, fix.elapsedRealtimeNanos, fix.provider,
+            last?.accuracy, last?.elapsedRealtimeNanos, last?.provider,
+        )
+        if (!better) return
+        val reading = LocationTracker.reading(fix) ?: return
+        lastFix = fix
+        latest[SensorCatalog.LOCATION] = reading
+        sink?.onReading(reading)
+    }
+
+    /** `get`: the live fix, a recent last-known one, or the first fix within a few seconds. */
+    private suspend fun readLocation(): Reading? {
+        if (!locationUsable) return null
+        if (SensorCatalog.LOCATION in liveSources) latest[SensorCatalog.LOCATION]?.let { return it }
+        location.lastKnown(GET_FIX_MAX_AGE_MS)?.let { fix -> LocationTracker.reading(fix)?.let { return it } }
+        val result = CompletableDeferred<Reading>()
+        val listener = LocationListenerCompat { fix -> LocationTracker.reading(fix)?.let { result.complete(it) } }
+        if (!location.start(listener, handler.looper)) return null
+        return try {
+            withTimeoutOrNull(LOCATION_ONE_SHOT_TIMEOUT_MS) { result.await() }
+        } finally {
+            location.stop(listener)
+        }
+    }
+
     // ---- battery ----
 
     private fun startBattery() {
@@ -261,6 +368,13 @@ class AndroidSensorSource(context: Context) : SensorSource {
         const val DEFAULT_RATE_HZ = 50.0
         private const val FALLBACK_MAX_HZ = 200.0
         private const val ONE_SHOT_TIMEOUT_MS = 1_000L
+
+        /** A last-known fix this recent is sent as a new location subscription's first event. */
+        private const val INITIAL_FIX_MAX_AGE_MS = 2 * 60_000L
+
+        /** `get location` answers with a last-known fix this recent rather than waiting. */
+        private const val GET_FIX_MAX_AGE_MS = 10 * 60_000L
+        private const val LOCATION_ONE_SHOT_TIMEOUT_MS = 5_000L
 
         /** Convert a SensorEvent timestamp (elapsedRealtimeNanos timebase) to Unix millis. */
         fun wallClockMillis(eventNanos: Long): Long =

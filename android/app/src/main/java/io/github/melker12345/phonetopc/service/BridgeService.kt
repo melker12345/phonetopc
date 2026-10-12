@@ -43,9 +43,10 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Foreground service (type connectedDevice) that runs the WebSocket server, advertises it via
- * mDNS and keeps the process alive. Secure mode (the default) serves `wss://` with the
- * phone's Keystore key and only lets paired PCs in; developer mode serves plain `ws://`.
+ * Foreground service (type connectedDevice, plus location while the `location` source may be
+ * served) that runs the WebSocket server, advertises it via mDNS and keeps the process alive.
+ * Secure mode (the default) serves `wss://` with the phone's Keystore key and only lets paired
+ * PCs in; developer mode serves plain `ws://`.
  */
 class BridgeService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -58,6 +59,10 @@ class BridgeService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wakeLockJob: Job? = null
     private var inForeground = false
+
+    /** The foreground service types we're running with. */
+    private var foregroundTypes = 0
+    private var lastAddress: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -76,6 +81,14 @@ class BridgeService : Service() {
             }
             ACTION_PAUSE -> hub?.setPaused(true) // paused is still "running" as far as intent goes
             ACTION_RESUME -> hub?.setPaused(false)
+            ACTION_REFRESH -> {
+                if (!inForeground) {
+                    // Raced with a stop: don't linger as a plain started service.
+                    if (startJob == null) stopSelf()
+                    return START_NOT_STICKY
+                }
+                refreshForeground()
+            }
             ACTION_START -> {
                 val auto = intent.getBooleanExtra(EXTRA_AUTO_START, false)
                 if (!auto) setDesiredRunning(true)
@@ -86,21 +99,53 @@ class BridgeService : Service() {
         return START_STICKY
     }
 
-    @SuppressLint("InlinedApi") // the constant is inlined; ServiceCompat drops the type below API 29
     private fun goForeground(): Boolean {
         val notification = BridgeNotifications.build(this, BridgeStatus(state = RunState.STARTING), null)
-        return try {
-            ServiceCompat.startForeground(
-                this, BridgeNotifications.NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-            inForeground = true
-            true
-        } catch (e: Exception) {
-            // e.g. ForegroundServiceStartNotAllowedException on a background sticky restart.
-            Log.w(TAG, "startForeground failed", e)
-            false
+        return startForegroundAs(wantedTypes(), notification)
+    }
+
+    /**
+     * Type location lets the service use location while the app is in the background, but
+     * Android 14+ only accepts it with the permission granted (and refuses it in a start from the
+     * background, e.g. after boot, unless "Allow all the time" was granted), so it is only asked
+     * for when location may be served and dropped if refused.
+     */
+    @SuppressLint("InlinedApi") // the constants are inlined; ServiceCompat drops types below API 29
+    private fun wantedTypes(): Int {
+        val source = appGraph.sensorSource
+        val location = source.locationPermitted() && SensorCatalog.LOCATION !in source.disabledSources
+        return ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+            (if (location) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+    }
+
+    @SuppressLint("InlinedApi")
+    private fun startForegroundAs(types: Int, notification: android.app.Notification): Boolean {
+        val connectedOnly = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        for (t in if (types == connectedOnly) listOf(types) else listOf(types, connectedOnly)) {
+            try {
+                ServiceCompat.startForeground(this, BridgeNotifications.NOTIFICATION_ID, notification, t)
+                inForeground = true
+                foregroundTypes = t
+                return true
+            } catch (e: Exception) {
+                // e.g. ForegroundServiceStartNotAllowedException on a background sticky restart,
+                // or a SecurityException for type location.
+                Log.w(TAG, "startForeground(types=$t) failed", e)
+            }
         }
+        return false
+    }
+
+    /**
+     * Re-declares the foreground service types after the location permission or the location
+     * toggle changed, so a permission granted while the server runs applies without a restart.
+     * Adding type location only works while the app is in the foreground: the UI asks for this.
+     */
+    private fun refreshForeground() {
+        if (!inForeground) return
+        val wanted = wantedTypes()
+        if (wanted == foregroundTypes) return
+        startForegroundAs(wanted, BridgeNotifications.build(this, controller.status.value, lastAddress))
     }
 
     private fun startBridge(auto: Boolean) {
@@ -120,6 +165,7 @@ class BridgeService : Service() {
             val secure = !settings.devMode
             val deviceId = graph.settings.deviceId()
             val source = graph.sensorSource.apply { disabledSources = settings.disabledSources }
+            refreshForeground()
 
             // Secure mode (SECURITY.md §3): the Keystore key for TLS, and paired PCs' tokens.
             val tls = if (!secure) {
@@ -148,6 +194,7 @@ class BridgeService : Service() {
                 withContext(Dispatchers.IO) { ApprovalKey.status(applicationContext, fresh = true) }
                 ApprovalService(AndroidApprover(applicationContext), onError = { e -> Log.w(TAG, "approval failed", e) })
             }
+            source.recheckAvailability()
             val newHub = BridgeHub(
                 source = source,
                 serverInfo = ServerInfo("phonetopc-android", BuildConfig.VERSION_NAME),
@@ -160,6 +207,8 @@ class BridgeService : Service() {
             // meanwhile must find it here; teardown() then stops it once start() is done.
             hub = newHub
             server = newServer
+            // Location switched on/off or permitted: list_sensors and running streams follow.
+            source.onAvailabilityChanged = { newHub.refreshAvailability() }
             val started = withContext(Dispatchers.IO) {
                 graph.bridge.serverLock.withLock {
                     // Taking a free lock doesn't check for cancellation: a Stop whose stop()
@@ -232,6 +281,7 @@ class BridgeService : Service() {
                 if (graph.sensorSource.disabledSources != s.disabledSources) {
                     graph.sensorSource.disabledSources = s.disabledSources
                     hub.refreshAvailability()
+                    refreshForeground()
                 }
             }
         }
@@ -250,6 +300,7 @@ class BridgeService : Service() {
     }
 
     private fun updateNotification(address: String?) {
+        lastAddress = address
         if (!inForeground) return
         val notification = BridgeNotifications.build(this, controller.status.value, address)
         // Without POST_NOTIFICATIONS (13+) the FGS still runs; the notification is just hidden.
@@ -296,6 +347,7 @@ class BridgeService : Service() {
         startJob?.cancel()
         startJob = null
         setWakeLock(false)
+        appGraph.sensorSource.onAvailabilityChanged = null
         mdns?.stop()
         mdns = null
         hub?.shutdown()
@@ -319,6 +371,9 @@ class BridgeService : Service() {
         const val ACTION_STOP = "io.github.melker12345.phonetopc.action.STOP"
         const val ACTION_PAUSE = "io.github.melker12345.phonetopc.action.PAUSE"
         const val ACTION_RESUME = "io.github.melker12345.phonetopc.action.RESUME"
+
+        /** Re-declare the foreground service types (location permission or toggle changed). */
+        const val ACTION_REFRESH = "io.github.melker12345.phonetopc.action.REFRESH"
 
         /** Boolean extra on [ACTION_START]: started by the system (update/boot), not the user. */
         const val EXTRA_AUTO_START = "io.github.melker12345.phonetopc.extra.AUTO_START"

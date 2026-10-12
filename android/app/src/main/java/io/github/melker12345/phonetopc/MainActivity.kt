@@ -27,6 +27,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The location permission or switch may have changed in system settings or a dialog.
+        appGraph.sensorSource.recheckAvailability()
+        appGraph.bridge.refreshForeground()
         // Started here, once we're in the foreground, so the FGS start is always allowed.
         if (startServerOnResume) {
             startServerOnResume = false

@@ -63,7 +63,8 @@ whether they are connected now. **Revoke** forgets a PC and disconnects it at on
 form). After pairing, the PC shows the same value for this phone.
 
 Optional: change the **Port** (default 8765) and turn off sensors you don't want to share.
-Turned-off sensors are reported as `available: false`.
+Turned-off sensors are reported as `available: false`. **Location** is off until you turn it
+on; turning it on asks for location access (precise or approximate).
 
 The notification (`phonetopc · N clients connected`) has **Pause** (clients stay connected,
 sensors stop) and **Stop**. Add the **PC button** Quick Settings tile to send
@@ -183,14 +184,24 @@ Don't rely on that: many networks block multicast.
   at the highest rate any subscription asked for, and each subscription is downsampled to
   its own rate.
 - A partial wake lock is held only while a continuous sensor (accelerometer, gyro, rotation
-  vectors, magnetometer, compass, barometer) is streaming.
+  vectors, magnetometer, compass, barometer) is streaming. Otherwise the foreground service
+  alone keeps the app alive.
 - `compass` is computed from the rotation vector (`getRotationMatrixFromVector` +
   `getOrientation`, written out in `SensorValues`), so it exists on exactly the phones that
-  have a rotation vector, and like it is thrown off by magnets and steel nearby. Otherwise the foreground service alone keeps the app alive.
+  have a rotation vector, and like it is thrown off by magnets and steel nearby.
 - The `subscribe` response always comes before that subscription's first event. Subscribing
-  to `light`, `proximity` or `battery` starts with the current value as `seq` 0 (for light
-  and proximity, as soon as the sensor reports it); `ui` sends nothing until the tile is
-  tapped. These sources only send an event when the value actually changes.
+  to `light`, `proximity`, `battery` or `location` starts with the current value as `seq` 0
+  (for light and proximity, as soon as the sensor reports it); `ui` sends nothing until the
+  tile is tapped. These sources only send an event when the value actually changes.
+- `location` uses the platform `LocationManager` (no Google Play Services): the fused provider
+  on Android 12+ where there is one, else GPS and network, at about one fix per second while
+  subscribed. A subscription starts with a last-known fix up to two minutes old if there is
+  one. It is `available: false` while location access isn't granted or location is off. The
+  service adds foreground service type `location` only when access is granted (Android 14+
+  refuses it otherwise); granting access while the server runs re-declares the type when you
+  return to the app, so location keeps flowing with the screen off. After a reboot or update
+  auto-start with only "while using the app" access, Android refuses type location from the
+  background: the server runs without it, and location only flows once you open the app.
 - If a client can't keep up, continuous events are dropped (visible as `seq` gaps). If
   on_change events back up, the connection is closed with 1008 (spec §5).
 - `ts_mono_ns` is `SensorEvent.timestamp`; `ts` is that converted to wall-clock time.

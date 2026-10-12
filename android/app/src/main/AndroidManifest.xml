@@ -13,6 +13,20 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <!-- Only for the location source, which is off until the user turns it on in Settings;
+         asked for there. Platform LocationManager, no Google Play Services. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-feature
+        android:name="android.hardware.location"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.location.network"
+        android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -69,7 +83,7 @@
         <service
             android:name=".service.BridgeService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
 
         <!-- Both actions are protected broadcasts sent by the system, which may deliver to a
              non-exported receiver. No LOCKED_BOOT_COMPLETED: settings live in

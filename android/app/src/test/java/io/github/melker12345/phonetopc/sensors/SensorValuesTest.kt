@@ -60,6 +60,42 @@ class SensorValuesTest {
         )
     }
 
+    @Test fun positionLeavesOutWhatTheFixLacks() {
+        assertEquals(
+            """{"lat":59.3293,"lon":18.0686,"accuracy_m":12.5}""",
+            SensorValues.position(59.3293, 18.0686, 12.5f).toString(),
+        )
+        assertEquals(
+            """{"lat":-33.85,"lon":151.2,"accuracy_m":4.0,"altitude_m":31.5,"speed_mps":1.25,"bearing_deg":271.5}""",
+            SensorValues.position(-33.85, 151.2, 4f, altitudeM = 31.5, speedMps = 1.25f, bearingDeg = 271.5f).toString(),
+        )
+        // A bearing of exactly 360 is north again; NaN members are left out like missing ones.
+        assertEquals(
+            """{"lat":1.0,"lon":2.0,"accuracy_m":3.0,"bearing_deg":0.0}""",
+            SensorValues.position(1.0, 2.0, 3f, altitudeM = Double.NaN, speedMps = Float.NaN, bearingDeg = 360f).toString(),
+        )
+    }
+
+    @Test fun positionRejectsFixesTheValueCantDescribe() {
+        assertNull(SensorValues.position(1.0, 2.0, null)) // accuracy_m is required
+        assertNull(SensorValues.position(1.0, 2.0, Float.NaN))
+        assertNull(SensorValues.position(91.0, 2.0, 3f))
+        assertNull(SensorValues.position(1.0, -180.5, 3f))
+        assertNull(SensorValues.position(Double.NaN, 2.0, 3f))
+    }
+
+    @Test fun betterFix() {
+        val s = 1_000_000_000L
+        fun better(acc: Float, t: Long, p: String, lastAcc: Float, lastT: Long, lastP: String) =
+            SensorValues.isBetterFix(acc, t * s, p, lastAcc, lastT * s, lastP)
+        assertTrue(SensorValues.isBetterFix(50f, 1, "network", null, null, null)) // the first fix
+        assertTrue(better(30f, 2, "gps", 5f, 1, "gps")) // same provider: always the newest
+        assertTrue(better(4f, 2, "gps", 30f, 1, "network")) // more accurate
+        assertTrue(!better(40f, 2, "network", 5f, 1, "gps")) // a coarse fix between GPS fixes
+        assertTrue(better(40f, 12, "network", 5f, 1, "gps")) // ... unless GPS went quiet
+        assertTrue(!better(4f, 1, "gps", 30f, 2, "network")) // older than what was sent
+    }
+
     /** Hamilton product a * b of quaternions [x, y, z, w]: rotate by b, then by a. */
     private fun multiply(a: FloatArray, b: FloatArray): FloatArray {
         val (ax, ay, az, aw) = a
