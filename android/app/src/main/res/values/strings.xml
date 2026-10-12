@@ -138,8 +138,9 @@
     <string name="pair_done">Done</string>
     <string name="pair_view_devices">Paired devices</string>
     <string name="pair_failed_title">Pairing didn\'t work</string>
-    <string name="pair_err_bad_secret">Your PC didn\'t accept this code. Scan the code your PC shows right now.</string>
+    <string name="pair_err_bad_secret">Your PC didn\'t accept this QR code. After a failed attempt it shows a new one: scan the QR code your PC shows now.</string>
     <string name="pair_err_rejected">Pairing was declined on your PC.</string>
+    <string name="pair_err_qr_only">This PC only accepts the QR code; scan it instead.</string>
     <string name="pair_err_out_of_order">Your PC and phone got out of step. Start pairing again.</string>
     <string name="pair_err_codes_differ">The codes didn\'t match, so nothing was saved. If they really were the same, try again; if not, someone may be interfering with your network.</string>
     <string name="pair_err_commitment">Your PC\'s answer didn\'t check out, so pairing was stopped. Someone may be interfering with your network. Try again, or use the QR code.</string>

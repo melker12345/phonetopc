@@ -52,11 +52,17 @@ object PairingErrors {
 
 /** Why pairing stopped. Every case has its own message and a retry in the UI. */
 sealed interface PairingFailure {
-    /** -32020: the PC didn't accept the QR secret (an old or mistyped code). */
+    /**
+     * -32020: the PC didn't accept the QR secret. It shows a new QR code after any attempt
+     * that reached its prompt (SECURITY.md §4.2), so the scanned one may be used up.
+     */
     data object BadSecret : PairingFailure
 
     /** -32021: the PC's user declined. */
     data object Rejected : PairingFailure
+
+    /** -32021 to `pair_sas_begin`: the PC only pairs by QR code (e.g. `phonetopc pair --yes`). */
+    data object QrOnly : PairingFailure
 
     /** -32022: the two sides got out of step. */
     data object OutOfOrder : PairingFailure
@@ -172,14 +178,20 @@ class PairingClient(
             channel.use { ch ->
                 val me = phone()
                 val pcPinSeen = ch.pcPin
-                val begin = ch.call(
-                    "pair_sas_begin",
-                    buildJsonObject {
-                        put("protocol", PAIR_PROTOCOL)
-                        put("phone", me.toJson())
-                    },
-                    requestTimeout,
-                )
+                val begin = try {
+                    ch.call(
+                        "pair_sas_begin",
+                        buildJsonObject {
+                            put("protocol", PAIR_PROTOCOL)
+                            put("phone", me.toJson())
+                        },
+                        requestTimeout,
+                    )
+                } catch (e: PairingRpcException) {
+                    // §4.3: a PC that pairs without asking its user refuses code comparison.
+                    if (e.code == PairingErrors.REJECTED) throw Failure(PairingFailure.QrOnly)
+                    throw e
+                }
                 val pcInfo = begin.obj("pc")
                 val pcName = pcInfo?.string("name") ?: pc.name
                 val pcId = pcInfo?.string("id") ?: pc.id

@@ -231,6 +231,14 @@ class PairingClientTest {
         assertTrue(stored.isEmpty())
     }
 
+    @Test fun sasRefusedByAQrOnlyPc() = runTest {
+        val pc = FakePc().apply { errorFor = "pair_sas_begin" to PairingErrors.REJECTED }
+        val c = client(pc)
+        startSas(pc, c).join()
+        assertEquals(PairingFailure.QrOnly, failure(c))
+        assertTrue(stored.isEmpty())
+    }
+
     @Test fun sasUnsupportedProtocol() = runTest {
         val pc = FakePc().apply { errorFor = "pair_sas_begin" to PairingErrors.UNSUPPORTED_PROTOCOL }
         val c = client(pc)

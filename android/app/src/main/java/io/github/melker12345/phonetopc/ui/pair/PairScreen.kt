@@ -510,6 +510,7 @@ private fun Failure(failure: PairingFailure, onRetry: () -> Unit, onBack: () -> 
 private fun failureMessage(f: PairingFailure): String = when (f) {
     PairingFailure.BadSecret -> stringResource(R.string.pair_err_bad_secret)
     PairingFailure.Rejected -> stringResource(R.string.pair_err_rejected)
+    PairingFailure.QrOnly -> stringResource(R.string.pair_err_qr_only)
     PairingFailure.OutOfOrder -> stringResource(R.string.pair_err_out_of_order)
     PairingFailure.CodesDiffer -> stringResource(R.string.pair_err_codes_differ)
     PairingFailure.CommitmentMismatch -> stringResource(R.string.pair_err_commitment)
