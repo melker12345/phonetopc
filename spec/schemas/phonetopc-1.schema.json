@@ -213,18 +213,24 @@
         "device": { "type": "string" }
       },
       "allOf": [
-        { "if": { "properties": { "source": { "enum": ["accelerometer", "gyro"] } } },
+        { "if": { "properties": { "source": { "enum": ["accelerometer", "gyro", "magnetometer"] } } },
           "then": { "properties": { "value": { "$ref": "#/$defs/vec3" } } } },
-        { "if": { "properties": { "source": { "const": "game_rotation_vector" } } },
+        { "if": { "properties": { "source": { "enum": ["game_rotation_vector", "rotation_vector"] } } },
           "then": { "properties": { "value": { "$ref": "#/$defs/quat" } } } },
-        { "if": { "properties": { "source": { "enum": ["proximity", "light"] } } },
+        { "if": { "properties": { "source": { "enum": ["proximity", "light", "barometer"] } } },
           "then": { "properties": { "value": { "type": "number" } } } },
+        { "if": { "properties": { "source": { "const": "compass" } } },
+          "then": { "properties": { "value": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 } } } },
         { "if": { "properties": { "source": { "const": "battery" } } },
           "then": { "properties": { "value": {
             "type": "object", "required": ["level", "charging"],
             "properties": { "level": { "type": "number", "minimum": 0, "maximum": 100 }, "charging": { "type": "boolean" } } } } } },
+        { "if": { "properties": { "source": { "const": "location" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/position" } } } },
         { "if": { "properties": { "source": { "const": "ui" } } },
-          "then": { "properties": { "value": { "type": "boolean" } } } }
+          "then": { "properties": { "value": { "type": "boolean" } } } },
+        { "if": { "properties": { "source": { "const": "nfc" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/tag" } } } }
       ]
     },
 
@@ -247,6 +253,40 @@
               }
             }
           ]
+        }
+      }
+    },
+
+    "position": {
+      "description": "location/position (PROTOCOL.md §6)",
+      "type": "object", "required": ["lat", "lon", "accuracy_m"],
+      "properties": {
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+        "accuracy_m": { "type": "number", "minimum": 0 },
+        "altitude_m": { "type": "number" },
+        "speed_mps": { "type": "number", "minimum": 0 },
+        "bearing_deg": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 }
+      }
+    },
+    "tag": {
+      "description": "nfc/tag (PROTOCOL.md §6)",
+      "type": "object", "required": ["id", "tech"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^([0-9a-f]{2})*$" },
+        "tech": { "type": "array", "items": { "type": "string" } },
+        "ndef": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["tnf", "type", "payload"],
+            "properties": {
+              "tnf": { "type": "integer", "minimum": 0, "maximum": 7 },
+              "type": { "type": "string" },
+              "payload": { "type": "string", "pattern": "^([0-9a-f]{2})*$" },
+              "text": { "type": "string" },
+              "uri": { "type": "string" }
+            }
+          }
         }
       }
     },

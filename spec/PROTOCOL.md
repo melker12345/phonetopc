@@ -7,6 +7,7 @@ This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECU
 tokens (milestone M2). [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
 
 **Changes in draft 3:** `request_approval`, capability `approval` and `hello.approval`; see `APPROVAL.md`.
+Sources `rotation_vector`, `magnetometer`, `compass`, `barometer`, `location` and `nfc` (§6); `proximity` clarified.
 
 **Changes in draft 2:** secure mode (`wss://` with a pinned certificate) is the default; `hello` gains `auth`
 and its result gains `pc`; new error `-32010`; mDNS TXT gains `tls=1`. See `SECURITY.md`.
@@ -166,13 +167,51 @@ One-shot read of the latest value. Params: `source` (required) and `type` (optio
 |---|---|---|---|---|---|
 | `accelerometer` | `motion` | `vec3` | `[x, y, z]` including gravity | `m/s^2` | continuous |
 | `gyro` | `rotation` | `vec3` | `[x, y, z]` angular speed | `rad/s` | continuous |
-| `game_rotation_vector` | `orientation` | `quat` | `[x, y, z, w]` unit quaternion, no magnetometer | `""` | continuous |
-| `proximity` | `distance` | `number` | distance; many phones report only `0` or max | `cm` | on_change |
+| `game_rotation_vector` | `orientation` | `quat` | `[x, y, z, w]` unit quaternion, no magnetometer: relative to an arbitrary heading that drifts slowly, but undisturbed by magnets and steel | `""` | continuous |
+| `rotation_vector` | `orientation` | `quat` | `[x, y, z, w]` unit quaternion in the earth frame (x east, y magnetic north, z up); uses the magnetometer, so it has an absolute heading but is disturbed near magnets and steel | `""` | continuous |
+| `magnetometer` | `magnetic_field` | `vec3` | `[x, y, z]` calibrated magnetic field | `uT` | continuous |
+| `compass` | `heading` | `number` | azimuth in `[0, 360)`: the direction the top edge of the phone (its +y axis) points, clockwise from magnetic north, meant for a phone lying flat; derived from `rotation_vector` | `deg` | continuous |
+| `barometer` | `pressure` | `number` | air pressure | `hPa` | continuous |
+| `proximity` | `distance` | `number` | the earpiece sensor that turns the screen off during calls: an object within a few cm of the top of the screen (range ~5 cm), many phones report only `0` (near) or their max (far). It is **not** the distance between phone and PC | `cm` | on_change |
 | `light` | `illuminance` | `number` | ambient light | `lx` | on_change |
 | `battery` | `state` | `object` | `{"level": 0–100, "charging": bool}`; `charging` is true while plugged in and charging or full | `%` | on_change |
+| `location` | `position` | `object` | a position fix, see below | `""` | on_change |
 | `ui` | `tile_tap` | `bool` | always `true`; fired by the Quick Settings tile | `""` | on_change |
+| `nfc` | `tag` | `object` | a scanned NFC tag, see below | `""` | on_change |
 
 Axes follow the [Android sensor coordinate system](https://developer.android.com/develop/sensors-and-location/sensors/sensors_overview#sensors-coords) (device frame, not rotated with screen orientation).
+
+**`location`** is a state like `battery`: a subscription starts with the current fix if one is known. Its value is
+
+```jsonc
+{"lat": 59.3293, "lon": 18.0686, "accuracy_m": 12.0,   // degrees (WGS 84); horizontal accuracy radius, 68% confidence
+ "altitude_m": 31.5, "speed_mps": 0.4, "bearing_deg": 271.0}   // optional
+```
+
+`altitude_m` (above the WGS 84 ellipsoid), `speed_mps` (over ground) and `bearing_deg` (direction of travel, clockwise from
+true north, `[0, 360)`) are omitted when the fix doesn't have them. A phone reports `location` as unavailable while
+the user hasn't granted location access to the app or has turned location off. Expect about one fix per second
+while subscribed.
+
+**`nfc`** is event-like, like `ui`: nothing is sent until a tag is scanned, and each scan is one event, also when
+the same tag is scanned again. Its value is
+
+```jsonc
+{"id": "04a2246a8e5d80",            // tag UID, lowercase hex; may be empty or random per scan on some tags
+ "tech": ["NfcA", "MifareUltralight", "Ndef"],   // technologies the tag supports (Android class names)
+ "ndef": [                           // optional: the tag's NDEF records, if it has an NDEF message
+   {"tnf": 1, "type": "U", "uri": "https://example.com/", "payload": "046578616d706c652e636f6d2f"},
+   {"tnf": 1, "type": "T", "text": "hello", "payload": "02656e68656c6c6f"}]}
+```
+
+Each NDEF record has `tnf` (the 3-bit Type Name Format, 0–7), `type` (the record type as UTF-8 text, or lowercase
+hex if it isn't printable UTF-8; `""` when empty) and `payload` (lowercase hex). Well-known text records (`tnf` 1,
+`type` `"T"`) also have `text`, the decoded text without the language code; well-known URI records (`tnf` 1,
+`type` `"U"`) and absolute-URI records (`tnf` 3) also have `uri`. A server MAY bound what it reports: the phone app
+sends at most 8 records and at most 4096 bytes of each payload (decoding `text`/`uri` from what it kept).
+Phones scan while their screen is on and unlocked; `available` only says that the phone has NFC, which may be
+switched off in its system settings. Tag contents are not authenticated: anyone can write a tag or clone a UID, and on
+Android other apps on the phone can hand the app a made-up tag, so treat `nfc` values as untrusted input.
 
 New sources and types MAY be added in any draft. Clients MUST tolerate unknown sources in `list_sensors`.
 
