@@ -8,6 +8,7 @@ import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.Nfc
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SensorOccupied
@@ -39,6 +40,7 @@ val SensorUiCatalog: List<SensorUi> = listOf(
     SensorUi(SensorCatalog.BATTERY, R.string.sensor_battery, R.string.sensor_battery_desc, Icons.Rounded.BatteryFull),
     SensorUi(SensorCatalog.LOCATION, R.string.sensor_location, R.string.sensor_location_desc, Icons.Rounded.LocationOn),
     SensorUi(SensorCatalog.UI, R.string.sensor_tile, R.string.sensor_tile_desc, Icons.Rounded.TouchApp),
+    SensorUi(SensorCatalog.NFC, R.string.sensor_nfc, R.string.sensor_nfc_desc, Icons.Rounded.Nfc),
 )
 
 fun sensorUi(source: String): SensorUi =

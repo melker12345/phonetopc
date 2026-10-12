@@ -9,6 +9,9 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.Ndef
 import android.location.LocationManager
 import android.os.BatteryManager
 import android.os.Handler
@@ -29,12 +32,13 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * [SensorSource] backed by SensorManager, the sticky battery broadcast, LocationManager and
- * the Quick Settings tile. Hardware listeners exist only while the hub demands the source; the hub
+ * [SensorSource] backed by SensorManager, the sticky battery broadcast, LocationManager, the
+ * Quick Settings tile and NFC tag scans. Hardware listeners exist only while the hub demands the source; the hub
  * passes the highest rate any subscription asked for and downsamples per subscription.
  */
 class AndroidSensorSource(context: Context) : SensorSource {
@@ -59,6 +63,9 @@ class AndroidSensorSource(context: Context) : SensorSource {
     private val location = LocationTracker(appContext)
     private var locationListener: LocationListenerCompat? = null // guarded by `this`
     @Volatile private var lastFix: Location? = null // the last fix sent
+
+    private val nfcAdapter: NfcAdapter? = runCatching { NfcAdapter.getDefaultAdapter(appContext) }.getOrNull()
+    private val lastTagNs = AtomicLong(Long.MIN_VALUE / 2)
 
     /** Location permission granted and location switched on; see [recheckAvailability]. */
     @Volatile private var locationUsable = false
@@ -92,6 +99,8 @@ class AndroidSensorSource(context: Context) : SensorSource {
             spec.source == SensorCatalog.BATTERY || spec.source == SensorCatalog.UI ->
                 SensorInfo.of(spec, available = true)
             spec.source == SensorCatalog.LOCATION -> SensorInfo.of(spec, available = location.present)
+            // Present is enough: NFC switched off in system settings only means no scans for now.
+            spec.source == SensorCatalog.NFC -> SensorInfo.of(spec, available = nfcAdapter != null)
             sensor == null -> SensorInfo.of(spec, available = false)
             spec.mode == SensorMode.CONTINUOUS -> {
                 // minDelay is the fastest period in µs. With HIGH_SAMPLING_RATE_SENSORS declared
@@ -134,6 +143,9 @@ class AndroidSensorSource(context: Context) : SensorSource {
     /** Location is switched on in system settings. */
     fun locationEnabled(): Boolean = location.enabled()
 
+    /** NFC is switched on in system settings. */
+    fun nfcEnabled(): Boolean = runCatching { nfcAdapter?.isEnabled == true }.getOrDefault(false)
+
     /**
      * Re-reads availability that can change behind the app's back (location permission and
      * switch) and calls [onAvailabilityChanged] if it changed. Cheap; call it e.g. on resume.
@@ -164,6 +176,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
             SensorCatalog.BATTERY -> if (demand != null) startBattery() else stopBattery()
             SensorCatalog.LOCATION -> if (demand != null) startLocation() else stopLocation()
             SensorCatalog.UI -> Unit // tile taps are pushed by the tile service
+            SensorCatalog.NFC -> Unit // scans are pushed by the activities, see emitTag
             else -> {
                 liveSources.remove(source)
                 listeners.remove(source)?.let { sensorManager?.unregisterListener(it) }
@@ -187,7 +200,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
         if (source in disabledSources) return null
         return when (source) {
             SensorCatalog.BATTERY -> readBatterySticky()
-            SensorCatalog.UI -> null // event-like: no state to report
+            SensorCatalog.UI, SensorCatalog.NFC -> null // event-like: no state to report
             SensorCatalog.LOCATION -> if (source in liveSources) latest[source] else null
             else -> if (source in liveSources) latest[source] else null
         }
@@ -197,7 +210,7 @@ class AndroidSensorSource(context: Context) : SensorSource {
         if (source in disabledSources) return null
         return when (source) {
             SensorCatalog.BATTERY -> readBatterySticky()
-            SensorCatalog.UI -> latest[source]
+            SensorCatalog.UI, SensorCatalog.NFC -> latest[source]
             SensorCatalog.LOCATION -> readLocation()
             else -> latest[source] ?: readOnce(source)
         }
@@ -212,6 +225,32 @@ class AndroidSensorSource(context: Context) : SensorSource {
         )
         latest[SensorCatalog.UI] = reading
         sink?.onReading(reading)
+    }
+
+    /**
+     * Called with a scanned tag, from reader mode in the app or from the NFC dispatch activity.
+     * The latter is exported, so [tag] may come from another app: everything taken from it is
+     * bounded (see [NfcValues]), and scans faster than real ones are dropped.
+     */
+    fun emitTag(tag: Tag) {
+        if (SensorCatalog.NFC in disabledSources) return
+        val now = SystemClock.elapsedRealtimeNanos()
+        val last = lastTagNs.get()
+        if (now - last < MIN_TAG_INTERVAL_NS || !lastTagNs.compareAndSet(last, now)) return
+        val value = runCatching {
+            NfcValues.tag(tag.id ?: ByteArray(0), tag.techList.orEmpty().asList(), ndefRecords(tag))
+        }.getOrNull() ?: return
+        val reading = Reading(SensorCatalog.NFC, "tag", value, "", System.currentTimeMillis(), now)
+        latest[SensorCatalog.NFC] = reading
+        sink?.onReading(reading)
+    }
+
+    /** The NDEF message Android read when the tag was discovered; `null` if it has none. */
+    private fun ndefRecords(tag: Tag): List<NfcValues.Record>? {
+        val message = runCatching { Ndef.get(tag)?.cachedNdefMessage }.getOrNull() ?: return null
+        return message.records.orEmpty().take(NfcValues.MAX_RECORDS).map {
+            NfcValues.Record(it.tnf.toInt(), it.type ?: ByteArray(0), it.payload ?: ByteArray(0))
+        }
     }
 
     // ---- hardware sensors ----
@@ -375,6 +414,9 @@ class AndroidSensorSource(context: Context) : SensorSource {
         /** `get location` answers with a last-known fix this recent rather than waiting. */
         private const val GET_FIX_MAX_AGE_MS = 10 * 60_000L
         private const val LOCATION_ONE_SHOT_TIMEOUT_MS = 5_000L
+
+        /** Tags arriving faster than this (no person scans that fast) are dropped. */
+        private const val MIN_TAG_INTERVAL_NS = 200_000_000L
 
         /** Convert a SensorEvent timestamp (elapsedRealtimeNanos timebase) to Unix millis. */
         fun wallClockMillis(eventNanos: Long): Long =

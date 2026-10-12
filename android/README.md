@@ -192,7 +192,8 @@ Don't rely on that: many networks block multicast.
 - The `subscribe` response always comes before that subscription's first event. Subscribing
   to `light`, `proximity`, `battery` or `location` starts with the current value as `seq` 0
   (for light and proximity, as soon as the sensor reports it); `ui` sends nothing until the
-  tile is tapped. These sources only send an event when the value actually changes.
+  tile is tapped, `nfc` nothing until a tag is scanned. The stateful sources only send an
+  event when the value actually changes.
 - `location` uses the platform `LocationManager` (no Google Play Services): the fused provider
   on Android 12+ where there is one, else GPS and network, at about one fix per second while
   subscribed. A subscription starts with a last-known fix up to two minutes old if there is
@@ -202,6 +203,14 @@ Don't rely on that: many networks block multicast.
   return to the app, so location keeps flowing with the screen off. After a reboot or update
   auto-start with only "while using the app" access, Android refuses type location from the
   background: the server runs without it, and location only flows once you open the app.
+- `nfc` sends one event per scanned tag while the screen is on and unlocked. With phonetopc
+  in front, it reads tags itself (reader mode). Otherwise Android's tag dispatch starts an
+  invisible activity that passes the tag on and finishes; it only gets tags no other app
+  claims (there is no catch-all `NDEF_DISCOVERED` filter, so URL stickers still open the
+  browser) and may share a chooser with other NFC apps. That activity is exported, so other
+  apps could hand it made-up tags: values are bounded (8 records, 4 KB per payload) and
+  scans faster than 5 a second are dropped. `available` means the phone has NFC; Settings
+  says when it is switched off.
 - If a client can't keep up, continuous events are dropped (visible as `seq` gaps). If
   on_change events back up, the connection is closed with 1008 (spec §5).
 - `ts_mono_ns` is `SensorEvent.timestamp`; `ts` is that converted to wall-clock time.

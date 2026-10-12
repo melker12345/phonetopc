@@ -27,6 +27,11 @@
     <uses-feature
         android:name="android.hardware.location.network"
         android:required="false" />
+    <!-- The nfc source: tags scanned while the screen is on. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -75,6 +80,30 @@
             android:launchMode="singleTask"
             android:taskAffinity="${applicationId}.approval"
             android:theme="@style/Theme.Phonetopc.Approval" />
+
+        <!-- The nfc source while phonetopc is in the background: Android's tag dispatch starts
+             it, it passes the tag on and finishes without showing anything. Exported because
+             the system NFC service starts it; any app can, so its input is treated as
+             untrusted. No catch-all NDEF_DISCOVERED filter: tags with a URL or an app record
+             keep opening what they normally open, only tags nothing else claims come here. -->
+        <activity
+            android:name=".sensors.NfcTagActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity="${applicationId}.nfc"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.nfc.action.TECH_DISCOVERED" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_tech_filter" />
+        </activity>
 
         <receiver
             android:name=".approval.ApprovalActionReceiver"

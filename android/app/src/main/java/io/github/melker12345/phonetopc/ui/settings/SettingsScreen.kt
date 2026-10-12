@@ -284,6 +284,7 @@ private fun SensorsGroup(disabled: Set<String>, vm: MainViewModel) {
     // The permission dialog and system settings pause the activity, so these pick up changes.
     val locationPermitted = rememberOnResume { vm.locationPermitted() }
     val locationOn = rememberOnResume { vm.locationEnabled() }
+    val nfcOn = rememberOnResume { vm.nfcEnabled() }
     var locationDenied by rememberSaveable { mutableStateOf(false) }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         locationDenied = result.values.none { it }
@@ -335,6 +336,19 @@ private fun SensorsGroup(disabled: Set<String>, vm: MainViewModel) {
                             }
                         }) {
                             Text(stringResource(if (!locationPermitted) R.string.allow else R.string.settings_turn_on))
+                        }
+                    },
+                )
+            }
+            if (sensor.source == SensorCatalog.NFC && enabled && !nfcOn) {
+                ListItem(
+                    colors = transparentItem,
+                    leadingContent = { IconBadge(Icons.Rounded.Warning, size = 36.dp) },
+                    headlineContent = { Text(stringResource(R.string.settings_nfc_off)) },
+                    supportingContent = { Text(stringResource(R.string.settings_nfc_off_summary)) },
+                    trailingContent = {
+                        FilledTonalButton(onClick = { SystemSettings.openNfcSettings(context) }) {
+                            Text(stringResource(R.string.settings_turn_on))
                         }
                     },
                 )

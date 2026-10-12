@@ -79,6 +79,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun locationEnabled() = graph.sensorSource.locationEnabled()
 
+    fun nfcEnabled() = graph.sensorSource.nfcEnabled()
+
     fun startServer() = graph.bridge.start()
     fun stopServer() = graph.bridge.stop()
     fun setPaused(paused: Boolean) = graph.bridge.setPaused(paused)
