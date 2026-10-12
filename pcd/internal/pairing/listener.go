@@ -61,6 +61,11 @@ type Options struct {
 	// if it fails, the phone gets internal_error and may retry. Required.
 	Save func(Paired) error
 
+	// NoSAS refuses pair_sas_begin with -32021, for a PC that can't ask its
+	// user to compare codes (`pair --yes`): nobody may confirm a code on the
+	// user's behalf (§4.3).
+	NoSAS bool
+
 	// Expiry closes the listener (default 5 minutes, §4.1).
 	Expiry time.Duration
 	// MaxFailures failed attempts (bad secret, rejection, SAS mismatch) per
@@ -514,6 +519,10 @@ func (s *session) sasBegin(params json.RawMessage) (any, func(), error) {
 	}
 	if err := checkProtocol(p.Protocol); err != nil {
 		return nil, nil, err
+	}
+	if s.l.opts.NoSAS {
+		s.l.logf("refused a code comparison from %s: this PC only accepts the QR code now", s.remote)
+		return nil, nil, protocol.NewError(protocol.CodeRejected, "this PC only accepts pairing by QR code right now")
 	}
 	s.npc = security.RandomBytes(security.NonceSize)
 	s.state, s.way, s.phone = stCommitted, WaySAS, p.Phone

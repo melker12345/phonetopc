@@ -38,7 +38,9 @@ bin/phonetopc pair            # prints a QR code, and advertises itself for "Fin
 
 On the phone, open phonetopc → *Pair a PC*, then either scan the QR code or tap the PC under
 *Find on network* and check that both screens show the same 6-digit code. The PC asks for
-confirmation too (`--yes` skips that, for scripts). `--png FILE` also writes the QR code as an
+confirmation too. `--yes` skips that for the QR code, for scripts; it turns *Find on network* off
+(nobody would compare the codes) and refuses a phone whose id is already paired with a different
+key. Without `--yes`, replacing such a phone takes an explicit `y`. `--png FILE` also writes the QR code as an
 image. The listener closes after one pairing, on Ctrl-C, or after 5 minutes (`--timeout`).
 
 The pairing listener uses TCP port **8766** (SECURITY.md §4.1), so a firewall rule only has to be
@@ -140,7 +142,7 @@ bin/phonetopc-mock --state /tmp/mock        # wss://127.0.0.1:8765/v1/ws with th
 | `--name` | Device name. Default `phonetopc mock` |
 | `--tap-every` | Interval between synthetic `ui/tile_tap` events. Default `10s`; `0` turns them off |
 | `--unavailable` | Comma-separated list of sources to report as `available: false` |
-| `--device-id` | Device id. Default `mock-0001`; in secure mode it only applies when the state is created (otherwise a random id) |
+| `--device-id` | Device id. Default `mock-0001`; in secure mode it only applies when the state is created (otherwise a random id), and must be 16 to 64 lowercase hex digits (SECURITY.md §2) |
 | `--seed` | Simulation seed |
 | `--approval MODE` | Secure mode: how the mock's "user" answers approval requests: `auto` (approve, the default), `deny`, `cancel`, `lockout`, `timeout` (never answer), `ask` (prompt on the mock's terminal: y/n/c/l), `tamper` (approve with a corrupted signature, to test clients), `off` (no approval capability) |
 | `--approval-delay` | How long `auto`, `deny`, `cancel`, `lockout` and `tamper` take to answer. Default `1s` |

@@ -103,3 +103,10 @@ func TestPairUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestSecureDeviceIDFormat(t *testing.T) {
+	err := serve(context.Background(), []string{"--state", t.TempDir(), "--device-id", "mock-0001", "--addr", "127.0.0.1:0"})
+	if err == nil || !strings.Contains(err.Error(), "16 to 64 lowercase hex digits") {
+		t.Errorf("want an id format error, got %v", err)
+	}
+}

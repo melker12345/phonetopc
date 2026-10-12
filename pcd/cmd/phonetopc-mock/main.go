@@ -165,6 +165,9 @@ func serve(ctx context.Context, args []string) error {
 		idArg := ""
 		if explicit["device-id"] {
 			idArg = *deviceID
+			if !pairing.ValidID(idArg) {
+				return fmt.Errorf("--device-id: in secure mode, an id is 16 to 64 lowercase hex digits (SECURITY.md §2), got %q", idArg)
+			}
 		}
 		if ident, err = st.Identity(idArg, *name); err != nil {
 			return err

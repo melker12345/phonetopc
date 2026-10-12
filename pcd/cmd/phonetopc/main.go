@@ -69,7 +69,9 @@ Flags (accepted before or after the command):
   --json               print raw JSON instead of human-readable output
 
 pair flags:
-  --yes                accept without asking (for scripts and tests)
+  --yes                accept the QR code without asking (for scripts and tests);
+                       turns off "Find on network", whose codes need a person,
+                       and never replaces a phone paired with another key
   --png FILE           also write the QR code to a PNG file
   --timeout D          give up after D (default 5m)
   --listen ADDR        listen address (default ":8766", all interfaces; a random

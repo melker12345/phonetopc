@@ -508,3 +508,33 @@ func TestOnePairingAtATime(t *testing.T) {
 		t.Fatalf("second phone: %v", err)
 	}
 }
+
+func TestPhoneIDFormat(t *testing.T) {
+	h := startListener(t, yes(), nil)
+	r := dialRaw(t, h)
+	phone := testPhone(t)
+	for _, id := range []string{"", "635f3a01db1859b", "635F3A01DB1859BC", "635f3a01db1859bg", "../../etc/passwd", "635f3a01db1859bc\n", strings.Repeat("a", 65)} {
+		bad := phone
+		bad.ID = id
+		wantErr(t, r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: bad}), protocol.CodeInvalidParams)
+	}
+	for _, id := range []string{"635f3a01db1859bc", strings.Repeat("0", 64), security.NewID()} {
+		if !ValidID(id) {
+			t.Errorf("%q refused", id)
+		}
+	}
+}
+
+func TestNoSAS(t *testing.T) {
+	h := startListener(t, yes(), func(o *Options) { o.NoSAS = true })
+	ok := func(context.Context, protocol.PCInfo, string) (bool, error) { return true, nil }
+	_, err := PairSAS(ctx(t), h.addr, testPhone(t), security.NewToken(), ok)
+	wantCode(t, err, protocol.CodeRejected)
+	// The QR code still works.
+	if _, err := PairQR(ctx(t), h.uri(), testPhone(t), security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := h.wait(t); err != nil || res.Way != WayQR {
+		t.Fatalf("listener: %+v %v", res, err)
+	}
+}

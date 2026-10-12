@@ -265,6 +265,84 @@ func TestPairExpires(t *testing.T) {
 	}
 }
 
+// TestPairYesRefusesSAS: --yes never confirms a code, so anyone on the LAN
+// can't pair through "Find on network" while a script waits for the QR.
+func TestPairYesRefusesSAS(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	pc := startPair(t, env, nil, "--yes")
+	u := pc.uri(t)
+	if !strings.Contains(pc.out.String(), "only the QR code works") {
+		t.Errorf("no hint that Find on network is off:\n%s", pc.out.String())
+	}
+	_, err := pairing.PairSAS(tctx(t), net.JoinHostPort("127.0.0.1", strconv.Itoa(u.Port)), ph.info(), security.NewToken(),
+		func(context.Context, protocol.PCInfo, string) (bool, error) { return true, nil })
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeRejected {
+		t.Fatalf("want -32021, got %v", err)
+	}
+	if strings.Contains(pc.out.String(), "Does the phone show") {
+		t.Errorf("a code was shown:\n%s", pc.out.String())
+	}
+	// The QR code still pairs.
+	if _, err := pairing.PairQR(tctx(t), u, ph.info(), security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	pc.wait(t)
+	if pc.code != 0 {
+		t.Fatalf("pair: code %d\n%s", pc.code, pc.errb.String())
+	}
+}
+
+// TestPairReplacingAnotherKey: a pairing that would replace a paired phone
+// with a different key is refused under --yes and needs an explicit yes
+// otherwise.
+func TestPairReplacingAnotherKey(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	old := pairDirect(t, env, ph, "phone", []string{"127.0.0.1"})
+	st := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc"))
+	impostor := startPhone(t).info()
+	impostor.ID = ph.id.ID // same id, another key
+
+	pc := startPair(t, env, nil, "--yes")
+	_, err := pairing.PairQR(tctx(t), pc.uri(t), impostor, security.NewToken())
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeRejected {
+		t.Fatalf("--yes: want -32021, got %v", err)
+	}
+	if !strings.Contains(pc.out.String(), "already paired, with a different key") || !strings.Contains(pc.out.String(), "Refused") {
+		t.Errorf("no warning:\n%s", pc.out.String())
+	}
+	// The same key re-pairs under --yes (the phone lost its token, say).
+	if _, err := pairing.PairQR(tctx(t), pc.uri(t), ph.info(), security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	pc.wait(t)
+
+	// Without --yes, an empty answer is no, ...
+	pc = startPair(t, env, strings.NewReader("\n"))
+	_, err = pairing.PairQR(tctx(t), pc.uri(t), impostor, security.NewToken())
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeRejected {
+		t.Fatalf("empty answer: want -32021, got %v", err)
+	}
+	pc.cancel()
+	pc.wait(t)
+	if d, err := st.Find(ph.id.ID); err != nil || d.Pin != old.Pin {
+		t.Fatalf("replaced: %+v %v", d, err)
+	}
+	// ... and y replaces it.
+	pc = startPair(t, env, strings.NewReader("y\n"))
+	if _, err := pairing.PairQR(tctx(t), pc.uri(t), impostor, security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	pc.wait(t)
+	if !strings.Contains(pc.out.String(), "Replace \"Test Phone\"? [y/N]") {
+		t.Errorf("prompt:\n%s", pc.out.String())
+	}
+	if d, err := st.Find(ph.id.ID); err != nil || d.Pin != impostor.Pin {
+		t.Fatalf("not replaced: %+v %v", d, err)
+	}
+}
+
 // pairDirect stores a pairing for ph in env's store without the listener.
 func pairDirect(t *testing.T, env map[string]string, ph *phone, name string, addrs []string) store.Device {
 	t.Helper()

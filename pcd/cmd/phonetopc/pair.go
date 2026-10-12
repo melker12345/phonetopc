@@ -90,10 +90,13 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	}
 
 	prompt := newTermPrompter(c.stdin, c.stdout, *yes)
+	prompt.replaces = func(phone pairing.PhoneInfo) (store.Device, bool) { return replaces(st, phone) }
 	l, err := pairing.New(pairing.Options{
 		PC:     protocol.PCInfo{ID: pc.ID, Name: pc.Name},
 		Cert:   pc.Cert,
 		Prompt: prompt,
+		// --yes can't compare codes, so Find on network is off (SECURITY.md §4.3).
+		NoSAS:  *yes,
 		Expiry: *timeout,
 		Logf:   func(format string, a ...any) { fmt.Fprintf(c.stderr, "phonetopc: "+format+"\n", a...) },
 		Save: func(p pairing.Paired) error {
@@ -127,7 +130,10 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	}
 
 	var adv *discovery.Advertiser
-	if !c.noMDNS {
+	if *yes {
+		fmt.Fprintln(c.stdout, "  (--yes: only the QR code works; \"Find on network\" needs you to compare codes.)")
+		fmt.Fprintln(c.stdout)
+	} else if !c.noMDNS {
 		adv, err = discovery.Advertise(pc.Name, discovery.ServicePair, port, map[string]string{"id": pc.ID, "n": pc.Name, "v": "1"})
 		if err != nil {
 			fmt.Fprintf(c.stderr, "phonetopc: mDNS unavailable (%v); use the QR code\n", err)
@@ -153,6 +159,21 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintf(c.stdout, "\nPaired with %q (id %s) by %s.\nTry: phonetopc info\n", res.Phone.Name, res.Phone.ID, how)
 	return nil
+}
+
+// replaces returns the stored device that pairing phone would replace with a
+// different key: the phone was reset or reinstalled, or someone else claims
+// its id.
+func replaces(st *store.Store, phone pairing.PhoneInfo) (store.Device, bool) {
+	devs, err := st.Devices()
+	if err != nil {
+		return store.Device{}, false // Save reports a broken store
+	}
+	i := slices.IndexFunc(devs, func(d store.Device) bool { return d.ID == phone.ID })
+	if i < 0 || devs[i].Pin == phone.Pin {
+		return store.Device{}, false
+	}
+	return devs[i], true
 }
 
 // listenPair opens the pairing listener's socket: on addr if given,
@@ -266,12 +287,15 @@ func (c *cli) pc(args []string) error {
 // one goroutine for the whole run, so a prompt abandoned because the phone
 // went away doesn't leave a reader behind.
 type termPrompter struct {
-	out  io.Writer
-	yes  bool
-	in   io.Reader
-	once sync.Once
-	ch   chan string // closed at EOF
-	mu   sync.Mutex  // one prompt at a time
+	out io.Writer
+	yes bool // confirm QR pairings without asking; never codes
+	in  io.Reader
+	// replaces, if set, returns the paired device a pairing would replace
+	// with a different key.
+	replaces func(pairing.PhoneInfo) (store.Device, bool)
+	once     sync.Once
+	ch       chan string // closed at EOF
+	mu       sync.Mutex  // one prompt at a time
 }
 
 func newTermPrompter(in io.Reader, out io.Writer, yes bool) *termPrompter {
@@ -300,10 +324,6 @@ func (p *termPrompter) lines() <-chan string {
 func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.yes {
-		fmt.Fprintf(p.out, "%s y (--yes)\n", question)
-		return true, nil
-	}
 	for {
 		fmt.Fprintf(p.out, "%s ", question)
 		select {
@@ -327,11 +347,46 @@ func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool
 	}
 }
 
+// replacing warns if phone would replace a paired device with a different
+// key, and reports whether it does.
+func (p *termPrompter) replacing(phone pairing.PhoneInfo) bool {
+	if p.replaces == nil {
+		return false
+	}
+	old, ok := p.replaces(phone)
+	if !ok {
+		return false
+	}
+	fmt.Fprintf(p.out, "\nWarning: %q (id %s) is already paired, with a different key.\n"+
+		"Pairing replaces it, and this PC then trusts the new key, also for `phonetopc approve`.\n"+
+		"Accept only if phonetopc was reset or reinstalled on that phone.\n", old.Name, old.ID)
+	return true
+}
+
 func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo) (bool, error) {
-	return p.ask(ctx, fmt.Sprintf("\nPair with %q? [Y/n]", phone.Name), true)
+	question := fmt.Sprintf("\nPair with %q? [Y/n]", phone.Name)
+	if p.replacing(phone) {
+		if p.yes {
+			fmt.Fprintln(p.out, "Refused: --yes never replaces a phone paired with a different key; pair without --yes.")
+			return false, nil
+		}
+		return p.ask(ctx, fmt.Sprintf("Replace %q? [y/N]", phone.Name), false)
+	}
+	if p.yes {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		fmt.Fprintf(p.out, "%s y (--yes)\n", question)
+		return true, nil
+	}
+	return p.ask(ctx, question, true)
 }
 
 func (p *termPrompter) ConfirmSAS(ctx context.Context, phone pairing.PhoneInfo, code string) (bool, error) {
+	if p.yes { // the listener refuses SAS under --yes already
+		fmt.Fprintf(p.out, "\nRefused a code comparison with %q: --yes can't compare codes.\n", phone.Name)
+		return false, nil
+	}
+	p.replacing(phone)
 	fmt.Fprintf(p.out, "\n%q wants to pair. Pairing code:  %s\n", phone.Name, security.FormatCode(code))
 	return p.ask(ctx, fmt.Sprintf("Does the phone show %s? [y/N]", security.FormatCode(code)), false)
 }

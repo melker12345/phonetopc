@@ -9,6 +9,7 @@ package pairing
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -48,18 +49,25 @@ type PhoneInfo struct {
 
 // Limits on what a phone may send, so a hostile one can't bloat the store.
 const (
-	maxIDLen      = 128
 	maxNameLen    = 256
 	maxAddresses  = 16
 	maxAddressLen = 255
 )
 
+// idRE is what a phone id must look like (SECURITY.md §2): 64 to 256
+// random bits as lowercase hex, as phones generate them. Nothing else can
+// sneak into the store, the terminal or `--device`.
+var idRE = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
+
+// ValidID reports whether id is a well-formed phone id.
+func ValidID(id string) bool { return idRE.MatchString(id) }
+
 // validate checks a phone's self-description and fills defaults. The error
 // becomes the message of an invalid_params error.
 func (p *PhoneInfo) validate() error {
 	switch {
-	case p.ID == "" || len(p.ID) > maxIDLen:
-		return fmt.Errorf("params.phone.id must be a non-empty string of at most %d bytes", maxIDLen)
+	case !ValidID(p.ID):
+		return fmt.Errorf("params.phone.id must be 16 to 64 lowercase hex digits")
 	case len(p.Name) > maxNameLen:
 		return fmt.Errorf("params.phone.name is too long")
 	case !security.ValidPin(p.Pin):

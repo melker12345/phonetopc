@@ -35,6 +35,8 @@ itself is in [`APPROVAL.md`](APPROVAL.md).
   `SubjectPublicKeyInfo`. Example: `sha256/n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg`. Pinning the public key
   rather than the certificate lets a side re-issue its certificate without re-pairing.
 - **Device ids** (`device.id` from `hello`, and a PC id) are random, at least 64 bits, stable, and not secret.
+  A phone id is 16 to 64 lowercase hex digits (`^[0-9a-f]{16,64}$`); a PC refuses any other `phone.id` in
+  pairing with `-32602`. PC ids SHOULD have the same form.
 - The phone SHOULD keep its private key in Android Keystore, hardware-backed where available. Tokens are
   stored only as received/issued; the phone MAY store a hash of each token instead of the token.
 
@@ -140,6 +142,9 @@ A man in the middle presents a different PC pin to the phone than the PC's real 
   yes. If either says no: error `-32023`, and both sides discard everything.
 - If the phone's commitment check fails, it sends `pair_sas_confirm {"match": false}` and then aborts.
 - If both confirm, the phone stores `pc_pin_seen` as the PC's pin and continues with §4.4.
+- The PC's confirmation MUST come from a person comparing the codes. A PC that pairs without asking (e.g.
+  `phonetopc pair --yes`) MUST refuse `pair_sas_begin` with `-32021` and SHOULD NOT advertise
+  `_phonetopc-pair._tcp`.
 
 ### 4.4 Finishing: the token
 
@@ -158,6 +163,9 @@ Both ways end with the phone issuing a token to the PC:
   otherwise `-32022`.
 - Re-pairing a PC that the phone already knows (same PC id) replaces its old token, and the phone closes sessions
   that used the old token with 1008.
+- On the PC, a pairing whose `phone.id` is already paired with a **different** pin would replace that phone's
+  entry, and with it the key the PC trusts (including for approvals). The PC MUST warn its user and get an
+  explicit yes for that (an empty answer is no); a PC that pairs without asking MUST refuse it with `-32021`.
 
 ### 4.5 Pairing errors
 
