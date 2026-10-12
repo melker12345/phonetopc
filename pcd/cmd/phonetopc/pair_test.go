@@ -70,7 +70,7 @@ func startPhoneOn(t *testing.T, addr string, tweaks ...func(*mockphone.Options, 
 	}
 	opts := mockphone.Options{
 		Device: protocol.DeviceInfo{ID: id.ID, Name: id.Name}, Authenticate: st.Authenticate,
-		TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1,
+		TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1, LocationEvery: -1, NFCEvery: -1,
 	}
 	for _, f := range tweaks {
 		f(&opts, st)

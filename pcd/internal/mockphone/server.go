@@ -53,6 +53,13 @@ type Options struct {
 	// between changes of those sources. Defaults 4s, 15s, 60s; negative
 	// disables changes.
 	LightEvery, ProximityEvery, BatteryEvery time.Duration
+	// LocationEvery is the interval between location fixes. Default 1s;
+	// negative disables new fixes (the first one stays current).
+	LocationEvery time.Duration
+	// NFCEvery is the interval of synthetic nfc/tag scans. Default 20s;
+	// negative disables them (scans can still be injected with
+	// Server.ScanTag).
+	NFCEvery time.Duration
 
 	// PingInterval and PingTimeout control WebSocket keepalive: a ping is sent
 	// every PingInterval and the session is closed if the pong doesn't arrive
@@ -123,6 +130,8 @@ func (o *Options) setDefaults() {
 	def(&o.LightEvery, 4*time.Second)
 	def(&o.ProximityEvery, 15*time.Second)
 	def(&o.BatteryEvery, 60*time.Second)
+	def(&o.LocationEvery, time.Second)
+	def(&o.NFCEvery, 20*time.Second)
 	def(&o.PingInterval, 15*time.Second)
 	def(&o.PingTimeout, 30*time.Second)
 	def(&o.HelloTimeout, 10*time.Second)
@@ -358,7 +367,7 @@ func (s *Server) reading(source string, value any, now time.Time) (protocol.Read
 // sampleContinuous samples a continuous source at now.
 func (s *Server) sampleContinuous(source string, now time.Time, rng *rand.Rand) (protocol.Reading, error) {
 	t := now.Sub(s.start).Seconds()
-	var v []float64
+	var v any
 	switch source {
 	case protocol.SourceGyro:
 		v = gyro(t, rng)
@@ -366,6 +375,14 @@ func (s *Server) sampleContinuous(source string, now time.Time, rng *rand.Rand) 
 		v = accelerometer(t, rng)
 	case protocol.SourceGameRotationVector:
 		v = gameRotationVector(t)
+	case protocol.SourceRotationVector:
+		v = rotationVector(t)
+	case protocol.SourceMagnetometer:
+		v = magnetometer(t, rng)
+	case protocol.SourceCompass:
+		v = compass(t, rng)
+	case protocol.SourceBarometer:
+		v = barometer(t, rng)
 	default:
 		return protocol.Reading{}, fmt.Errorf("%q is not a continuous source", source)
 	}

@@ -33,21 +33,32 @@ const (
 	SourceAccelerometer      = "accelerometer"
 	SourceGyro               = "gyro"
 	SourceGameRotationVector = "game_rotation_vector"
+	SourceRotationVector     = "rotation_vector"
+	SourceMagnetometer       = "magnetometer"
+	SourceCompass            = "compass"
+	SourceBarometer          = "barometer"
 	SourceProximity          = "proximity"
 	SourceLight              = "light"
 	SourceBattery            = "battery"
+	SourceLocation           = "location"
 	SourceUI                 = "ui"
+	SourceNFC                = "nfc"
 )
 
 // Event types in the sensor catalog.
 const (
-	TypeMotion      = "motion"
-	TypeRotation    = "rotation"
-	TypeOrientation = "orientation"
-	TypeDistance    = "distance"
-	TypeIlluminance = "illuminance"
-	TypeState       = "state"
-	TypeTileTap     = "tile_tap"
+	TypeMotion        = "motion"
+	TypeRotation      = "rotation"
+	TypeOrientation   = "orientation"
+	TypeMagneticField = "magnetic_field"
+	TypeHeading       = "heading"
+	TypePressure      = "pressure"
+	TypeDistance      = "distance"
+	TypeIlluminance   = "illuminance"
+	TypeState         = "state"
+	TypePosition      = "position"
+	TypeTileTap       = "tile_tap"
+	TypeTag           = "tag"
 )
 
 // Units in the sensor catalog.
@@ -55,6 +66,9 @@ const (
 	UnitMetersPerSecond2 = "m/s^2"
 	UnitRadiansPerSecond = "rad/s"
 	UnitNone             = ""
+	UnitMicrotesla       = "uT"
+	UnitDegrees          = "deg"
+	UnitHectopascal      = "hPa"
 	UnitCentimeters      = "cm"
 	UnitLux              = "lx"
 	UnitPercent          = "%"
@@ -69,7 +83,7 @@ const (
 	DefaultDefaultRateHz = 50
 )
 
-// Catalog returns the sensor catalog of draft 1 (spec §6), all marked
+// Catalog returns the sensor catalog (spec §6), all marked
 // available. The returned slice is a fresh copy and may be modified.
 func Catalog() []SensorInfo {
 	cont := func(source, typ, unit string, shape Shape) SensorInfo {
@@ -89,10 +103,16 @@ func Catalog() []SensorInfo {
 		cont(SourceAccelerometer, TypeMotion, UnitMetersPerSecond2, ShapeVec3),
 		cont(SourceGyro, TypeRotation, UnitRadiansPerSecond, ShapeVec3),
 		cont(SourceGameRotationVector, TypeOrientation, UnitNone, ShapeQuat),
+		cont(SourceRotationVector, TypeOrientation, UnitNone, ShapeQuat),
+		cont(SourceMagnetometer, TypeMagneticField, UnitMicrotesla, ShapeVec3),
+		cont(SourceCompass, TypeHeading, UnitDegrees, ShapeNumber),
+		cont(SourceBarometer, TypePressure, UnitHectopascal, ShapeNumber),
 		onChange(SourceProximity, TypeDistance, UnitCentimeters, ShapeNumber),
 		onChange(SourceLight, TypeIlluminance, UnitLux, ShapeNumber),
 		onChange(SourceBattery, TypeState, UnitPercent, ShapeObject),
+		onChange(SourceLocation, TypePosition, UnitNone, ShapeObject),
 		onChange(SourceUI, TypeTileTap, UnitNone, ShapeBool),
+		onChange(SourceNFC, TypeTag, UnitNone, ShapeObject),
 	}
 }
 

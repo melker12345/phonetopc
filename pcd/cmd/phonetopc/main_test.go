@@ -16,7 +16,7 @@ import (
 
 func startMock(t *testing.T) (*mockphone.Server, string) {
 	t.Helper()
-	srv := mockphone.New(mockphone.Options{TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1})
+	srv := mockphone.New(mockphone.Options{TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1, LocationEvery: -1, NFCEvery: -1})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { srv.Close(); hs.Close() })
 	return srv, strings.TrimPrefix(hs.URL, "http://")
@@ -74,7 +74,7 @@ func TestList(t *testing.T) {
 		t.Fatalf("code %d: %s", code, errs)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 8 || !strings.HasPrefix(lines[0], "SOURCE") {
+	if len(lines) != 1+len(protocol.Catalog()) || !strings.HasPrefix(lines[0], "SOURCE") {
 		t.Fatalf("table:\n%s", out)
 	}
 	for _, want := range []string{"gyro", "rad/s", "1-200 (default 50)", "game_rotation_vector", "tile_tap"} {

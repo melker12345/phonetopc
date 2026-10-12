@@ -344,6 +344,53 @@ func TestMotionDataIsPlausible(t *testing.T) {
 	}
 }
 
+// The earth-frame sources agree with each other: the compass is the azimuth
+// of the rotation vector, and the magnetometer has the strength of the
+// earth's field.
+func TestCompassSourcesArePlausible(t *testing.T) {
+	_, url := start(t, quietOptions())
+	c := dial(t, url)
+	ctx := testCtx(t)
+	mag, _ := c.Subscribe(ctx, "magnetometer", client.SubscribeOptions{RateHz: 100})
+	for range 10 {
+		ev := nextEvent(t, mag)
+		v, err := ev.Vec3()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b := math.Sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); b < 45 || b > 56 || ev.Unit != "uT" || ev.Type != "magnetic_field" {
+			t.Errorf("magnetometer %v (|B| = %.1f %s)", v, b, ev.Unit)
+		}
+	}
+	for range 10 {
+		r, err := c.Get(ctx, "rotation_vector")
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, _ := r.Quat()
+		h, err := c.Get(ctx, "compass")
+		if err != nil {
+			t.Fatal(err)
+		}
+		deg, _ := h.Number()
+		if deg < 0 || deg >= 360 || h.Unit != "deg" || h.Type != "heading" {
+			t.Fatalf("compass %v %s", deg, h.Unit)
+		}
+		// Both were sampled a moment apart; the phone turns ~7 deg/s at most.
+		want := math.Mod(math.Atan2(2*(q[0]*q[1]-q[2]*q[3]), 1-2*(q[0]*q[0]+q[2]*q[2]))*180/math.Pi+360, 360)
+		if d := math.Abs(math.Remainder(deg-want, 360)); d > 3 {
+			t.Errorf("compass %.1f, rotation vector says %.1f", deg, want)
+		}
+	}
+	b, err := c.Get(ctx, "barometer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := b.Number(); p < 1000 || p > 1030 || b.Unit != "hPa" {
+		t.Errorf("barometer %v %s", p, b.Unit)
+	}
+}
+
 func TestMinDelta(t *testing.T) {
 	_, url := start(t, quietOptions())
 	c := dial(t, url)
@@ -406,7 +453,7 @@ func TestOnChangeSources(t *testing.T) {
 	c := dial(t, url)
 
 	// State-like on_change sources deliver their current value on subscribe.
-	for _, src := range []string{"light", "proximity", "battery"} {
+	for _, src := range []string{"light", "proximity", "battery", "location"} {
 		sub, err := c.Subscribe(testCtx(t), src, client.SubscribeOptions{})
 		if err != nil {
 			t.Fatal(err)
@@ -426,6 +473,28 @@ func TestOnChangeSources(t *testing.T) {
 	b, _ := c.Get(testCtx(t), "battery")
 	if bat, err := b.Battery(); err != nil || bat.Level < 0 || bat.Level > 100 || b.Unit != "%" {
 		t.Errorf("battery %+v %v", bat, err)
+	}
+	l, _ := c.Get(testCtx(t), "location")
+	if p, err := l.Position(); err != nil || math.Abs(p.Lat-59.3) > 0.1 || math.Abs(p.Lon-18.1) > 0.1 || p.AccuracyM <= 0 || l.Type != "position" {
+		t.Errorf("location %+v %v", p, err)
+	}
+
+	// Like ui, nfc has no value until a scan.
+	nfc, err := c.Subscribe(testCtx(t), "nfc", client.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Get(testCtx(t), "nfc")
+	wantCode(t, err, protocol.CodeNoValue)
+	srv.ScanTag()
+	srv.ScanTag()
+	first, second := nextEvent(t, nfc), nextEvent(t, nfc)
+	tag, err := first.Tag()
+	if err != nil || first.Seq != 0 || tag.ID == "" || len(tag.Tech) == 0 || len(tag.NDEF) != 2 || tag.NDEF[0].URI == nil {
+		t.Errorf("first nfc event %+v: %+v %v", first, tag, err)
+	}
+	if tag, err := second.Tag(); err != nil || second.Seq != 1 || tag.NDEF != nil {
+		t.Errorf("second nfc event %+v: %+v %v", second, tag, err)
 	}
 
 	// ui has no value until a tap.
@@ -458,9 +527,11 @@ func TestBackgroundOnChangeActivity(t *testing.T) {
 	opts.LightEvery = 20 * time.Millisecond
 	opts.ProximityEvery = 20 * time.Millisecond
 	opts.BatteryEvery = 20 * time.Millisecond
+	opts.LocationEvery = 20 * time.Millisecond
+	opts.NFCEvery = 30 * time.Millisecond
 	_, url := start(t, opts)
 	c := dial(t, url)
-	for _, src := range []string{"ui", "light", "proximity", "battery"} {
+	for _, src := range []string{"ui", "light", "proximity", "battery", "location", "nfc"} {
 		sub, err := c.Subscribe(testCtx(t), src, client.SubscribeOptions{})
 		if err != nil {
 			t.Fatal(err)

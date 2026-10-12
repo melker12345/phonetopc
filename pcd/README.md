@@ -145,6 +145,7 @@ bin/phonetopc-mock --state /tmp/mock        # wss://127.0.0.1:8765/v1/ws with th
 | `--mdns` | Advertise `_phonetopc._tcp` (TXT `id`, `proto=1`, `tls=1` or `dev=1`) |
 | `--name` | Device name. Default `phonetopc mock` |
 | `--tap-every` | Interval between synthetic `ui/tile_tap` events. Default `10s`; `0` turns them off |
+| `--nfc-every` | Mean interval between synthetic `nfc/tag` scans. Default `20s`; `0` turns them off |
 | `--unavailable` | Comma-separated list of sources to report as `available: false` |
 | `--device-id` | Device id. Default `mock-0001`; in secure mode it only applies when the state is created (otherwise a random id), and must be 16 to 64 lowercase hex digits (SECURITY.md §2) |
 | `--seed` | Simulation seed |
@@ -201,9 +202,16 @@ What the mock simulates:
   - The gyro reports the matching angular rate.
   - The accelerometer includes gravity (about 9.81 on z when face up) plus some hand shake.
   - `game_rotation_vector` is the matching unit quaternion.
+  - `rotation_vector` is the same orientation relative to magnetic north, `compass` its heading
+    (it turns slowly through all 360°), and `magnetometer` the earth's field (~50 µT, pointing
+    north and down) seen by the phone.
+- The barometer drifts slowly around 1013 hPa, with a little noise.
 - Light changes every few seconds.
 - Proximity toggles about every 15 s.
 - The battery drains by 1% a minute, and starts charging when it reaches 15%.
+- The location is a fix in Stockholm, updated every second with a few meters of jitter.
+- An NFC tag is scanned about every 20 s, alternating between a sticker with a URL and a text
+  record, and a card without NDEF.
 
 The mock implements all of draft 3, including the error codes, ping/pong keepalive,
 backpressure and approvals. It is the reference for the transcripts in [`../spec/conformance`](../spec/conformance).
@@ -217,6 +225,7 @@ bin/phonetopc get battery
 bin/phonetopc tail gyro --rate 100
 bin/phonetopc tail accelerometer --min-delta 0.5 --json | jq -c .value
 bin/phonetopc tail ui --count 1             # wait for one tile tap
+bin/phonetopc tail nfc --count 1            # wait for one NFC tag
 ```
 
 `tail` prints one line per event and keeps going until you press Ctrl-C. It reports `seq` gaps
@@ -241,6 +250,9 @@ for ev := range sub.Events() {
 	fmt.Println(ev.Seq, v)
 }
 ```
+
+Values decode by shape: `Number()`, `Bool()`, `Vec3()`, `Quat()`, and for the object sources
+`Battery()`, `Position()` (`location`) and `Tag()` (`nfc`).
 
 With a known address and credentials: `client.Dial(ctx, client.SecureURL("192.168.1.153:8765"),
 client.WithPin(pin), client.WithToken(token))`. Dev mode: `client.Dial(ctx, client.URL(addr))`.

@@ -102,6 +102,7 @@ func serve(ctx context.Context, args []string) error {
 	var (
 		addr        = fs.String("addr", fmt.Sprintf("127.0.0.1:%d", protocol.DefaultPort), "listen address")
 		tapEvery    = fs.Duration("tap-every", 10*time.Second, "interval of synthetic ui/tile_tap events (0 disables)")
+		nfcEvery    = fs.Duration("nfc-every", 20*time.Second, "mean interval of synthetic nfc/tag scans (0 disables)")
 		deviceID    = fs.String("device-id", "mock-0001", "device.id (dev mode; in secure mode only when the state is created)")
 		name        = fs.String("name", "", "device name (default \"phonetopc mock\")")
 		unavailable = fs.String("unavailable", "", "comma-separated sources to report as unavailable (e.g. light,proximity)")
@@ -135,10 +136,14 @@ func serve(ctx context.Context, args []string) error {
 		Device:   protocol.DeviceInfo{ID: *deviceID, Name: *name},
 		Seed:     *seed,
 		TapEvery: *tapEvery,
+		NFCEvery: *nfcEvery,
 		Logf:     log.Printf,
 	}
 	if *tapEvery == 0 {
 		opts.TapEvery = -1
+	}
+	if *nfcEvery == 0 {
+		opts.NFCEvery = -1
 	}
 	for _, s := range strings.Split(*unavailable, ",") {
 		if s = strings.TrimSpace(s); s == "" {

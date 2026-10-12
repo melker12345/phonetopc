@@ -77,7 +77,7 @@ The file is a JSON array of cases:
 - It supports exactly one protocol version, `phonetopc/1`.
 - All catalog sources of §6 are known. `proximity` is unavailable (`available: false`); all
   others are available.
-- `battery` has a current value. `ui` has none (no tile tap has happened yet).
+- `battery` has a current value. `ui` and `nfc` have none (no tile tap or tag scan has happened yet).
 - No background activity is needed; cases never wait for events.
 
 **Choices the cases make.** Where §2 leaves a detail open, the cases take the reading most
@@ -232,9 +232,9 @@ with the same `id`.
 
 Where the spec says SHOULD or MAY, the transcripts show the mock's choice:
 
-- Subscribing to `light`, `proximity` or `battery` sends the current value right away as `seq` 0
-  (SHOULD), the same way Android reports on-change sensors when a listener registers. `ui` sends
-  nothing until a tap.
+- Subscribing to `light`, `proximity`, `battery` or `location` sends the current value right away
+  as `seq` 0 (SHOULD), the same way Android reports on-change sensors when a listener registers.
+  `ui` sends nothing until a tap, `nfc` nothing until a tag is scanned.
 - `get` on a continuous source samples it on the spot instead of returning `-32006`. `get ui`
   before any tap returns `-32006`.
 - Every error carries `data.name`, including the standard JSON-RPC codes.

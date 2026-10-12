@@ -24,6 +24,8 @@ func quietOptions() mockphone.Options {
 		LightEvery:     -1,
 		ProximityEvery: -1,
 		BatteryEvery:   -1,
+		LocationEvery:  -1,
+		NFCEvery:       -1,
 		Seed:           1,
 	}
 }

@@ -621,6 +621,13 @@
     "expect": {"error": -32006, "name": "no_value", "id": 1}
   },
   {
+    "name": "get_no_value_nfc",
+    "description": "Step 8: nfc is event-like too; before any tag is scanned, get is -32006.",
+    "hello": true,
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "nfc", "type": "tag"}},
+    "expect": {"error": -32006, "name": "no_value", "id": 1}
+  },
+  {
     "name": "unsubscribe_missing_subscription",
     "description": "Step 7: unsubscribe without subscription is -32602.",
     "hello": true,

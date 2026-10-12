@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 )
@@ -169,6 +170,41 @@ type Battery struct {
 	Charging bool    `json:"charging"`
 }
 
+// Position is the value of a location/position reading. The optional fields
+// are nil when the fix doesn't have them.
+type Position struct {
+	Lat        float64  `json:"lat"`
+	Lon        float64  `json:"lon"`
+	AccuracyM  float64  `json:"accuracy_m"`
+	AltitudeM  *float64 `json:"altitude_m,omitempty"`
+	SpeedMPS   *float64 `json:"speed_mps,omitempty"`
+	BearingDeg *float64 `json:"bearing_deg,omitempty"`
+}
+
+// Tag is the value of an nfc/tag reading.
+type Tag struct {
+	// ID is the tag UID in lowercase hex.
+	ID string `json:"id"`
+	// Tech lists the technologies the tag supports, e.g. "NfcA", "Ndef".
+	Tech []string `json:"tech"`
+	// NDEF holds the tag's NDEF records, if it has an NDEF message.
+	NDEF []NDEFRecord `json:"ndef,omitempty"`
+}
+
+// NDEFRecord is one record of a Tag's NDEF message.
+type NDEFRecord struct {
+	TNF  int    `json:"tnf"`
+	Type string `json:"type"`
+	// Text is set for well-known text records, URI for URI records.
+	Text *string `json:"text,omitempty"`
+	URI  *string `json:"uri,omitempty"`
+	// Payload is the record payload in lowercase hex.
+	Payload string `json:"payload"`
+}
+
+// PayloadBytes decodes Payload.
+func (r NDEFRecord) PayloadBytes() ([]byte, error) { return hex.DecodeString(r.Payload) }
+
 // SetValue marshals v into r.Value.
 func (r *Reading) SetValue(v any) error {
 	b, err := json.Marshal(v)
@@ -207,6 +243,18 @@ func (r Reading) Quat() ([4]float64, error) {
 func (r Reading) Battery() (Battery, error) {
 	var b Battery
 	return b, r.decode(&b)
+}
+
+// Position decodes a location/position value.
+func (r Reading) Position() (Position, error) {
+	var p Position
+	return p, r.decode(&p)
+}
+
+// Tag decodes an nfc/tag value.
+func (r Reading) Tag() (Tag, error) {
+	var t Tag
+	return t, r.decode(&t)
 }
 
 func (r Reading) decode(v any) error {

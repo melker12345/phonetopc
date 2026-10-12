@@ -39,7 +39,7 @@ def test_get_list_info(threaded_server: FakeServer, capsys: pytest.CaptureFixtur
     out = capsys.readouterr().out
     assert "gyro" in out and "[unavailable]" in out and "1-1000 Hz" in out
     assert main(["list", "--json", *addr]) == 0
-    assert any(s["source"] == "barometer" for s in json.loads(capsys.readouterr().out))
+    assert any(s["source"] == "thermometer" for s in json.loads(capsys.readouterr().out))
     assert main(["info", *addr]) == 0
     assert "Fake Phone" in capsys.readouterr().out
 

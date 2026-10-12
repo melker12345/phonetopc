@@ -29,8 +29,8 @@ data class SensorSpec(
     val shape: Shape,
     val mode: SensorMode,
     /**
-     * An on_change source whose value is a state (light, proximity, battery), as opposed to an
-     * event-like one (`ui`). New subscriptions to a stateful source start with the current
+     * An on_change source whose value is a state (light, proximity, battery, location), as
+     * opposed to an event-like one (`ui`, `nfc`). New subscriptions to a stateful source start with the current
      * value (spec §4.3), and readings that don't change the state are not sent.
      */
     val stateful: Boolean = mode == SensorMode.ON_CHANGE,
@@ -41,19 +41,31 @@ object SensorCatalog {
     const val ACCELEROMETER = "accelerometer"
     const val GYRO = "gyro"
     const val GAME_ROTATION_VECTOR = "game_rotation_vector"
+    const val ROTATION_VECTOR = "rotation_vector"
+    const val MAGNETOMETER = "magnetometer"
+    const val COMPASS = "compass"
+    const val BAROMETER = "barometer"
     const val PROXIMITY = "proximity"
     const val LIGHT = "light"
     const val BATTERY = "battery"
+    const val LOCATION = "location"
     const val UI = "ui"
+    const val NFC = "nfc"
 
     val all: List<SensorSpec> = listOf(
         SensorSpec(ACCELEROMETER, listOf("motion"), "m/s^2", Shape.VEC3, SensorMode.CONTINUOUS),
         SensorSpec(GYRO, listOf("rotation"), "rad/s", Shape.VEC3, SensorMode.CONTINUOUS),
         SensorSpec(GAME_ROTATION_VECTOR, listOf("orientation"), "", Shape.QUAT, SensorMode.CONTINUOUS),
+        SensorSpec(ROTATION_VECTOR, listOf("orientation"), "", Shape.QUAT, SensorMode.CONTINUOUS),
+        SensorSpec(MAGNETOMETER, listOf("magnetic_field"), "uT", Shape.VEC3, SensorMode.CONTINUOUS),
+        SensorSpec(COMPASS, listOf("heading"), "deg", Shape.NUMBER, SensorMode.CONTINUOUS),
+        SensorSpec(BAROMETER, listOf("pressure"), "hPa", Shape.NUMBER, SensorMode.CONTINUOUS),
         SensorSpec(PROXIMITY, listOf("distance"), "cm", Shape.NUMBER, SensorMode.ON_CHANGE),
         SensorSpec(LIGHT, listOf("illuminance"), "lx", Shape.NUMBER, SensorMode.ON_CHANGE),
         SensorSpec(BATTERY, listOf("state"), "%", Shape.OBJECT, SensorMode.ON_CHANGE),
+        SensorSpec(LOCATION, listOf("position"), "", Shape.OBJECT, SensorMode.ON_CHANGE),
         SensorSpec(UI, listOf("tile_tap"), "", Shape.BOOL, SensorMode.ON_CHANGE, stateful = false),
+        SensorSpec(NFC, listOf("tag"), "", Shape.OBJECT, SensorMode.ON_CHANGE, stateful = false),
     )
 
     private val bySource = all.associateBy { it.source }

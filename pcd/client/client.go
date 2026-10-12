@@ -51,6 +51,9 @@ type (
 	Reading     = protocol.Reading
 	Event       = protocol.Event
 	Battery     = protocol.Battery
+	Position    = protocol.Position
+	Tag         = protocol.Tag
+	NDEFRecord  = protocol.NDEFRecord
 	Error       = protocol.Error
 	ErrorCode   = protocol.ErrorCode
 	Mode        = protocol.Mode

@@ -12,8 +12,20 @@ import (
 // consistent: the gyro is the body-frame angular velocity, the accelerometer
 // is gravity seen in the device frame plus a little hand shake, and the game
 // rotation vector is the orientation quaternion.
+//
+// The game rotation vector's yaw has an arbitrary origin. In the earth frame
+// (x east, y magnetic north, z up) the phone is turned by headingOffset
+// more; the rotation vector, the compass and the magnetometer use that.
 
 const gravity = 9.80665
+
+// headingOffset is the yaw between the game rotation vector's frame and the
+// earth frame, in rad.
+const headingOffset = 0.9
+
+// earthField is the geomagnetic field in the earth frame [east, north, up]
+// in µT, roughly that of northern Europe (pointing north and steeply down).
+var earthField = [3]float64{0, 15.2, -48.5}
 
 type euler struct{ roll, pitch, yaw float64 }
 
@@ -75,6 +87,78 @@ func accelerometer(t float64, rng *rand.Rand) []float64 {
 // [x, y, z, w].
 func gameRotationVector(t float64) []float64 {
 	a, _ := orientation(t)
+	return quaternion(a)
+}
+
+// earthOrientation is orientation(t) relative to the earth frame.
+func earthOrientation(t float64) euler {
+	a, _ := orientation(t)
+	a.yaw += headingOffset
+	return a
+}
+
+// bodyFromWorld returns R^T v for R = Rz(yaw) Ry(pitch) Rx(roll): a world
+// vector seen in the device frame.
+func bodyFromWorld(a euler, v [3]float64) [3]float64 {
+	sy, cy := math.Sincos(a.yaw)
+	sp, cp := math.Sincos(a.pitch)
+	sr, cr := math.Sincos(a.roll)
+	x, y, z := cy*v[0]+sy*v[1], -sy*v[0]+cy*v[1], v[2]
+	x, z = cp*x-sp*z, sp*x+cp*z
+	y, z = cr*y+sr*z, -sr*y+cr*z
+	return [3]float64{x, y, z}
+}
+
+// rotationVector returns the earth-frame orientation as a unit quaternion
+// [x, y, z, w].
+func rotationVector(t float64) []float64 {
+	return quaternion(earthOrientation(t))
+}
+
+// magnetometer returns the geomagnetic field in the device frame in µT.
+func magnetometer(t float64, rng *rand.Rand) []float64 {
+	m := bodyFromWorld(earthOrientation(t), earthField)
+	return []float64{
+		round(m[0]+noise(rng, 0.3), 2),
+		round(m[1]+noise(rng, 0.3), 2),
+		round(m[2]+noise(rng, 0.3), 2),
+	}
+}
+
+// compass returns the heading in degrees, [0, 360), computed from the
+// rotation vector the way the Android app does.
+func compass(t float64, rng *rand.Rand) float64 {
+	return normalizeDegrees(azimuth(rotationVector(t))+noise(rng, 0.2), 1)
+}
+
+// azimuth returns atan2(R[1], R[4]) of the rotation matrix of the unit
+// quaternion q = [x, y, z, w] (SensorManager.getOrientation's azimuth) in
+// degrees, in (-180, 180].
+func azimuth(q []float64) float64 {
+	x, y, z, w := q[0], q[1], q[2], q[3]
+	return math.Atan2(2*(x*y-z*w), 1-2*(x*x+z*z)) * 180 / math.Pi
+}
+
+// normalizeDegrees maps deg to [0, 360) after rounding to n decimals.
+func normalizeDegrees(deg float64, n int) float64 {
+	deg = round(math.Mod(deg, 360), n)
+	if deg < 0 {
+		deg = round(deg+360, n)
+	}
+	if deg >= 360 {
+		deg = 0
+	}
+	return deg
+}
+
+// barometer returns the air pressure in hPa: a slow weather drift around
+// standard pressure plus sensor noise.
+func barometer(t float64, rng *rand.Rand) float64 {
+	return round(1013.25+1.5*math.Sin(2*math.Pi*t/3600)+noise(rng, 0.03), 2)
+}
+
+// quaternion returns a as a unit quaternion [x, y, z, w] with w >= 0.
+func quaternion(a euler) []float64 {
 	sr, cr := math.Sincos(a.roll / 2)
 	sp, cp := math.Sincos(a.pitch / 2)
 	sy, cy := math.Sincos(a.yaw / 2)

@@ -89,19 +89,44 @@ SENSORS: list[dict[str, Any]] = [
     {"source": "game_rotation_vector", "types": ["orientation"], "unit": "", "shape": "quat",
      "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 200, "default_rate_hz": 50,
      "available": True},
+    {"source": "rotation_vector", "types": ["orientation"], "unit": "", "shape": "quat",
+     "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 200, "default_rate_hz": 50,
+     "available": True},
+    {"source": "magnetometer", "types": ["magnetic_field"], "unit": "uT", "shape": "vec3",
+     "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 100, "default_rate_hz": 50,
+     "available": True},
+    {"source": "compass", "types": ["heading"], "unit": "deg", "shape": "number",
+     "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 200, "default_rate_hz": 50,
+     "available": True},
+    {"source": "barometer", "types": ["pressure"], "unit": "hPa", "shape": "number",
+     "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 25, "default_rate_hz": 5,
+     "available": True},
     {"source": "proximity", "types": ["distance"], "unit": "cm", "shape": "number",
      "mode": "on_change", "available": True},
     {"source": "light", "types": ["illuminance"], "unit": "lx", "shape": "number",
      "mode": "on_change", "available": True},
     {"source": "battery", "types": ["state"], "unit": "%", "shape": "object",
      "mode": "on_change", "available": True},
+    {"source": "location", "types": ["position"], "unit": "", "shape": "object",
+     "mode": "on_change", "available": True},
     {"source": "ui", "types": ["tile_tap"], "unit": "", "shape": "bool",
      "mode": "on_change", "available": True},
+    {"source": "nfc", "types": ["tag"], "unit": "", "shape": "object",
+     "mode": "on_change", "available": True},
     # Not in the spec's catalog: clients must tolerate it.
-    {"source": "barometer", "types": ["pressure"], "unit": "hPa", "shape": "number",
+    {"source": "thermometer", "types": ["temperature"], "unit": "C", "shape": "number",
      "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 25, "default_rate_hz": 5,
      "available": True},
 ]
+
+#: A location/position value (PROTOCOL.md 6).
+LOCATION = {"lat": 59.32528, "lon": 18.07109, "accuracy_m": 8.0, "altitude_m": 28.0}
+#: An nfc/tag value (PROTOCOL.md 6).
+TAG = {
+    "id": "04a2246a8e5d80",
+    "tech": ["NfcA", "MifareUltralight", "Ndef"],
+    "ndef": [{"tnf": 1, "type": "T", "text": "hi", "payload": "02656e6869"}],
+}
 # fmt: on
 
 ERRORS = {
@@ -120,10 +145,18 @@ ERRORS = {
 
 
 def sample_value(source: str, n: int) -> Any:
-    if source in ("gyro", "accelerometer"):
+    if source in ("gyro", "accelerometer", "magnetometer"):
         return [n * 0.01, -n * 0.02, 0.5]
-    if source == "game_rotation_vector":
+    if source in ("game_rotation_vector", "rotation_vector"):
         return [0.0, 0.0, 0.0, 1.0]
+    if source == "compass":
+        return float(n % 360)
+    if source == "barometer":
+        return 1013.25 + n * 0.01
+    if source == "location":
+        return LOCATION
+    if source == "nfc":
+        return TAG
     if source == "battery":
         return {"level": 82, "charging": True}
     if source == "ui":
@@ -234,7 +267,10 @@ class FakeServer:
         #: Seconds to wait before answering, per "get" source (overrides delays).
         self.get_delays: dict[str, float] = {}
         #: Values for "get"; missing on_change sources answer no_value.
-        self.values: dict[str, Any] = {"battery": {"level": 82, "charging": True}}
+        self.values: dict[str, Any] = {
+            "battery": {"level": 82, "charging": True},
+            "location": LOCATION,
+        }
         #: Send the first event(s) of a new subscription *before* its response
         #: (off-spec since draft 1, which requires the response first).
         self.events_before_response = 0

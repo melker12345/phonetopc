@@ -91,7 +91,7 @@ async def test_list_sensors(phone: Phone) -> None:
     assert not sensors["proximity"].continuous
     assert sensors["proximity"].min_rate_hz is None
     assert not sensors["game_rotation_vector"].available
-    assert "barometer" in sensors  # unknown sources are tolerated
+    assert "thermometer" in sensors  # unknown sources are tolerated
 
 
 async def test_get(server: FakeServer, phone: Phone) -> None:
@@ -243,6 +243,22 @@ async def test_on_change_initial_value(server: FakeServer, phone: Phone) -> None
     assert light.dropped == 0 and ui.dropped == 0
 
 
+async def test_location_and_nfc_values(server: FakeServer, phone: Phone) -> None:
+    # location is a state like battery; nfc is event-like like ui (PROTOCOL.md 6).
+    async with phone.subscribe("location") as location, phone.subscribe("nfc") as nfc:
+        (fix,) = await take(location, 1)
+        assert fix.seq == 0 and fix.type == "position" and fix.unit == ""
+        assert {"lat", "lon", "accuracy_m"} <= fix.value.keys()
+        with pytest.raises(phonetopc.NoValue):
+            await phone.get("nfc")
+        await server.emit("nfc")
+        (scan,) = await take(nfc, 1)
+        assert scan.seq == 0 and scan.type == "tag"
+        assert scan.value["id"] and scan.value["ndef"][0]["text"] == "hi"
+    heading = await phone.get("compass")
+    assert heading.unit == "deg" and 0 <= heading.value < 360
+
+
 async def test_min_delta_filtering_is_not_a_gap(server: FakeServer, phone: Phone) -> None:
     # Filtered readings don't consume a seq number (PROTOCOL.md section 5).
     server.values["light"] = 5.0
@@ -296,7 +312,7 @@ async def test_overflow_errors_for_on_change(server: FakeServer, phone: Phone) -
 
 async def test_overflow_policy_from_mode(server: FakeServer, phone: Phone) -> None:
     server.auto_stream = False
-    async with phone.subscribe("barometer") as ev:  # not in the spec's catalog
+    async with phone.subscribe("thermometer") as ev:  # not in the spec's catalog
         assert ev.info is not None and ev.info.mode == "continuous"
         assert ev.mode == "continuous" and ev.overflow == "drop_oldest"
     async with phone.subscribe("ui") as ev:
@@ -311,7 +327,7 @@ async def test_overflow_policy_without_mode(server: FakeServer, phone: Phone) ->
     # A draft 0 server sends no mode: infer it from rate_hz (continuous only).
     server.auto_stream = False
     server.omit_mode = True
-    async with phone.subscribe("barometer") as ev:
+    async with phone.subscribe("thermometer") as ev:
         assert ev.info is not None and ev.info.mode is None
         assert ev.mode == "continuous" and ev.overflow == "drop_oldest"
     async with phone.subscribe("ui") as ev:

@@ -172,7 +172,7 @@ func TestValidRequestID(t *testing.T) {
 
 func TestCatalog(t *testing.T) {
 	cat := Catalog()
-	if len(cat) != 7 {
+	if len(cat) != 13 {
 		t.Fatalf("catalog has %d entries", len(cat))
 	}
 	for _, s := range cat {
@@ -195,6 +195,46 @@ func TestCatalog(t *testing.T) {
 	}
 	if _, ok := LookupSensor("nope"); ok {
 		t.Error("lookup of unknown source succeeded")
+	}
+	for _, want := range []SensorInfo{
+		{Source: SourceRotationVector, Types: []string{TypeOrientation}, Unit: UnitNone, Shape: ShapeQuat, Mode: ModeContinuous},
+		{Source: SourceMagnetometer, Types: []string{TypeMagneticField}, Unit: "uT", Shape: ShapeVec3, Mode: ModeContinuous},
+		{Source: SourceCompass, Types: []string{TypeHeading}, Unit: "deg", Shape: ShapeNumber, Mode: ModeContinuous},
+		{Source: SourceBarometer, Types: []string{TypePressure}, Unit: "hPa", Shape: ShapeNumber, Mode: ModeContinuous},
+		{Source: SourceLocation, Types: []string{TypePosition}, Unit: UnitNone, Shape: ShapeObject, Mode: ModeOnChange},
+		{Source: SourceNFC, Types: []string{TypeTag}, Unit: UnitNone, Shape: ShapeObject, Mode: ModeOnChange},
+	} {
+		got, ok := LookupSensor(want.Source)
+		if !ok || !got.HasType(want.Types[0]) || got.Unit != want.Unit || got.Shape != want.Shape || got.Mode != want.Mode {
+			t.Errorf("%s entry: %+v", want.Source, got)
+		}
+	}
+}
+
+func TestPositionAndTagValues(t *testing.T) {
+	r := Reading{Source: SourceLocation, Type: TypePosition, Value: json.RawMessage(`{"lat":59.3,"lon":18.1,"accuracy_m":5,"speed_mps":1.5}`)}
+	p, err := r.Position()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Lat != 59.3 || p.Lon != 18.1 || p.AccuracyM != 5 || p.SpeedMPS == nil || *p.SpeedMPS != 1.5 || p.AltitudeM != nil || p.BearingDeg != nil {
+		t.Errorf("position: %+v", p)
+	}
+	if b, _ := json.Marshal(p); string(b) != `{"lat":59.3,"lon":18.1,"accuracy_m":5,"speed_mps":1.5}` {
+		t.Errorf("position marshals as %s", b)
+	}
+
+	r = Reading{Source: SourceNFC, Type: TypeTag, Value: json.RawMessage(
+		`{"id":"04a2","tech":["NfcA","Ndef"],"ndef":[{"tnf":1,"type":"T","text":"hi","payload":"02656e6869"}]}`)}
+	tag, err := r.Tag()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.ID != "04a2" || len(tag.Tech) != 2 || len(tag.NDEF) != 1 || tag.NDEF[0].TNF != 1 || tag.NDEF[0].Text == nil || *tag.NDEF[0].Text != "hi" || tag.NDEF[0].URI != nil {
+		t.Errorf("tag: %+v", tag)
+	}
+	if b, _ := tag.NDEF[0].PayloadBytes(); string(b) != "\x02enhi" {
+		t.Errorf("payload bytes: %q", b)
 	}
 }
 

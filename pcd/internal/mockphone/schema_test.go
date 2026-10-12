@@ -171,6 +171,11 @@ func TestClientAndMockFramesMatchSchema(t *testing.T) {
 				srv.Tap()
 				nextEvent(t, sub)
 			}
+		case info.Source == protocol.SourceNFC:
+			for range 2 { // with and without NDEF
+				srv.ScanTag()
+				nextEvent(t, sub)
+			}
 		case info.Mode == protocol.ModeOnChange:
 			nextEvent(t, sub) // the current value, sent on subscribe
 		default:
