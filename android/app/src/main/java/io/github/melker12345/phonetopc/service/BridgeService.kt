@@ -31,6 +31,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -155,17 +156,23 @@ class BridgeService : Service() {
                 approvals = approvals,
             )
             val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)
+            // Tracked before it starts: start() blocks and can't be cancelled, so a Stop
+            // meanwhile must find it here; teardown() then stops it once start() is done.
+            hub = newHub
+            server = newServer
             val started = withContext(Dispatchers.IO) {
-                graph.bridge.serverLock.withLock { runCatching { newServer.start() } }
+                graph.bridge.serverLock.withLock {
+                    // Taking a free lock doesn't check for cancellation: a Stop whose stop()
+                    // already ran must not be followed by a start.
+                    ensureActive()
+                    runCatching { newServer.start() }
+                }
             }
             started.exceptionOrNull()?.let { e ->
                 Log.w(TAG, "server start failed", e)
-                newHub.shutdown()
                 fail(getString(R.string.error_port_in_use, settings.port))
                 return@launch
             }
-            hub = newHub
-            server = newServer
             controller.update { it.copy(state = RunState.RUNNING, port = settings.port, secure = secure) }
 
             mdns = MdnsAdvertiser(this@BridgeService, DeviceIdentity.name(this@BridgeService), settings.port, deviceId, secure)
