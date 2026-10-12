@@ -79,6 +79,9 @@ class WebSocketPairingChannel(private val ws: PinnedWebSocket) : PairingChannel 
                 IOException("the PC closed the connection")
             } catch (e: IOException) {
                 e
+            } catch (e: Exception) {
+                // Anything else from a misbehaving PC must fail the pairing, not kill the app.
+                IOException("bad data from the PC", e)
             }
             closedWith.complete(reason)
             pending.values.forEach { it.completeExceptionally(reason) }

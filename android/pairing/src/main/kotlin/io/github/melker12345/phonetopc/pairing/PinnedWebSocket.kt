@@ -68,6 +68,8 @@ class PinnedWebSocket private constructor(
                 127 -> {
                     var v = 0L
                     repeat(8) { v = (v shl 8) or readByte().toLong() }
+                    // RFC 6455 §5.2: the most significant bit must be 0.
+                    if (v < 0) throw IOException("bad frame length")
                     if (v > MAX_MESSAGE) throw IOException("frame too large")
                     v.toInt()
                 }
