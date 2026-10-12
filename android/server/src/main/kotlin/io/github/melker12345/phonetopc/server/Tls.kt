@@ -92,6 +92,7 @@ class TlsFrontend(
 ) {
     private var server: SSLServerSocket? = null
     private val peers = ConcurrentHashMap<Int, Peer>()
+    private val clients = ConcurrentHashMap<Int, SSLSocket>()
     private val open = ConcurrentHashMap.newKeySet<Socket>()
     private val active = AtomicInteger()
     private val threadId = AtomicInteger()
@@ -103,6 +104,22 @@ class TlsFrontend(
 
     /** The real client behind a loopback connection from this frontend, by its loopback source port. */
     fun peerFor(loopbackPort: Int): Peer? = peers[loopbackPort]
+
+    /**
+     * Drops the client behind a loopback connection at once, unsent data and all. For a client
+     * that stopped reading: a normal close would wait for it forever.
+     */
+    fun drop(loopbackPort: Int) {
+        val client = clients[loopbackPort] ?: return
+        // SO_LINGER 0: no waiting for the TLS close_notify or unsent bytes; the TCP connection
+        // is reset. Off the caller's thread, since closing a TLS socket can still block.
+        runCatching {
+            pool.execute {
+                runCatching { client.setSoLinger(true, 0) }
+                runCatching { client.close() }
+            }
+        }
+    }
 
     /** Binds; throws if the port is taken. */
     fun start() {
@@ -174,6 +191,7 @@ class TlsFrontend(
             }
             loopbackPort = b.localPort
             peers[loopbackPort] = Peer(client.inetAddress.hostAddress ?: "?", client.port)
+            clients[loopbackPort] = client
 
             val back = pool.submit { pump(b.getInputStream(), client.getOutputStream()); closeBoth(client, b) }
             pump(client.getInputStream(), b.getOutputStream())
@@ -184,7 +202,10 @@ class TlsFrontend(
         } catch (e: RuntimeException) {
             onError("relay failed", e)
         } finally {
-            if (loopbackPort >= 0) peers.remove(loopbackPort)
+            if (loopbackPort >= 0) {
+                peers.remove(loopbackPort)
+                clients.remove(loopbackPort)
+            }
             closeBoth(client, backend)
             open -= client
             backend?.let { open -= it }

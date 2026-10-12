@@ -52,6 +52,10 @@ class BridgeHub(
     private val deviceInfoProvider: () -> DeviceInfo,
     val continuousQueueCapacity: Int = 512,
     val onChangeQueueCapacity: Int = 1024,
+    /** Unsent responses a session may have before it is closed with 1008. */
+    val responseQueueCapacity: Int = 256,
+    /** Frames a session may send before a successful `hello`; one more closes it with 1008. */
+    val framesBeforeHello: Int = 16,
     /** `null` is dev mode: no authentication, draft-1 behaviour. */
     val security: SecureAccess? = null,
     /**

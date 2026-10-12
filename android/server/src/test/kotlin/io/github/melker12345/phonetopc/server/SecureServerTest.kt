@@ -35,6 +35,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
+import java.net.Socket
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.X509TrustManager
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -170,5 +175,33 @@ class SecureServerTest {
             client.close()
         }
         assertTrue("plaintext ws:// was accepted", !opened)
+    }
+
+    /** A TLS connection that trusts anything, for clients that speak WebSocket by hand ([Flood]). */
+    private fun tlsSocket(port: Int): Socket {
+        val trustAll = object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        }
+        val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trustAll), null) }
+        return (context.socketFactory.createSocket("127.0.0.1", port) as SSLSocket).apply { startHandshake() }
+    }
+
+    @Test fun clientThatOnlySendsIsDroppedBeforeHello() {
+        val port = start()
+        Flood(tlsSocket(port), port, first = null, request = Flood.LIST_SENSORS).use {
+            assertTrue("not dropped", it.awaitDropped(10_000))
+        }
+    }
+
+    @Test fun clientThatOnlySendsIsDroppedAfterHello() {
+        val port = start()
+        val hello = """{"jsonrpc":"2.0","id":1,"method":"hello","params":${hello(token)}}"""
+        Flood(tlsSocket(port), port, first = hello, request = Flood.LIST_SENSORS).use {
+            assertTrue("not dropped", it.awaitDropped(10_000))
+        }
+        // The relay slot is free again.
+        connect(port).use { ws -> assertTrue("result" in ws.call(1, "hello", hello(token))) }
     }
 }

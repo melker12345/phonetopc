@@ -14,14 +14,18 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
 import io.ktor.server.websocket.timeout
 import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.ChannelOverflow
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -63,7 +67,11 @@ class PhonetopcServer(
         }
         var front: TlsFrontend? = null
         val backend = embeddedServer(CIO, port = 0, host = LOOPBACK) {
-            phonetopcModule(hub, pingPeriod, pingTimeout, helloTimeout) { loopbackPort -> front?.peerFor(loopbackPort) }
+            phonetopcModule(
+                hub, pingPeriod, pingTimeout, helloTimeout,
+                peerFor = { loopbackPort -> front?.peerFor(loopbackPort) },
+                drop = { loopbackPort -> front?.drop(loopbackPort) },
+            )
         }.start(wait = false)
         try {
             val backendPort = runBlocking { backend.engine.resolvedConnectors().first().port }
@@ -104,6 +112,8 @@ class PhonetopcServer(
  * @param helloTimeout secure mode: close connections that haven't completed `hello` in time.
  * @param peerFor secure mode: the real client behind a loopback connection from the
  *   [TlsFrontend]; connections it doesn't know are refused.
+ * @param drop secure mode: drops the real client behind a loopback connection, for one that
+ *   doesn't take its close frame.
  */
 fun Application.phonetopcModule(
     hub: BridgeHub,
@@ -111,25 +121,39 @@ fun Application.phonetopcModule(
     pingTimeout: Duration,
     helloTimeout: Duration? = null,
     peerFor: ((loopbackPort: Int) -> Peer?)? = null,
+    drop: ((loopbackPort: Int) -> Unit)? = null,
 ) {
     install(WebSockets) {
         this.pingPeriod = pingPeriod
         this.timeout = pingTimeout
         maxFrameSize = MAX_FRAME_BYTES
         masking = false
+        // Ktor's queues are unbounded by default, so a client that doesn't read would make
+        // frames pile up there. Bounded, the session's own limits apply (see Session).
+        channels {
+            incoming = bounded(FRAME_QUEUE, ChannelOverflow.SUSPEND)
+            outgoing = bounded(FRAME_QUEUE, ChannelOverflow.SUSPEND)
+        }
     }
     routing {
-        webSocket(WS_PATH) { serve(hub, helloTimeout, peerFor) }
+        webSocket(WS_PATH) { serve(hub, helloTimeout, peerFor, drop) }
     }
 }
 
 /** Requests are tiny; anything bigger is a misbehaving client. */
 private const val MAX_FRAME_BYTES = 64L * 1024
 
+/** Frames Ktor buffers each way per connection. */
+private const val FRAME_QUEUE = 16
+
+/** How long a closing client gets to take the close frame and answer it. */
+private val CLOSE_GRACE = 1.seconds
+
 private suspend fun DefaultWebSocketServerSession.serve(
     hub: BridgeHub,
     helloTimeout: Duration?,
     peerFor: ((Int) -> Peer?)?,
+    drop: ((Int) -> Unit)?,
 ) {
     val local = call.request.local
     val peer = if (peerFor == null) {
@@ -152,9 +176,20 @@ private suspend fun DefaultWebSocketServerSession.serve(
             }
             val closer = launch {
                 val request = session.closeRequest.await()
-                close(CloseReason(request.code, request.reason))
+                // A client that doesn't read can't take the close frame, let alone answer it,
+                // and would hold its unsent frames forever: give it a moment, then drop it.
+                // If it does answer, the connection ends and this is cancelled first. Without
+                // the TLS frontend (dev mode) Ktor may keep such a socket open after the
+                // session has ended, but no longer queues anything for it.
+                withTimeoutOrNull(CLOSE_GRACE) {
+                    close(CloseReason(request.code, request.reason))
+                    awaitCancellation()
+                }
+                drop?.invoke(local.remotePort)
+                this@serve.cancel()
             }
-            // SECURITY.md §5: drop connections that don't authenticate promptly.
+            // SECURITY.md §5: drop connections that don't authenticate promptly. The session
+            // ignores everything it receives from then on.
             val helloTimer = helloTimeout?.let { timeout ->
                 launch {
                     delay(timeout)

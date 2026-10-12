@@ -42,10 +42,12 @@ object CloseCodes {
  * Outgoing responses and events share one ordered queue, so a response is never overtaken
  * by an event produced after it (e.g. no event follows an `unsubscribe` response). A new
  * subscription only starts producing events after its `subscribe` response is queued.
- * Responses are never dropped. Events are bounded per spec §5: continuous ones are dropped
- * when [BridgeHub.continuousQueueCapacity] events are pending; if
- * [BridgeHub.onChangeQueueCapacity] on_change events are pending the session asks to be
- * closed with 1008.
+ * Responses are never dropped, but a client that sends requests without reading the answers
+ * is closed with 1008 once [BridgeHub.responseQueueCapacity] are pending, and so is one that
+ * sends more than [BridgeHub.framesBeforeHello] frames without a successful `hello`. Events
+ * are bounded per spec §5: continuous ones are dropped when
+ * [BridgeHub.continuousQueueCapacity] events are pending; if [BridgeHub.onChangeQueueCapacity]
+ * on_change events are pending the session asks to be closed with 1008.
  */
 class Session internal constructor(
     private val hub: BridgeHub,
@@ -57,12 +59,16 @@ class Session internal constructor(
     private class Out(val text: String, val kind: Int, val close: CloseRequest? = null)
 
     private val queue = Channel<Out>(Channel.UNLIMITED)
+    private val pendingResponses = AtomicInteger()
     private val pendingContinuous = AtomicInteger()
     private val pendingOnChange = AtomicInteger()
     private val closeDeferred = CompletableDeferred<CloseRequest>()
     private val subscriptions = ConcurrentHashMap<String, Subscription>()
 
     @Volatile private var closed = false
+
+    /** Frames received before a successful hello. Only touched by [handleText]. */
+    private var framesBeforeHello = 0
 
     @Volatile var helloDone: Boolean = false
         private set
@@ -90,8 +96,8 @@ class Session internal constructor(
     private val approvals: MutableSet<Job> = ConcurrentHashMap.newKeySet()
 
     /**
-     * Set when the session must end (failed auth, revoked): later frames are ignored and the
-     * close is queued behind the responses already queued.
+     * Set when the session must end (failed auth, revoked, a close was requested): later frames
+     * are ignored and nothing more is answered.
      */
     @Volatile private var ending = false
 
@@ -127,6 +133,7 @@ class Session internal constructor(
 
     private fun markSent(out: Out) {
         when (out.kind) {
+            KIND_RESPONSE -> pendingResponses.decrementAndGet()
             KIND_CONTINUOUS -> pendingContinuous.decrementAndGet()
             KIND_ON_CHANGE -> pendingOnChange.decrementAndGet()
         }
@@ -135,8 +142,12 @@ class Session internal constructor(
     /** Handle one inbound text frame; the response (if any) is queued for sending. */
     suspend fun handleText(text: String) {
         if (ending) return
+        if (!helloDone && ++framesBeforeHello > hub.framesBeforeHello) {
+            closeAfterQueued(CloseRequest(CloseCodes.POLICY_VIOLATION, "hello required"))
+            return
+        }
         val reply = respond(text) ?: return
-        reply.text?.let { queue.trySend(Out(it, KIND_RESPONSE)) }
+        reply.text?.let { enqueueResponse(it) }
         reply.closeAfter?.let { closeAfterQueued(it) }
         // Spec §4.3: a new subscription's events (including its initial value) may only be
         // queued once its subscribe response is.
@@ -158,9 +169,23 @@ class Session internal constructor(
         requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "pairing revoked"))
     }
 
-    /** Ask the transport to close the connection. First request wins. */
+    /** Ask the transport to close the connection. First request wins; later frames are ignored. */
     fun requestClose(request: CloseRequest) {
+        ending = true
         closeDeferred.complete(request)
+    }
+
+    /**
+     * Responses are not dropped, so a client that doesn't read them can't be allowed to pile
+     * them up without bound: close it instead.
+     */
+    private fun enqueueResponse(text: String) {
+        if (pendingResponses.incrementAndGet() > hub.responseQueueCapacity) {
+            pendingResponses.decrementAndGet()
+            requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "response queue overflow"))
+            return
+        }
+        queue.trySend(Out(text, KIND_RESPONSE))
     }
 
     /** Called by the transport when the connection is gone. Drops all subscriptions. */
@@ -391,7 +416,7 @@ class Session internal constructor(
             return Handled(ApprovalOutcome.Refused(ApprovalWhy.UNAVAILABLE).toJson())
         }
         val start = service.start(hub.deviceId, pcInfo, approvalKey, parsed) { outcome ->
-            if (!closed && !ending) queue.trySend(Out(Rpc.result(replyId, outcome.toJson()), KIND_RESPONSE))
+            if (!closed && !ending) enqueueResponse(Rpc.result(replyId, outcome.toJson()))
         }
         return when (start) {
             is ApprovalService.Start.Answered -> Handled(start.outcome.toJson())

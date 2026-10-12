@@ -29,6 +29,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 
@@ -139,5 +140,28 @@ class PhonetopcServerTest {
                 assertEquals(1, hub.clients.value.size)
             }
         }
+    }
+
+    private fun awaitNoClients(millis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + millis
+        while (hub.clients.value.isNotEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        return hub.clients.value.isEmpty()
+    }
+
+    @Test fun clientThatOnlySendsIsClosedAfterHello() {
+        // Over the response limit. Without the TLS frontend the socket itself may linger (see
+        // SecureServerTest), but the session must end and stop queueing.
+        Flood(Socket("127.0.0.1", port), port, first = Flood.HELLO, request = Flood.LIST_SENSORS).use {
+            Thread.sleep(200)
+            assertTrue("session still open", awaitNoClients(10_000))
+        }
+    }
+
+    @Test fun clientThatOnlySendsIsDroppedBeforeHello() {
+        // Over the pre-hello frame limit.
+        Flood(Socket("127.0.0.1", port), port, first = null, request = Flood.LIST_SENSORS).use {
+            assertTrue("not dropped", it.awaitDropped(10_000))
+        }
+        assertTrue(awaitNoClients(2_000))
     }
 }

@@ -672,6 +672,56 @@ class SessionTest {
         assertEquals(JsonPrimitive(99), frames.last()["id"])
     }
 
+    @Test fun unreadResponsesOverCapacityClose1008() = runBlocking {
+        val s = helloSession()
+        val request = """{"jsonrpc":"2.0","id":2,"method":"list_sensors"}"""
+        // A client that sends without reading: nothing is drained.
+        repeat(256) { s.handleText(request) }
+        assertFalse(s.closeRequest.isCompleted)
+        s.handleText(request)
+        assertTrue(s.closeRequest.isCompleted)
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+        assertEquals(CloseCodes.POLICY_VIOLATION, s.closeRequest.getCompleted().code)
+        // Nothing more is queued once the close is requested.
+        repeat(10) { s.handleText(request) }
+        assertEquals(256, s.drain().size)
+    }
+
+    @Test fun drainedResponsesDontCountTowardsTheCapacity() {
+        val s = helloSession()
+        repeat(1000) { assertNotNull(s.rpc("list_sensors")["result"]) }
+        assertFalse(s.closeRequest.isCompleted)
+    }
+
+    @Test fun tooManyFramesBeforeHelloClose1008() {
+        val s = hub.openSession("t")
+        repeat(15) { assertEquals(-32003, s.rpc("list_sensors").errorCode()) }
+        // Notifications count too.
+        assertTrue(s.send("""{"jsonrpc":"2.0","method":"list_sensors"}""").isEmpty())
+        assertFalse(s.closeRequest.isCompleted)
+        // The 17th frame isn't answered, not even a hello; the answers before it go out first.
+        assertTrue(s.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1"}}""").isEmpty())
+        assertTrue(s.closeRequest.isCompleted)
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+        assertEquals(CloseCodes.POLICY_VIOLATION, s.closeRequest.getCompleted().code)
+        assertFalse(s.helloDone)
+    }
+
+    @Test fun framesAfterHelloAreNotLimited() {
+        val s = hub.openSession("t")
+        repeat(10) { assertEquals(-32003, s.rpc("list_sensors").errorCode()) }
+        assertNotNull(s.rpc("hello", """{"protocol":"phonetopc/1"}""")["result"])
+        repeat(100) { assertNotNull(s.rpc("list_sensors")["result"]) }
+        assertFalse(s.closeRequest.isCompleted)
+    }
+
+    @Test fun requestedCloseIgnoresLaterFrames() {
+        val s = hub.openSession("t")
+        s.requestClose(CloseRequest(CloseCodes.POLICY_VIOLATION, "hello timeout"))
+        assertTrue(s.send("""{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1"}}""").isEmpty())
+        assertFalse(s.helloDone)
+    }
+
     // ---- lifecycle ----
 
     @Test fun closeDropsSessionAndSubscriptions() {
