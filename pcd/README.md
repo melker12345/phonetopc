@@ -38,7 +38,8 @@ bin/phonetopc pair            # prints a QR code, and advertises itself for "Fin
 
 On the phone, open phonetopc → *Pair a PC*, then either scan the QR code or tap the PC under
 *Find on network* and check that both screens show the same 6-digit code. The PC asks for
-confirmation too. `--yes` skips that for the QR code, for scripts; it turns *Find on network* off
+confirmation too, and takes only an explicit `y`; what you type before the question appears is
+ignored. `--yes` skips that for the QR code, for scripts; it turns *Find on network* off
 (nobody would compare the codes) and refuses a phone whose id is already paired with a different
 key. Without `--yes`, replacing such a phone takes an explicit `y`. `--png FILE` also writes the QR code as an
 image. The listener closes after one pairing, on Ctrl-C, after 5 minutes (`--timeout`), or after

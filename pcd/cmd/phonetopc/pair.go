@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -89,7 +90,7 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		hosts = []string{"127.0.0.1"}
 	}
 
-	prompt := newTermPrompter(c.stdin, c.stdout, *yes)
+	prompt := newTermPrompter(c.stdin, c.stdout, *yes, isTerminal(c.stdin))
 	prompt.replaces = func(phone pairing.PhoneInfo) (store.Device, bool) { return replaces(st, phone) }
 	l, err := pairing.New(pairing.Options{
 		PC:     protocol.PCInfo{ID: pc.ID, Name: pc.Name},
@@ -293,16 +294,35 @@ type termPrompter struct {
 	out io.Writer
 	yes bool // confirm QR pairings without asking; never codes
 	in  io.Reader
+	// fresh drops lines typed while no question is waiting (stdin is a
+	// terminal): a stray Enter pressed while waiting for the phone must not
+	// answer a later question. Piped answers are kept for the next one.
+	fresh bool
 	// replaces, if set, returns the paired device a pairing would replace
 	// with a different key.
 	replaces func(pairing.PhoneInfo) (store.Device, bool)
-	once     sync.Once
-	ch       chan string // closed at EOF
-	mu       sync.Mutex  // one prompt at a time
+
+	once sync.Once
+	ch   chan string // closed at EOF
+	mu   sync.Mutex  // one prompt at a time
 }
 
-func newTermPrompter(in io.Reader, out io.Writer, yes bool) *termPrompter {
-	return &termPrompter{in: in, out: out, yes: yes}
+func newTermPrompter(in io.Reader, out io.Writer, yes, fresh bool) *termPrompter {
+	p := &termPrompter{in: in, out: out, yes: yes, fresh: fresh}
+	if fresh {
+		p.lines() // read (and drop) from now on, not from the first question
+	}
+	return p
+}
+
+// isTerminal reports whether r is a terminal.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func (p *termPrompter) lines() <-chan string {
@@ -315,7 +335,14 @@ func (p *termPrompter) lines() <-chan string {
 			}
 			sc := bufio.NewScanner(p.in)
 			for sc.Scan() {
-				p.ch <- sc.Text()
+				if !p.fresh {
+					p.ch <- sc.Text()
+					continue
+				}
+				select {
+				case p.ch <- sc.Text():
+				default: // nobody asked yet
+				}
 			}
 		}()
 	})
@@ -367,7 +394,8 @@ func (p *termPrompter) replacing(phone pairing.PhoneInfo) bool {
 }
 
 func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo) (bool, error) {
-	question := fmt.Sprintf("\nPair with %q? [Y/n]", phone.Name)
+	// No default: whoever photographed the QR code may be the one asking.
+	question := fmt.Sprintf("\nPair with %q? [y/N]", phone.Name)
 	if p.replacing(phone) {
 		if p.yes {
 			fmt.Fprintln(p.out, "Refused: --yes never replaces a phone paired with a different key; pair without --yes.")
@@ -381,7 +409,7 @@ func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo) (
 		fmt.Fprintf(p.out, "%s y (--yes)\n", question)
 		return true, nil
 	}
-	return p.ask(ctx, question, true)
+	return p.ask(ctx, question, false)
 }
 
 func (p *termPrompter) ConfirmSAS(ctx context.Context, phone pairing.PhoneInfo, code string) (bool, error) {

@@ -257,6 +257,72 @@ func TestPairSASRefusedOnPC(t *testing.T) {
 	}
 }
 
+// waitFor waits until s is in out.
+func waitFor(t *testing.T, out *syncBuffer, s string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if strings.Contains(out.String(), s) {
+			return
+		}
+	}
+	t.Fatalf("%q not printed:\n%s", s, out.String())
+}
+
+// TestPrompterDropsEarlyInput: on a terminal, lines typed before the
+// question (a stray Enter, or a "y" while waiting) don't answer it.
+func TestPrompterDropsEarlyInput(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	var out syncBuffer
+	p := newTermPrompter(pr, &out, false, true)
+	phone := pairing.PhoneInfo{ID: "635f3a01db1859bc", Name: "Pixel"}
+	io.WriteString(pw, "y\n\n")
+	time.Sleep(100 * time.Millisecond) // the reader has dropped them
+
+	type answer struct {
+		ok  bool
+		err error
+	}
+	ask := func() <-chan answer {
+		ch := make(chan answer, 1)
+		go func() {
+			ok, err := p.ConfirmQR(context.Background(), phone)
+			ch <- answer{ok, err}
+		}()
+		return ch
+	}
+	got := ask()
+	waitFor(t, &out, "[y/N]")
+	select {
+	case a := <-got:
+		t.Fatalf("answered by early input: %+v", a)
+	case <-time.After(100 * time.Millisecond):
+	}
+	io.WriteString(pw, "y\n")
+	if a := <-got; !a.ok || a.err != nil {
+		t.Errorf("y: %+v", a)
+	}
+
+	// An empty line typed after the question is no.
+	got = ask()
+	time.Sleep(100 * time.Millisecond)
+	io.WriteString(pw, "\n")
+	if a := <-got; a.ok || a.err != nil {
+		t.Errorf("empty line: %+v", a)
+	}
+}
+
+func TestPrompterQRNeedsExplicitYes(t *testing.T) {
+	var out syncBuffer
+	p := newTermPrompter(strings.NewReader("\n"), &out, false, false)
+	if ok, err := p.ConfirmQR(context.Background(), pairing.PhoneInfo{Name: "Pixel"}); ok || err != nil {
+		t.Errorf("empty answer: %v %v", ok, err)
+	}
+	if !strings.Contains(out.String(), `Pair with "Pixel"? [y/N]`) {
+		t.Errorf("prompt: %s", out.String())
+	}
+}
+
 func TestPairSASLimit(t *testing.T) {
 	env := testEnv(t, nil)
 	ph := startPhone(t)

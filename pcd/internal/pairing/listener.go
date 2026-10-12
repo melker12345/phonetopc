@@ -25,7 +25,7 @@ import (
 // return promptly with ctx.Err() when ctx is done (the phone went away or
 // the listener expired).
 type Prompter interface {
-	// ConfirmQR asks `Pair with "<name>"? [Y/n]` (§4.2).
+	// ConfirmQR asks `Pair with "<name>"? [y/N]` (§4.2).
 	ConfirmQR(ctx context.Context, phone PhoneInfo) (bool, error)
 	// ConfirmSAS asks `Does the phone show 123 456? [y/N]` (§4.3).
 	ConfirmSAS(ctx context.Context, phone PhoneInfo, code string) (bool, error)
