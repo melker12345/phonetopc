@@ -32,7 +32,7 @@ Milestone M1 (walking skeleton) from [plan.md](plan.md): protocol draft 1 in pla
 | [`android/`](android/) | Phone app (Kotlin, Jetpack Compose, Ktor) |
 | [`pcd/`](pcd/) | PC side in Go: `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
 | [`clients/python/`](clients/python/) | Python client library |
-| [`examples/`](examples/) | Python recipes: print gyro, air mouse, lock PC from a phone tile |
+| [`examples/`](examples/) | Python recipes: print gyro, compass, air mouse, lock PC from a phone tile |
 
 ## Quick start
 

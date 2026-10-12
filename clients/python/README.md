@@ -165,7 +165,7 @@ Requests can run concurrently: one reader task matches responses to requests by 
 
 An async context manager and async iterator of `Event`. Leaving the `async with` block sends `unsubscribe`.
 
-For an `on_change` source with state (battery, light, proximity) the server sends the current value first, as `seq` 0, so you learn the state without waiting for a change. `ui` sends nothing until the tile is tapped.
+For an `on_change` source with state (battery, light, proximity, location) the server sends the current value first, as `seq` 0, so you learn the state without waiting for a change. `ui` sends nothing until the tile is tapped, `nfc` nothing until a tag is scanned.
 
 - `id`, `mode` (`"continuous"` or `"on_change"`), `rate_hz` (effective rate reported by the server, continuous sensors only), `info` (`SubscribeResult`)
 - `dropped`: total events lost. That's `dropped_remote` (gaps in `seq`, meaning the server dropped them) plus `dropped_local` (discarded because the local queue was full)
@@ -174,7 +174,7 @@ For an `on_change` source with state (battery, light, proximity) the server send
 The local queue holds `queue_size` events. When it's full:
 
 - **continuous sensors** (gyro, accelerometer, ...): the oldest event is dropped and counted. Fresh data matters more than complete data.
-- **on_change sensors** (battery, ui, ...): the protocol never drops these, so the client doesn't either. Iteration raises `SubscriptionOverflow` after the queued events, and the subscription is closed.
+- **on_change sensors** (battery, ui, location, nfc, ...): the protocol never drops these, so the client doesn't either. Iteration raises `SubscriptionOverflow` after the queued events, and the subscription is closed.
 
 Pass `overflow="drop_oldest"` or `overflow="error"` to choose the policy yourself. With `"auto"` the client goes by the `mode` the server reports in the `subscribe` result. (Draft 0 servers didn't send `mode`; then a reported `rate_hz` means continuous.)
 
@@ -183,6 +183,8 @@ When the connection is lost, pending calls raise `ConnectionClosed` and every su
 ### `Event`
 
 A frozen dataclass: `source`, `type`, `value`, `unit`, `ts` (Unix ms), `ts_mono_ns` (phone monotonic clock, use it for deltas), `device`, `subscription`, `seq`, and `.datetime` (`ts` as an aware UTC `datetime`).
+
+`value` is the decoded JSON of [PROTOCOL.md §6](../../spec/PROTOCOL.md#6-sensor-catalog): a `float` (`compass` in degrees, `barometer` in hPa, `light`, ...), a list for `vec3`/`quat` sources, `True` for `ui`, and a `dict` for `battery`, `location` (`lat`, `lon`, `accuracy_m`, optionally `altitude_m`, `speed_mps`, `bearing_deg`) and `nfc` (`id`, `tech`, optionally `ndef` records).
 
 `DeviceInfo`, `ServerInfo`, `HelloResult`, `PCInfo`, `ApprovalInfo` (`hello.approval`), `SensorInfo` and `SubscribeResult` are frozen dataclasses too. Unknown fields from newer servers are kept in `.raw`.
 
