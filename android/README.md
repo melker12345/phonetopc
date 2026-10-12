@@ -182,8 +182,11 @@ Don't rely on that: many networks block multicast.
 - A hardware sensor listener exists only while at least one subscription needs it. It runs
   at the highest rate any subscription asked for, and each subscription is downsampled to
   its own rate.
-- A partial wake lock is held only while a continuous sensor (accelerometer, gyro, game
-  rotation vector) is streaming. Otherwise the foreground service alone keeps the app alive.
+- A partial wake lock is held only while a continuous sensor (accelerometer, gyro, rotation
+  vectors, magnetometer, compass, barometer) is streaming.
+- `compass` is computed from the rotation vector (`getRotationMatrixFromVector` +
+  `getOrientation`, written out in `SensorValues`), so it exists on exactly the phones that
+  have a rotation vector, and like it is thrown off by magnets and steel nearby. Otherwise the foreground service alone keeps the app alive.
 - The `subscribe` response always comes before that subscription's first event. Subscribing
   to `light`, `proximity` or `battery` starts with the current value as `seq` 0 (for light
   and proximity, as soon as the sensor reports it); `ui` sends nothing until the tile is

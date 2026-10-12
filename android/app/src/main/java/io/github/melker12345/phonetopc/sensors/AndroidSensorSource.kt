@@ -27,7 +27,6 @@ import kotlinx.serialization.json.JsonElement
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /**
  * [SensorSource] backed by SensorManager, the sticky battery broadcast and the Quick
@@ -60,6 +59,11 @@ class AndroidSensorSource(context: Context) : SensorSource {
         add(SensorCatalog.ACCELEROMETER, Sensor.TYPE_ACCELEROMETER)
         add(SensorCatalog.GYRO, Sensor.TYPE_GYROSCOPE)
         add(SensorCatalog.GAME_ROTATION_VECTOR, Sensor.TYPE_GAME_ROTATION_VECTOR)
+        add(SensorCatalog.ROTATION_VECTOR, Sensor.TYPE_ROTATION_VECTOR)
+        add(SensorCatalog.MAGNETOMETER, Sensor.TYPE_MAGNETIC_FIELD)
+        // Derived from the rotation vector, so it exists exactly when that does.
+        add(SensorCatalog.COMPASS, Sensor.TYPE_ROTATION_VECTOR)
+        add(SensorCatalog.BAROMETER, Sensor.TYPE_PRESSURE)
         add(SensorCatalog.PROXIMITY, Sensor.TYPE_PROXIMITY)
         add(SensorCatalog.LIGHT, Sensor.TYPE_LIGHT)
     }
@@ -190,14 +194,13 @@ class AndroidSensorSource(context: Context) : SensorSource {
         val spec = SensorCatalog[source] ?: return null
         val v = event.values
         val value = when (source) {
-            SensorCatalog.ACCELEROMETER, SensorCatalog.GYRO ->
+            SensorCatalog.ACCELEROMETER, SensorCatalog.GYRO, SensorCatalog.MAGNETOMETER ->
                 if (v.size >= 3) Values.vec(v[0], v[1], v[2]) else return null
-            SensorCatalog.GAME_ROTATION_VECTOR -> {
-                if (v.size < 3) return null
-                // values[3] (the scalar part) is optional on older devices; the quaternion is
-                // unit length, so derive it when absent.
-                val w = if (v.size >= 4) v[3] else sqrt(max(0f, 1f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2]))
-                Values.vec(v[0], v[1], v[2], w)
+            SensorCatalog.GAME_ROTATION_VECTOR, SensorCatalog.ROTATION_VECTOR ->
+                Values.vec(*(SensorValues.quaternion(v) ?: return null))
+            SensorCatalog.COMPASS -> {
+                val q = SensorValues.quaternion(v) ?: return null
+                Values.number(SensorValues.azimuthDegrees(q[0], q[1], q[2], q[3]))
             }
             else -> if (v.isNotEmpty()) Values.number(v[0]) else return null
         }
