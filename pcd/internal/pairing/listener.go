@@ -84,8 +84,14 @@ type Options struct {
 	// address, stop the listener with ErrSASLimit: each one is a fresh
 	// 1-in-a-million guess for a man in the middle (default 3, §4.3).
 	MaxSASRuns int
-	// IdleTimeout closes a pairing connection that sends nothing for this
-	// long with 1001 (default 5 minutes, the time §4.1 gives users to answer).
+	// StartTimeout closes a pairing connection with 1001 that hasn't begun
+	// a pairing (pair_qr with the right secret, or pair_sas_begin) this long
+	// after connecting or after a refusal (default 20 seconds, §4.1), so a
+	// stray client can't hold the one pairing slot.
+	StartTimeout time.Duration
+	// IdleTimeout closes a pairing connection whose pairing hasn't advanced
+	// for this long with 1001 (default 5 minutes, the time §4.1 gives users
+	// to answer). Only requests that advance the pairing restart it.
 	IdleTimeout time.Duration
 
 	// Logf, if set, receives progress messages for the user.
@@ -140,6 +146,9 @@ func New(opts Options) (*Listener, error) {
 	}
 	if opts.MaxSASRuns <= 0 {
 		opts.MaxSASRuns = 3
+	}
+	if opts.StartTimeout <= 0 {
+		opts.StartTimeout = 20 * time.Second
 	}
 	if opts.IdleTimeout <= 0 {
 		opts.IdleTimeout = 5 * time.Minute
@@ -347,6 +356,7 @@ type session struct {
 	npc        []byte
 	revealed   bool              // npc was sent: the run counts if it fails
 	asked      bool              // pair_qr reached the prompt: the secret goes if it fails
+	steps      int               // requests that advanced the pairing or reached a user
 	answer     chan promptAnswer // PC user's SAS answer, buffered(1)
 	stopPrompt context.CancelFunc
 }
@@ -390,7 +400,9 @@ func (s *session) run() {
 		}
 	}()
 
-	idle := time.NewTimer(s.l.opts.IdleTimeout)
+	// The timer restarts only when the pairing advances, so junk, wrong
+	// secrets and repeated errors can't hold the one pairing slot (§4.1).
+	idle := time.NewTimer(s.l.opts.StartTimeout)
 	defer idle.Stop()
 	for {
 		select {
@@ -404,8 +416,15 @@ func (s *session) run() {
 			s.conn.Close(websocket.StatusGoingAway, "idle for too long")
 			return
 		case data := <-frames:
-			idle.Reset(s.l.opts.IdleTimeout)
+			steps := s.steps
 			resp, after, closeCode := s.handle(data)
+			if s.steps != steps {
+				if s.state == stStart { // after a refusal: start over
+					idle.Reset(s.l.opts.StartTimeout)
+				} else {
+					idle.Reset(s.l.opts.IdleTimeout)
+				}
+			}
 			if resp != nil && !s.write(resp) {
 				return
 			}
@@ -514,18 +533,20 @@ func (s *session) dispatch(method string, params json.RawMessage) (any, func(), 
 	if s.state != st {
 		return nil, nil, protocol.NewError(protocol.CodeOutOfOrder, "%s is not valid at this step of the pairing", method)
 	}
-	switch method {
-	case MethodQR:
-		return s.pairQR(params)
-	case MethodSASBegin:
-		return s.sasBegin(params)
-	case MethodSASNonce:
-		return s.sasNonce(params)
-	case MethodSASConfirm:
-		return s.sasConfirm(params)
-	default:
-		return s.finish(params)
+	handler := map[string]func(json.RawMessage) (any, func(), error){
+		MethodQR:         s.pairQR,
+		MethodSASBegin:   s.sasBegin,
+		MethodSASNonce:   s.sasNonce,
+		MethodSASConfirm: s.sasConfirm,
+		MethodFinish:     s.finish,
+	}[method]
+	result, after, err := handler(params)
+	// A step counts if it succeeded or a user said no; malformed requests,
+	// wrong secrets and the like don't.
+	if code, _ := protocol.ErrorCodeOf(err); err == nil || code == protocol.CodeRejected || code == protocol.CodeSASMismatch {
+		s.steps++
 	}
+	return result, after, err
 }
 
 func checkProtocol(p string) error {

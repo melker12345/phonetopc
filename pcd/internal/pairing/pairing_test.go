@@ -625,6 +625,52 @@ func TestQRSecretUsedUpOnDisconnect(t *testing.T) {
 	}
 }
 
+// TestStartTimeout: a client that never begins a pairing loses the slot
+// after StartTimeout, however much it sends; one that advances keeps it.
+func TestStartTimeout(t *testing.T) {
+	h := startListener(t, yes(), func(o *Options) { o.StartTimeout = 300 * time.Millisecond })
+	r := dialRaw(t, h)
+	bad := QRParams{Protocol: Protocol, Secret: security.NewSecret(), Phone: testPhone(t)}
+	start := time.Now()
+	var err error
+	for i := 1; err == nil && time.Since(start) < 5*time.Second; i++ {
+		b, _ := json.Marshal(protocol.NewRequest(protocol.IntID(int64(i)), "nope", nil))
+		if i%2 == 0 { // wrong secrets don't count either (and stay under the rate limit)
+			b, _ = json.Marshal(protocol.NewRequest(protocol.IntID(int64(i)), MethodQR, bad))
+		}
+		if err = r.ws.Write(ctx(t), websocket.MessageText, b); err == nil {
+			_, _, err = r.ws.Read(ctx(t))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if websocket.CloseStatus(err) != websocket.StatusGoingAway || time.Since(start) > 2*time.Second {
+		t.Fatalf("want close 1001 after ~300ms, got %v after %v", err, time.Since(start))
+	}
+
+	// Each step restarts the timer with the long IdleTimeout.
+	r = dialRaw(t, h)
+	if m := r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: testPhone(t)}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	time.Sleep(600 * time.Millisecond)
+	if m := r.call(MethodSASNonce, NonceMessage{Nonce: security.B64(security.RandomBytes(32))}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	time.Sleep(600 * time.Millisecond) // the phone's user compares the codes
+	if m := r.call(MethodSASConfirm, map[string]bool{"match": true}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	if m := r.call(MethodFinish, FinishParams{Token: security.NewToken()}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	if _, _, err := r.ws.Read(ctx(t)); websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+		t.Errorf("want close 1000, got %v", err)
+	}
+	if _, err := h.wait(t); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNoSAS(t *testing.T) {
 	h := startListener(t, yes(), func(o *Options) { o.NoSAS = true })
 	ok := func(context.Context, protocol.PCInfo, string) (bool, error) { return true, nil }
