@@ -228,19 +228,36 @@ func TestPairQRWrongPin(t *testing.T) {
 func TestPairQRBadSecretAndRejected(t *testing.T) {
 	reject := true
 	p := &prompter{qr: func(PhoneInfo) bool { return !reject }}
-	h := startListener(t, p, nil)
+	newSecrets := make(chan string, 4)
+	h := startListener(t, p, func(o *Options) { o.NewSecret = func(s string) { newSecrets <- s } })
 	u := h.uri()
 	good := u.Secret
 	u.Secret = security.NewSecret()
 	_, err := PairQR(ctx(t), u, testPhone(t), security.NewToken())
 	wantCode(t, err, protocol.CodeBadSecret)
+	if h.l.Secret() != good {
+		t.Fatal("a wrong secret changed the QR code")
+	}
 
 	u.Secret = good
 	_, err = PairQR(ctx(t), u, testPhone(t), security.NewToken())
 	wantCode(t, err, protocol.CodeRejected)
 
-	// The listener stays open after both failures.
+	// The refusal used up the secret (§4.2): a photo of the QR code no
+	// longer works, the new one does.
 	reject = false
+	_, err = PairQR(ctx(t), u, testPhone(t), security.NewToken())
+	wantCode(t, err, protocol.CodeBadSecret)
+	select {
+	case u.Secret = <-newSecrets:
+	default:
+		t.Fatal("NewSecret not called")
+	}
+	if u.Secret == good || u.Secret != h.l.Secret() {
+		t.Fatalf("new secret %q, listener has %q", u.Secret, h.l.Secret())
+	}
+
+	// The listener stays open after the failures.
 	if _, err := PairQR(ctx(t), u, testPhone(t), security.NewToken()); err != nil {
 		t.Fatal(err)
 	}
@@ -577,6 +594,34 @@ func TestSASRunLimit(t *testing.T) {
 	}
 	if _, err := h.wait(t); !errors.Is(err, ErrSASLimit) {
 		t.Fatalf("Serve: %v", err)
+	}
+}
+
+// TestQRSecretUsedUpOnDisconnect: a phone that goes away while the PC user
+// is asked uses up the secret too; a confirmed pairing doesn't.
+func TestQRSecretUsedUpOnDisconnect(t *testing.T) {
+	h := startListener(t, &prompter{}, nil) // prompts never answer
+	first := h.l.Secret()
+	r := dialRaw(t, h)
+	b, _ := json.Marshal(protocol.NewRequest(protocol.IntID(1), MethodQR, QRParams{Protocol: Protocol, Secret: first, Phone: testPhone(t)}))
+	if err := r.ws.Write(ctx(t), websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // the prompt is up
+	r.ws.CloseNow()
+	h.idle(t, 0)
+	if h.l.Secret() == first {
+		t.Fatal("secret unchanged")
+	}
+
+	h = startListener(t, yes(), nil)
+	first = h.l.Secret()
+	if _, err := PairQR(ctx(t), h.uri(), testPhone(t), security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	h.wait(t)
+	if h.l.Secret() != first {
+		t.Error("a successful pairing changed the secret")
 	}
 }
 

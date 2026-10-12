@@ -90,12 +90,34 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		hosts = []string{"127.0.0.1"}
 	}
 
+	// showQR prints the QR code and the URI for secret, and writes the PNG.
+	showQR := func(secret string) error {
+		uri := pairing.URI{ID: pc.ID, Name: pc.Name, Hosts: hosts, Port: port, Pin: pc.Pin, Secret: secret}.String()
+		if err := writeQR(c.stdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "\n    %s\n\n", uri)
+		if *png != "" {
+			if err := writePNG(*png, uri); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.stdout, "    (also written to %s)\n\n", *png)
+		}
+		return nil
+	}
+
 	prompt := newTermPrompter(c.stdin, c.stdout, *yes, isTerminal(c.stdin))
 	prompt.replaces = func(phone pairing.PhoneInfo) (store.Device, bool) { return replaces(st, phone) }
 	l, err := pairing.New(pairing.Options{
 		PC:     protocol.PCInfo{ID: pc.ID, Name: pc.Name},
 		Cert:   pc.Cert,
 		Prompt: prompt,
+		NewSecret: func(secret string) {
+			fmt.Fprintf(c.stdout, "\nThe QR code changed (the last one was used without pairing, maybe from a photo). Scan this one:\n\n")
+			if err := showQR(secret); err != nil {
+				fmt.Fprintf(c.stderr, "phonetopc: %v\n", err)
+			}
+		},
 		// --yes can't compare codes, so Find on network is off (SECURITY.md §4.3).
 		NoSAS:  *yes,
 		Expiry: *timeout,
@@ -114,20 +136,12 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	uri := pairing.URI{ID: pc.ID, Name: pc.Name, Hosts: hosts, Port: port, Pin: pc.Pin, Secret: l.Secret()}.String()
 
 	fmt.Fprintf(c.stdout, "Pairing %q. On the phone, open phonetopc → Pair a PC, then either:\n\n", pc.Name)
 	fmt.Fprintln(c.stdout, "  • Scan QR code:")
 	fmt.Fprintln(c.stdout)
-	if err := writeQR(c.stdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
+	if err := showQR(l.Secret()); err != nil {
 		return err
-	}
-	fmt.Fprintf(c.stdout, "\n    %s\n\n", uri)
-	if *png != "" {
-		if err := writePNG(*png, uri); err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stdout, "    (also written to %s)\n\n", *png)
 	}
 
 	var adv *discovery.Advertiser

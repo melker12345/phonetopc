@@ -117,12 +117,13 @@ func startPair(t *testing.T, env map[string]string, stdin io.Reader, args ...str
 
 var uriRE = regexp.MustCompile(`phonetopc://pair\?\S+`)
 
-// uri waits for the pairing URI on stdout.
+// uri waits for the pairing URI on stdout and returns the latest one.
 func (p *pairCmd) uri(t *testing.T) pairing.URI {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if m := uriRE.FindString(p.out.String()); m != "" {
+		if all := uriRE.FindAllString(p.out.String(), -1); len(all) > 0 {
+			m := all[len(all)-1]
 			u, err := pairing.ParseURI(m)
 			if err != nil {
 				t.Fatal(err)
@@ -320,6 +321,35 @@ func TestPrompterQRNeedsExplicitYes(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `Pair with "Pixel"? [y/N]`) {
 		t.Errorf("prompt: %s", out.String())
+	}
+}
+
+// TestPairNewQRAfterRefusal: once the user said no, the QR code on screen
+// (maybe photographed) stops working and a new one is shown.
+func TestPairNewQRAfterRefusal(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	png := filepath.Join(t.TempDir(), "qr.png")
+	pc := startPair(t, env, strings.NewReader("n\ny\n"), "--png", png)
+	old := pc.uri(t)
+	_, err := pairing.PairQR(tctx(t), old, ph.info(), security.NewToken())
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeRejected {
+		t.Fatalf("want -32021, got %v", err)
+	}
+	u := pc.uri(t)
+	if u.Secret == old.Secret || !strings.Contains(pc.out.String(), "The QR code changed") {
+		t.Fatalf("no new QR code:\n%s", pc.out.String())
+	}
+	_, err = pairing.PairQR(tctx(t), old, ph.info(), security.NewToken())
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeBadSecret {
+		t.Fatalf("old QR code: want -32020, got %v", err)
+	}
+	if _, err := pairing.PairQR(tctx(t), u, ph.info(), security.NewToken()); err != nil {
+		t.Fatal(err)
+	}
+	pc.wait(t)
+	if pc.code != 0 {
+		t.Fatalf("pair: code %d\n%s", pc.code, pc.errb.String())
 	}
 }
 

@@ -110,6 +110,11 @@ phonetopc://pair?v=1&id=<pc id>&n=<pc name, percent-encoded>&h=<host1>,<host2>&p
 - The PC compares `secret` in constant time. On mismatch: error `-32020` and the listener stays open.
 - On match, the PC asks its user to confirm (`Pair with "Melker's S25 Ultra"? [y/N]`), because a QR on screen
   might be photographed by someone else. Refusal: `-32021`.
+- **One prompt per secret:** once a `pair_qr` with the right secret reached the PC user's prompt and did not end
+  in a pairing (refused, or the phone disconnected or timed out), the PC MUST replace the secret with a fresh one
+  and show a new QR code; the old secret then gets `-32020`. Otherwise someone who photographed the QR code could
+  retry, under the name of the user's phone, until the user gives in. Phones SHOULD tell the user to scan again
+  after `-32020`. The PC SHOULD tell its user when a second phone connects while a pairing is pending.
 - **Prompts** (here and in §4.3) need an explicit yes; an empty answer is no. A PC reading answers from a
   terminal MUST ignore input typed before the question was shown, so a key pressed while waiting can't answer it.
 - On confirmation the PC answers `{"pc": {"id", "name"}}`; the phone's last step is issuing the token, see §4.4.

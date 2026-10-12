@@ -53,7 +53,12 @@ type Paired struct {
 type Options struct {
 	PC     protocol.PCInfo
 	Cert   tls.Certificate // the PC's long-term certificate
-	Secret string          // QR secret; default: a fresh random one
+	Secret string          // first QR secret; default: a fresh random one
+	// NewSecret, if set, receives a fresh QR secret that replaces the
+	// current one after a pair_qr reached the prompt but did not pair
+	// (refused, or the phone went away): someone may have photographed the
+	// QR code and be retrying it (§4.2). The PC shows the new QR code.
+	NewSecret func(secret string)
 
 	// Prompt asks the user. Required.
 	Prompt Prompter
@@ -103,6 +108,7 @@ type Listener struct {
 	expired chan struct{}   // closed on expiry, before ctx is cancelled
 
 	mu       sync.Mutex
+	secret   string // current QR secret
 	busy     bool
 	failures map[string][]time.Time // by remote host
 	sasRuns  int                    // failed SAS runs that revealed Npc
@@ -139,13 +145,37 @@ func New(opts Options) (*Listener, error) {
 		opts.IdleTimeout = 5 * time.Minute
 	}
 	return &Listener{
-		opts: opts, pin: pin, result: make(chan Paired, 1), expired: make(chan struct{}),
+		opts: opts, pin: pin, secret: opts.Secret, result: make(chan Paired, 1), expired: make(chan struct{}),
 		failures: make(map[string][]time.Time), sasLimit: make(chan struct{}),
 	}, nil
 }
 
-// Secret returns the QR secret.
-func (l *Listener) Secret() string { return l.opts.Secret }
+// Secret returns the current QR secret.
+func (l *Listener) Secret() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.secret
+}
+
+// rotateSecret replaces the QR secret, unless the listener is stopping.
+func (l *Listener) rotateSecret() {
+	if l.ctx.Err() != nil {
+		return
+	}
+	select {
+	case <-l.expired:
+		return
+	default:
+	}
+	l.mu.Lock()
+	l.secret = security.NewSecret()
+	secret := l.secret
+	l.mu.Unlock()
+	l.logf("the QR code was used without pairing; it no longer works, and a new one follows")
+	if l.opts.NewSecret != nil {
+		l.opts.NewSecret(secret)
+	}
+}
 
 // Pin returns the PC's pin.
 func (l *Listener) Pin() string { return l.pin }
@@ -276,6 +306,8 @@ func (l *Listener) serveWS(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
 	if l.busy {
 		l.mu.Unlock()
+		// Two phones at once may mean someone else is using the QR code.
+		l.logf("refused a second phone from %s while a pairing is in progress", r.RemoteAddr)
 		conn.Close(websocket.StatusTryAgainLater, "another pairing is in progress")
 		return
 	}
@@ -314,6 +346,7 @@ type session struct {
 	phone      PhoneInfo
 	npc        []byte
 	revealed   bool              // npc was sent: the run counts if it fails
+	asked      bool              // pair_qr reached the prompt: the secret goes if it fails
 	answer     chan promptAnswer // PC user's SAS answer, buffered(1)
 	stopPrompt context.CancelFunc
 }
@@ -408,16 +441,22 @@ func (s *session) write(resp *protocol.Response) bool {
 // reset discards everything learned in this session (§4.3: "both sides
 // discard everything"). It runs after a failed attempt and when the
 // connection ends; a SAS run that revealed Npc and didn't pair counts
-// towards MaxSASRuns either way.
+// towards MaxSASRuns either way, and a QR run that reached the prompt and
+// didn't pair uses up the QR secret.
 func (s *session) reset() {
 	if s.stopPrompt != nil {
 		s.stopPrompt()
 		s.stopPrompt = nil
 	}
-	if s.revealed && s.state != stDone {
-		s.l.sasFailed()
+	if s.state != stDone {
+		if s.revealed {
+			s.l.sasFailed()
+		}
+		if s.asked {
+			s.l.rotateSecret()
+		}
 	}
-	s.state, s.way, s.phone, s.npc, s.revealed, s.answer = stStart, "", PhoneInfo{}, nil, false, nil
+	s.state, s.way, s.phone, s.npc, s.revealed, s.asked, s.answer = stStart, "", PhoneInfo{}, nil, false, false, nil
 }
 
 // handle processes one frame. It returns the response (nil for none), a
@@ -528,15 +567,17 @@ func (s *session) pairQR(params json.RawMessage) (any, func(), error) {
 	if err := checkProtocol(p.Protocol); err != nil {
 		return nil, nil, err
 	}
-	if !security.Equal(p.Secret, s.l.opts.Secret) {
+	if !security.Equal(p.Secret, s.l.Secret()) {
 		s.l.logf("wrong pairing secret from %s", s.remote)
 		return nil, nil, protocol.NewError(protocol.CodeBadSecret, "wrong pairing secret")
 	}
+	s.asked = true
 	ok, err := s.l.opts.Prompt.ConfirmQR(s.ctx, p.Phone)
 	if err != nil {
 		if s.ctx.Err() != nil {
 			return nil, nil, s.waitErr()
 		}
+		s.reset()
 		return nil, nil, err
 	}
 	if !ok {
