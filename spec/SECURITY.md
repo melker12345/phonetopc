@@ -72,6 +72,10 @@ Pairing creates trust between one phone and one PC. It runs **once**. Afterwards
   It SHOULD rate-limit failed attempts to 5 per minute per address; once over the limit, connections are closed
   with 1013, and after an error response that exceeds it, with 1008.
 - After `-32020`, `-32021` or `-32023` the listener stays open for another attempt; all three count as failures.
+  Way B has a stricter limit across all addresses as well (§4.3).
+- **One connection per pairing:** all steps of a pairing, from `pair_qr` or `pair_sas_begin` to `pair_finish`,
+  happen on one connection. When that connection closes, the listener discards the pairing's state; a phone that
+  reconnects starts over. An abandoned code comparison counts as failed (§4.3).
 - **Long answers:** the answers to `pair_qr` and `pair_sas_confirm` wait for the PC user. Phones MUST allow at
   least 5 minutes for them.
 - **Order of checks** for each pairing request: (1)–(4) as in `PROTOCOL.md` §2; (5) unknown method → `-32601`;
@@ -141,6 +145,12 @@ A man in the middle presents a different PC pin to the phone than the PC's real 
   `{"match": true|false}`; the PC asks `Does the phone show 123 456? [y/N]` and answers `{}` once its user said
   yes. If either says no: error `-32023`, and both sides discard everything.
 - If the phone's commitment check fails, it sends `pair_sas_confirm {"match": false}` and then aborts.
+- **Limit on runs:** every run in which the PC reveals `Npc` gives a man in the middle a fresh 1-in-a-million
+  chance, and per-address limits don't stop one (an IPv6 /64 is a lot of addresses). A run **fails** if the PC
+  answered `pair_sas_nonce` and the run did not end in `pair_finish`: a mismatch, a refusal, a timeout or a
+  disconnect all count. After 3 failed runs, from any addresses, the listener MUST NOT reveal a new `Npc`, and
+  SHOULD close and tell its user that someone may be trying to pair in the phone's place. The user can start
+  again; the QR code (Way A) doesn't have this weakness.
 - If both confirm, the phone stores `pc_pin_seen` as the PC's pin and continues with §4.4.
 - The PC's confirmation MUST come from a person comparing the codes. A PC that pairs without asking (e.g.
   `phonetopc pair --yes`) MUST refuse `pair_sas_begin` with `-32021` and SHOULD NOT advertise

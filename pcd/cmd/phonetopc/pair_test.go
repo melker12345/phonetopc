@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -253,6 +254,25 @@ func TestPairSASRefusedOnPC(t *testing.T) {
 	}
 	if devs, _ := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc")).Devices(); len(devs) != 0 {
 		t.Errorf("stored %+v", devs)
+	}
+}
+
+func TestPairSASLimit(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	pc := startPair(t, env, nil) // stdin at EOF: the PC user says no
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(pc.uri(t).Port))
+	for range 3 {
+		_, err := pairing.PairSAS(tctx(t), addr, ph.info(), security.NewToken(),
+			func(context.Context, protocol.PCInfo, string) (bool, error) { return true, nil })
+		if !errors.Is(err, pairing.ErrCodesDiffer) {
+			t.Fatalf("want codes to differ, got %v", err)
+		}
+		time.Sleep(50 * time.Millisecond) // let the listener free its slot
+	}
+	pc.wait(t)
+	if pc.code != 1 || !strings.Contains(pc.errb.String(), "too many code comparisons failed") {
+		t.Errorf("code %d, stderr %s", pc.code, pc.errb.String())
 	}
 }
 

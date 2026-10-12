@@ -525,6 +525,61 @@ func TestPhoneIDFormat(t *testing.T) {
 	}
 }
 
+// idle waits until no session holds the pairing slot and n failed SAS runs
+// have been counted.
+func (h *harness) idle(t *testing.T, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		h.l.mu.Lock()
+		busy, runs := h.l.busy, h.l.sasRuns
+		h.l.mu.Unlock()
+		if !busy && runs == n {
+			return
+		}
+	}
+	t.Fatalf("listener not idle with %d failed SAS runs", n)
+}
+
+// TestSASRunLimit: every SAS run that revealed Npc and didn't pair counts,
+// from any address and however it ended; the third stops the listener.
+func TestSASRunLimit(t *testing.T) {
+	h := startListener(t, yes(), nil)
+	phone := testPhone(t)
+	nonce := NonceMessage{Nonce: security.B64(security.RandomBytes(32))}
+
+	// The phone disconnects after seeing Npc.
+	r := dialRaw(t, h)
+	if m := r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: phone}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	if m := r.call(MethodSASNonce, nonce); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	r.ws.Close(websocket.StatusNormalClosure, "")
+	h.idle(t, 1)
+
+	// A run abandoned before Npc doesn't count.
+	r = dialRaw(t, h)
+	if m := r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: phone}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
+	r.ws.Close(websocket.StatusNormalClosure, "")
+	h.idle(t, 1)
+
+	// Two mismatches; the listener stops after the second.
+	no := func(context.Context, protocol.PCInfo, string) (bool, error) { return false, nil }
+	if _, err := PairSAS(ctx(t), h.addr, phone, security.NewToken(), no); !errors.Is(err, ErrCodesDiffer) {
+		t.Fatalf("second run: %v", err)
+	}
+	h.idle(t, 2)
+	if _, err := PairSAS(ctx(t), h.addr, phone, security.NewToken(), no); !errors.Is(err, ErrCodesDiffer) {
+		t.Fatalf("third run: %v", err)
+	}
+	if _, err := h.wait(t); !errors.Is(err, ErrSASLimit) {
+		t.Fatalf("Serve: %v", err)
+	}
+}
+
 func TestNoSAS(t *testing.T) {
 	h := startListener(t, yes(), func(o *Options) { o.NoSAS = true })
 	ok := func(context.Context, protocol.PCInfo, string) (bool, error) { return true, nil }

@@ -41,7 +41,9 @@ On the phone, open phonetopc → *Pair a PC*, then either scan the QR code or ta
 confirmation too. `--yes` skips that for the QR code, for scripts; it turns *Find on network* off
 (nobody would compare the codes) and refuses a phone whose id is already paired with a different
 key. Without `--yes`, replacing such a phone takes an explicit `y`. `--png FILE` also writes the QR code as an
-image. The listener closes after one pairing, on Ctrl-C, or after 5 minutes (`--timeout`).
+image. The listener closes after one pairing, on Ctrl-C, after 5 minutes (`--timeout`), or after
+3 code comparisons that failed or were abandoned (SECURITY.md §4.3): each one is a fresh guess for
+someone in the middle, so it stops and says so.
 
 The pairing listener uses TCP port **8766** (SECURITY.md §4.1), so a firewall rule only has to be
 added once; if 8766 is busy it says so and uses a random port. `--listen ADDR` picks another

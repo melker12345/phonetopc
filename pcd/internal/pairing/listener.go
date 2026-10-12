@@ -74,6 +74,11 @@ type Options struct {
 	// (§4.1).
 	MaxFailures   int
 	FailureWindow time.Duration
+	// MaxSASRuns code comparisons that revealed the PC's nonce but did not
+	// end in a pairing (mismatch, refusal, timeout, disconnect), from any
+	// address, stop the listener with ErrSASLimit: each one is a fresh
+	// 1-in-a-million guess for a man in the middle (default 3, §4.3).
+	MaxSASRuns int
 	// IdleTimeout closes a pairing connection that sends nothing for this
 	// long with 1001 (default 5 minutes, the time §4.1 gives users to answer).
 	IdleTimeout time.Duration
@@ -84,7 +89,8 @@ type Options struct {
 
 // Errors returned by Serve.
 var (
-	ErrExpired = errors.New("pairing expired: no phone paired within the time limit")
+	ErrExpired  = errors.New("pairing expired: no phone paired within the time limit")
+	ErrSASLimit = errors.New("pairing stopped: too many code comparisons failed")
 )
 
 // Listener is a PC pairing listener. It serves one pairing at a time and
@@ -99,6 +105,8 @@ type Listener struct {
 	mu       sync.Mutex
 	busy     bool
 	failures map[string][]time.Time // by remote host
+	sasRuns  int                    // failed SAS runs that revealed Npc
+	sasLimit chan struct{}          // closed when sasRuns reaches MaxSASRuns
 	result   chan Paired            // buffered(1)
 	wg       sync.WaitGroup
 }
@@ -124,12 +132,15 @@ func New(opts Options) (*Listener, error) {
 	if opts.FailureWindow <= 0 {
 		opts.FailureWindow = time.Minute
 	}
+	if opts.MaxSASRuns <= 0 {
+		opts.MaxSASRuns = 3
+	}
 	if opts.IdleTimeout <= 0 {
 		opts.IdleTimeout = 5 * time.Minute
 	}
 	return &Listener{
 		opts: opts, pin: pin, result: make(chan Paired, 1), expired: make(chan struct{}),
-		failures: make(map[string][]time.Time),
+		failures: make(map[string][]time.Time), sasLimit: make(chan struct{}),
 	}, nil
 }
 
@@ -180,6 +191,8 @@ func (l *Listener) Serve(ctx context.Context, ln net.Listener) (Paired, error) {
 	case <-expiry.C:
 		err = ErrExpired
 		close(l.expired) // sessions answer pending requests with -32024
+	case <-l.sasLimit:
+		err = ErrSASLimit
 	case <-ctx.Done():
 		err = ctx.Err()
 	case err = <-errc:
@@ -214,6 +227,24 @@ func (l *Listener) fail(host string) {
 	l.mu.Lock()
 	l.failures[host] = append(l.failures[host], time.Now())
 	l.mu.Unlock()
+}
+
+// sasFailed counts a SAS run that revealed Npc without pairing, and stops
+// the listener after MaxSASRuns of them (§4.3).
+func (l *Listener) sasFailed() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sasRuns++
+	if l.sasRuns == l.opts.MaxSASRuns {
+		close(l.sasLimit)
+	}
+}
+
+// sasExhausted reports whether no further Npc may be revealed.
+func (l *Listener) sasExhausted() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sasRuns >= l.opts.MaxSASRuns
 }
 
 // remoteHost returns the host part of a remote address.
@@ -282,6 +313,7 @@ type session struct {
 	way        Way
 	phone      PhoneInfo
 	npc        []byte
+	revealed   bool              // npc was sent: the run counts if it fails
 	answer     chan promptAnswer // PC user's SAS answer, buffered(1)
 	stopPrompt context.CancelFunc
 }
@@ -374,13 +406,18 @@ func (s *session) write(resp *protocol.Response) bool {
 }
 
 // reset discards everything learned in this session (§4.3: "both sides
-// discard everything").
+// discard everything"). It runs after a failed attempt and when the
+// connection ends; a SAS run that revealed Npc and didn't pair counts
+// towards MaxSASRuns either way.
 func (s *session) reset() {
 	if s.stopPrompt != nil {
 		s.stopPrompt()
 		s.stopPrompt = nil
 	}
-	s.state, s.way, s.phone, s.npc, s.answer = stStart, "", PhoneInfo{}, nil, nil
+	if s.revealed && s.state != stDone {
+		s.l.sasFailed()
+	}
+	s.state, s.way, s.phone, s.npc, s.revealed, s.answer = stStart, "", PhoneInfo{}, nil, false, nil
 }
 
 // handle processes one frame. It returns the response (nil for none), a
@@ -524,6 +561,9 @@ func (s *session) sasBegin(params json.RawMessage) (any, func(), error) {
 		s.l.logf("refused a code comparison from %s: this PC only accepts the QR code now", s.remote)
 		return nil, nil, protocol.NewError(protocol.CodeRejected, "this PC only accepts pairing by QR code right now")
 	}
+	if s.l.sasExhausted() { // the listener is stopping
+		return nil, nil, protocol.NewError(protocol.CodeExpired, "too many code comparisons failed; pairing stopped")
+	}
 	s.npc = security.RandomBytes(security.NonceSize)
 	s.state, s.way, s.phone = stCommitted, WaySAS, p.Phone
 	return SASBeginResult{PC: s.l.opts.PC, Commitment: security.Commitment(s.npc)}, nil, nil
@@ -539,7 +579,7 @@ func (s *session) sasNonce(params json.RawMessage) (any, func(), error) {
 		return nil, nil, invalid(fmt.Errorf("params.nonce must be base64url of %d bytes", security.NonceSize))
 	}
 	code := security.SASCode(s.l.pin, s.phone.Pin, s.npc, nphone)
-	s.state = stCoded
+	s.state, s.revealed = stCoded, true
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.stopPrompt = cancel
 	answer := make(chan promptAnswer, 1)

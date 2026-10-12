@@ -150,6 +150,9 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	switch {
 	case errors.Is(err, pairing.ErrExpired):
 		return fmt.Errorf("no phone paired within %v; run `phonetopc pair` again", *timeout)
+	case errors.Is(err, pairing.ErrSASLimit):
+		return errors.New("pairing stopped: too many code comparisons failed or were abandoned " +
+			"(someone may be trying to pair in your phone's place); run `phonetopc pair` again, or scan the QR code")
 	case err != nil:
 		return err
 	}
