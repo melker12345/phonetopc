@@ -1,5 +1,5 @@
 {"dir":"c2s","msg":{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocol":"phonetopc/1","client":{"name":"conformance","version":"1"}}}}
-{"dir":"s2c","msg":{"jsonrpc":"2.0","id":1,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get"]}}}
+{"dir":"s2c","msg":{"jsonrpc":"2.0","id":1,"result":{"protocol":"phonetopc/1","server":{"name":"phonetopc-mock","version":"0.1.0"},"device":{"id":"mock-0001","name":"phonetopc mock","manufacturer":"phonetopc","model":"Mock","platform":"android","platform_version":"34"},"capabilities":["events","get","notify","panels"]}}}
 {"dir":"c2s","msg":{"jsonrpc":"2.0","id":2,"method":"no_such_method"}}
 {"dir":"s2c","msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"method \"no_such_method\" not found","data":{"name":"method_not_found"}}}}
 {"dir":"c2s","msg":{"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"source":"nope"}}}

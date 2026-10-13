@@ -43,6 +43,7 @@ const (
 	SourceLocation           = "location"
 	SourceUI                 = "ui"
 	SourceNFC                = "nfc"
+	// SourceNotification and SourcePanel (PANELS.md §2) are in panels.go.
 )
 
 // Event types in the sensor catalog.
@@ -84,7 +85,8 @@ const (
 )
 
 // Catalog returns the sensor catalog (spec §6), all marked
-// available. The returned slice is a fresh copy and may be modified.
+// available. It includes the event sources notification and panel of
+// PANELS.md §2. The returned slice is a fresh copy and may be modified.
 func Catalog() []SensorInfo {
 	cont := func(source, typ, unit string, shape Shape) SensorInfo {
 		return SensorInfo{
@@ -113,6 +115,14 @@ func Catalog() []SensorInfo {
 		onChange(SourceLocation, TypePosition, UnitNone, ShapeObject),
 		onChange(SourceUI, TypeTileTap, UnitNone, ShapeBool),
 		onChange(SourceNFC, TypeTag, UnitNone, ShapeObject),
+		{
+			Source: SourceNotification, Types: []string{TypeAction, TypeTap, TypeDismiss},
+			Unit: UnitNone, Shape: ShapeObject, Mode: ModeOnChange, Available: true,
+		},
+		{
+			Source: SourcePanel, Types: []string{TypeState, TypePress, TypeChange, TypeSubmit, TypeStroke},
+			Unit: UnitNone, Shape: ShapeObject, Mode: ModeOnChange, Available: true,
+		},
 	}
 }
 

@@ -50,6 +50,9 @@ var loadSchemasOnce = sync.OnceValues(func() (*schemas, error) {
 	for _, method := range []string{
 		protocol.MethodHello, protocol.MethodListSensors, protocol.MethodSubscribe,
 		protocol.MethodUnsubscribe, protocol.MethodGet, protocol.MethodRequestApproval,
+		protocol.MethodNotify, protocol.MethodNotifyCancel, protocol.MethodPanelShow,
+		protocol.MethodPanelAttach, protocol.MethodPanelUpdate, protocol.MethodPanelClose,
+		protocol.MethodPanelList, protocol.MethodCanvasClear,
 	} {
 		if s.results[method], err = c.Compile(id + "#/$defs/resultByMethod/properties/" + method); err != nil {
 			return nil, fmt.Errorf("result schema for %s: %w", method, err)
@@ -158,8 +161,11 @@ func TestClientAndMockFramesMatchSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, info := range protocol.Catalog() {
-		if info.Source == protocol.SourceProximity {
+		switch info.Source {
+		case protocol.SourceProximity:
 			continue
+		case protocol.SourcePanel, protocol.SourceNotification:
+			continue // driven by exercisePanels below
 		}
 		sub, err := c.Subscribe(ctx, info.Source, client.SubscribeOptions{Type: info.Types[0], RateHz: 200, MinDelta: 0.001})
 		if err != nil {
@@ -190,6 +196,7 @@ func TestClientAndMockFramesMatchSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	exercisePanels(t, c, srv)
 	// Schema-valid requests that produce errors.
 	_, _ = c.Subscribe(ctx, "nope", client.SubscribeOptions{})
 	_, _ = c.Subscribe(ctx, "proximity", client.SubscribeOptions{})
@@ -222,6 +229,99 @@ func TestClientAndMockFramesMatchSchema(t *testing.T) {
 	t.Logf("validated %d frames", v.checked)
 	if v.checked < 40 {
 		t.Errorf("only %d frames validated", v.checked)
+	}
+}
+
+// exercisePanels calls every method of PANELS.md, with results and errors,
+// and makes the user produce every panel and notification event type.
+func exercisePanels(t *testing.T, c *client.Client, srv *mockphone.Server) {
+	t.Helper()
+	ctx := testCtx(t)
+	call := func(method string, params any) {
+		t.Helper()
+		if err := c.Call(ctx, method, params, nil); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+	}
+	panels, err := c.Subscribe(ctx, protocol.SourcePanel, client.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, err := c.Subscribe(ctx, protocol.SourceNotification, client.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := srv.User("")
+
+	call(protocol.MethodNotify, protocol.NotifyParams{Title: "Build done", Body: "All green.\nShip it?", ID: "build",
+		Actions: []protocol.NotifyAction{{ID: "ship", Label: "Ship"}}, Priority: protocol.PriorityHigh})
+	call(protocol.MethodNotify, protocol.NotifyParams{Title: "Plain"})
+	call(protocol.MethodNotify, protocol.NotifyParams{Title: "Swipe me", ID: "swipe"})
+	for _, f := range []func() error{
+		func() error { return user.Act("build", "ship") },
+		func() error { return user.TapNotification("n-1") },
+		func() error { return user.Dismiss("swipe") },
+	} {
+		if err := f(); err != nil {
+			t.Fatal(err)
+		}
+		nextEvent(t, notes)
+	}
+	call(protocol.MethodNotifyCancel, protocol.NotifyCancelParams{ID: "gone"})
+
+	layout := json.RawMessage(`{"type":"column","children":[
+		{"type":"text","id":"msg","text":"Hi","size":"title","tone":"accent"},
+		{"type":"grid","cols":2,"children":[{"type":"button","id":"b","label":"Go"},{"type":"toggle","id":"t","label":"On"}]},
+		{"type":"slider","id":"s","min":0,"max":10,"step":1},
+		{"type":"progress","value":null},
+		{"type":"text_input","id":"in","label":"Say"},
+		{"type":"canvas","id":"c","weight":2}]}`)
+	call(protocol.MethodPanelShow, map[string]any{"panel": "p", "title": "Everything", "layout": layout, "keep_awake": true})
+	call(protocol.MethodPanelUpdate, protocol.PanelUpdateParams{Panel: "p", Updates: []protocol.WidgetUpdate{{Widget: "msg", Set: map[string]any{"text": "Bye"}}}})
+	call(protocol.MethodPanelList, nil)
+	for _, f := range []func() error{
+		func() error { return user.Look("p") },
+		func() error { return user.Press("p", "b") },
+		func() error { _, err := user.Toggle("p", "t"); return err },
+		func() error { _, err := user.Slide("p", "s", 3.4, true); return err },
+		func() error { return user.Submit("p", "in", "hello") },
+	} {
+		if err := f(); err != nil {
+			t.Fatal(err)
+		}
+		nextEvent(t, panels)
+	}
+	stroke := mockphone.Stroke{Points: []protocol.Point{{0.1, 0.1, 0.5, 0}, {0.2, 0.2, 0.5, 16}, {0.3, 0.2, 0.6, 32}}, Chunk: 2}
+	if err := user.Draw("p", "c", stroke); err != nil {
+		t.Fatal(err)
+	}
+	nextEvent(t, panels) // start
+	nextEvent(t, panels) // end
+	call(protocol.MethodPanelAttach, protocol.PanelAttachParams{Panel: "p"})
+	nextEvent(t, panels) // replayed start
+	nextEvent(t, panels) // replayed end
+	call(protocol.MethodCanvasClear, protocol.CanvasClearParams{Panel: "p", Widget: "c"})
+	user.LookAway()
+	nextEvent(t, panels) // hidden
+	call(protocol.MethodPanelClose, protocol.PanelRef{Panel: "p"})
+	call(protocol.MethodPanelShow, map[string]any{"panel": "q", "title": "Bye", "layout": json.RawMessage(`{"type":"text","text":""}`)})
+	if err := user.Close("q"); err != nil {
+		t.Fatal(err)
+	}
+	nextEvent(t, panels) // closed
+
+	// Schema-valid requests that produce errors.
+	_ = c.Call(ctx, protocol.MethodPanelAttach, protocol.PanelAttachParams{Panel: "q"}, nil)
+	srv.AllowPanels(false)
+	_ = c.Call(ctx, protocol.MethodPanelList, nil, nil)
+	srv.AllowPanels(true)
+	for _, ref := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"} {
+		_ = c.Call(ctx, protocol.MethodPanelShow, map[string]any{"panel": ref, "title": ref, "layout": json.RawMessage(`{"type":"text","text":""}`)}, nil)
+	}
+	for _, s := range []*client.Subscription{panels, notes} {
+		if err := s.Unsubscribe(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,7 @@ func TestHelloAndListSensors(t *testing.T) {
 
 	h := c.Server()
 	if h.Protocol != protocol.Version || h.Server.Name != mockphone.ServerName || h.Device.ID != "mock-0001" ||
-		h.Device.Platform == "" || len(h.Capabilities) != 2 {
+		h.Device.Platform == "" || !slices.Equal(h.Capabilities, []string{"events", "get", "notify", "panels"}) {
 		t.Errorf("hello result %+v", h)
 	}
 

@@ -1,7 +1,8 @@
 // Package mockphone implements a mock phonetopc phone server: the full
 // protocol (spec/PROTOCOL.md) over WebSocket, in dev mode or in secure mode
 // with tokens (spec/SECURITY.md §5), backed by synthetic but plausible
-// sensor data. It is used by the phonetopc-mock command and by
+// sensor data, with notifications and panels (spec/PANELS.md) and a
+// stand-in for the phone's user. It is used by the phonetopc-mock command and by
 // tests, so that clients can be developed without a phone.
 package mockphone
 
@@ -101,6 +102,21 @@ type Options struct {
 	// test hook for clients, which must report an error, not approval.
 	TamperApprovals bool
 
+	// NoNotify and NoPanels play a user who hasn't allowed notifications or
+	// panels (PANELS.md §1): the methods fail with not_allowed. A phone
+	// has both off by default; the mock, a development tool, has them on.
+	// Server.AllowNotify and Server.AllowPanels change them later.
+	NoNotify, NoPanels bool
+	// PanelExpiry is how long a detached panel is kept (PANELS.md §4.1).
+	// Default 10 minutes.
+	PanelExpiry time.Duration
+	// NotifyPerMinute limits notify per PC (PANELS.md §3.1). Default 60;
+	// negative disables the limit.
+	NotifyPerMinute int
+	// CanvasPoints is how many stroke points a canvas keeps before it is
+	// full (PANELS.md §7.3). Default 100000.
+	CanvasPoints int
+
 	// MaxAuthFailures failed hellos per minute from one address make the
 	// server close further connections from it with 1013 (SECURITY.md §5),
 	// even with a valid token, for the rest of
@@ -135,8 +151,15 @@ func (o *Options) setDefaults() {
 	def(&o.PingInterval, 15*time.Second)
 	def(&o.PingTimeout, 30*time.Second)
 	def(&o.HelloTimeout, 10*time.Second)
+	def(&o.PanelExpiry, protocol.DetachedPanelTimeout*time.Second)
 	if o.MaxAuthFailures == 0 {
 		o.MaxAuthFailures = 5
+	}
+	if o.NotifyPerMinute == 0 {
+		o.NotifyPerMinute = 60
+	}
+	if o.CanvasPoints <= 0 {
+		o.CanvasPoints = protocol.MinCanvasPoints
 	}
 	if o.QueueSize <= 0 {
 		o.QueueSize = 1024
@@ -149,9 +172,10 @@ func (o *Options) setDefaults() {
 // Server is a mock phone. Create it with New, serve Handler, and Close it
 // when done.
 type Server struct {
-	opts  Options
-	start time.Time // monotonic origin for ts_mono_ns
-	world *world
+	opts   Options
+	start  time.Time // monotonic origin for ts_mono_ns
+	world  *world
+	panels *panelHub
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -179,6 +203,7 @@ func New(opts Options) *Server {
 		authFailures: make(map[string][]time.Time),
 	}
 	s.world = newWorld(s)
+	s.panels = newPanelHub(s)
 	s.wg.Go(func() { s.world.run(ctx, s.newRand()) })
 	return s
 }
@@ -311,11 +336,18 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
-// sensors returns the catalog with availability applied.
+// sensors returns the catalog with availability applied. notification and
+// panel are available while the user allows them (PANELS.md §1).
 func (s *Server) sensors() []protocol.SensorInfo {
+	s.panels.mu.Lock()
+	notify, panels := s.panels.allowNotify, s.panels.allowPanels
+	s.panels.mu.Unlock()
 	cat := protocol.Catalog()
 	for i := range cat {
-		if slices.Contains(s.opts.Unavailable, cat[i].Source) {
+		switch src := cat[i].Source; {
+		case slices.Contains(s.opts.Unavailable, src),
+			src == protocol.SourceNotification && !notify,
+			src == protocol.SourcePanel && !panels:
 			cat[i].Available = false
 		}
 	}
@@ -336,7 +368,7 @@ func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInf
 		Protocol:     protocol.Version,
 		Server:       protocol.ServerInfo{Name: ServerName, Version: Version},
 		Device:       s.opts.Device,
-		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet},
+		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet, protocol.CapabilityNotify, protocol.CapabilityPanels},
 		PC:           pc,
 		Approval:     approval,
 	}

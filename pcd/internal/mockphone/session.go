@@ -133,6 +133,7 @@ func (s *session) run() {
 	err := s.readLoop()
 	s.cancel()
 	s.stopAll()
+	s.srv.panels.sessionClosed(s)
 	wg.Wait()
 	s.mu.Lock()
 	closing := s.closing
@@ -390,6 +391,22 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		if rpcErr == errAsyncResponse {
 			return nil, nil // answered later
 		}
+	case protocol.MethodNotify:
+		result, rpcErr = s.notify(params)
+	case protocol.MethodNotifyCancel:
+		result, rpcErr = s.notifyCancel(params)
+	case protocol.MethodPanelShow:
+		result, after, rpcErr = s.panelShow(params)
+	case protocol.MethodPanelAttach:
+		result, after, rpcErr = s.panelAttach(params)
+	case protocol.MethodPanelUpdate:
+		result, rpcErr = s.panelUpdate(params)
+	case protocol.MethodPanelClose:
+		result, rpcErr = s.panelClose(params)
+	case protocol.MethodPanelList:
+		result, rpcErr = s.panelList(params)
+	case protocol.MethodCanvasClear:
+		result, rpcErr = s.canvasClear(params)
 	default:
 		rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found", method)
 	}
@@ -601,15 +618,23 @@ type subscription struct {
 	rate     float64 // effective rate; 0 for on_change
 	minDelta float64
 
-	mu     sync.Mutex
-	closed bool
-	seq    uint64
-	last   json.RawMessage // value of the last event actually queued
-	stopFn func()
+	mu      sync.Mutex
+	started bool // set by start: events before the subscribe response are not sent
+	closed  bool
+	seq     uint64
+	last    json.RawMessage // value of the last event actually queued
+	stopFn  func()
 }
 
 // start begins producing events.
 func (sub *subscription) start() {
+	sub.mu.Lock()
+	sub.started = true
+	sub.mu.Unlock()
+	switch sub.info.Source {
+	case protocol.SourcePanel, protocol.SourceNotification:
+		return // delivered by the panel hub (session.deliver), not the world
+	}
 	if sub.info.Mode == protocol.ModeContinuous {
 		stop := make(chan struct{})
 		sub.setStop(func() { close(stop) })
@@ -659,7 +684,7 @@ func (sub *subscription) emit(r protocol.Reading) {
 	}
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	if sub.closed {
+	if sub.closed || !sub.started {
 		return
 	}
 	if sub.minDelta > 0 && sub.last != nil {

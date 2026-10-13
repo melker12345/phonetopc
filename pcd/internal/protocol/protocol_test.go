@@ -172,7 +172,7 @@ func TestValidRequestID(t *testing.T) {
 
 func TestCatalog(t *testing.T) {
 	cat := Catalog()
-	if len(cat) != 13 {
+	if len(cat) != 15 {
 		t.Fatalf("catalog has %d entries", len(cat))
 	}
 	for _, s := range cat {
