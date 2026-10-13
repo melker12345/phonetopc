@@ -34,6 +34,12 @@ data class SensorSpec(
      * value (spec §4.3), and readings that don't change the state are not sent.
      */
     val stateful: Boolean = mode == SensorMode.ON_CHANGE,
+    /**
+     * Not hardware: events that belong to one PC (`notification`, `panel`, PANELS.md §2). The
+     * hub never starts the platform source for them, and their availability is the user's
+     * permission for the asking PC.
+     */
+    val pcScoped: Boolean = false,
 )
 
 /** The sensor catalog, spec §6. */
@@ -51,6 +57,8 @@ object SensorCatalog {
     const val LOCATION = "location"
     const val UI = "ui"
     const val NFC = "nfc"
+    const val NOTIFICATION = "notification"
+    const val PANEL = "panel"
 
     val all: List<SensorSpec> = listOf(
         SensorSpec(ACCELEROMETER, listOf("motion"), "m/s^2", Shape.VEC3, SensorMode.CONTINUOUS),
@@ -66,6 +74,8 @@ object SensorCatalog {
         SensorSpec(LOCATION, listOf("position"), "", Shape.OBJECT, SensorMode.ON_CHANGE),
         SensorSpec(UI, listOf("tile_tap"), "", Shape.BOOL, SensorMode.ON_CHANGE, stateful = false),
         SensorSpec(NFC, listOf("tag"), "", Shape.OBJECT, SensorMode.ON_CHANGE, stateful = false),
+        SensorSpec(NOTIFICATION, listOf("action", "tap", "dismiss"), "", Shape.OBJECT, SensorMode.ON_CHANGE, stateful = false, pcScoped = true),
+        SensorSpec(PANEL, listOf("state", "press", "change", "submit", "stroke"), "", Shape.OBJECT, SensorMode.ON_CHANGE, stateful = false, pcScoped = true),
     )
 
     private val bySource = all.associateBy { it.source }

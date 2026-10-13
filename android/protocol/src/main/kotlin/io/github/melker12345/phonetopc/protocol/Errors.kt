@@ -18,6 +18,12 @@ enum class RpcError(val code: Int, val errorName: String, val defaultMessage: St
     UNKNOWN_SUBSCRIPTION(-32005, "unknown_subscription", "Unknown subscription"),
     NO_VALUE(-32006, "no_value", "No value yet"),
     UNAUTHORIZED(-32010, "unauthorized", "Unauthorized"),
+
+    // PANELS.md §9
+    NOT_ALLOWED(-32030, "not_allowed", "Not allowed for this PC"),
+    UNKNOWN_PANEL(-32031, "unknown_panel", "Unknown panel"),
+    TOO_MANY_PANELS(-32032, "too_many_panels", "Too many panels"),
+    RATE_LIMITED(-32033, "rate_limited", "Rate limited"),
 }
 
 class RpcException(

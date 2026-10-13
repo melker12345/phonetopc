@@ -1,6 +1,11 @@
 package io.github.melker12345.phonetopc.protocol
 
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
+import io.github.melker12345.phonetopc.protocol.panels.Feature
+import io.github.melker12345.phonetopc.protocol.panels.NotificationService
+import io.github.melker12345.phonetopc.protocol.panels.OutputPermissions
+import io.github.melker12345.phonetopc.protocol.panels.PanelService
+import io.github.melker12345.phonetopc.protocol.panels.PcRef
 import io.github.melker12345.phonetopc.protocol.security.HelloRateLimiter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,6 +68,12 @@ class BridgeHub(
      * approvals, and `request_approval` answers `unavailable`.
      */
     val approvals: ApprovalService? = null,
+    /** Notifications (PANELS.md §3); `null`: no capability `notify`, the methods don't exist. */
+    val notifications: NotificationService? = null,
+    /** Panels (PANELS.md §4–§7); `null`: no capability `panels`, the methods don't exist. */
+    val panels: PanelService? = null,
+    /** Whether the user allows a PC notifications and panels (PANELS.md §1); off by default. */
+    val outputPermissions: OutputPermissions = OutputPermissions { _, _ -> false },
 ) : ReadingSink {
     private val lock = Any()
     private val sessions = LinkedHashMap<Long, Session>()
@@ -90,6 +101,12 @@ class BridgeHub(
 
     init {
         source.setSink(this)
+        notifications?.bind { pc, reading -> sessionsOf(pc).forEach { it.deliverDirect(reading) } }
+    }
+
+    /** Sessions that authenticated as [pc] (or, for the dev-mode PC, every session). */
+    internal fun sessionsOf(pc: PcRef): List<Session> = synchronized(lock) {
+        sessions.values.filter { it.helloDone && PcRef.of(it.pc).key == pc.key }
     }
 
     fun deviceInfo(): DeviceInfo = deviceInfoProvider()
@@ -130,15 +147,27 @@ class BridgeHub(
         return victims.size
     }
 
-    /** Every catalog source, with availability and rates from the platform. */
-    fun describe(): List<SensorInfo> {
+    /**
+     * Every catalog source, with availability and rates from the platform. The PC-scoped
+     * sources are available to [pc] only while the feature exists and the user allows it.
+     */
+    fun describe(pc: PcRef? = null): List<SensorInfo> {
         val platform = source.describe().associateBy { it.source }
-        return SensorCatalog.all.map { spec -> platform[spec.source] ?: SensorInfo.of(spec, available = false) }
+        return SensorCatalog.all.map { spec ->
+            if (spec.pcScoped) pcScopedInfo(spec, pc) else platform[spec.source] ?: SensorInfo.of(spec, available = false)
+        }
     }
 
-    fun info(sourceName: String): SensorInfo {
+    fun info(sourceName: String, pc: PcRef? = null): SensorInfo {
         val spec = requireNotNull(SensorCatalog[sourceName]) { "not in catalog: $sourceName" }
+        if (spec.pcScoped) return pcScopedInfo(spec, pc)
         return source.describe().firstOrNull { it.source == sourceName } ?: SensorInfo.of(spec, available = false)
+    }
+
+    private fun pcScopedInfo(spec: SensorSpec, pc: PcRef?): SensorInfo {
+        val feature = if (spec.source == SensorCatalog.PANEL) Feature.PANELS else Feature.NOTIFY
+        val exists = if (feature == Feature.PANELS) panels != null else notifications != null
+        return SensorInfo.of(spec, available = exists && pc != null && outputPermissions.allowed(pc, feature))
     }
 
     suspend fun read(sourceName: String): Reading? = source.read(sourceName)
@@ -214,6 +243,7 @@ class BridgeHub(
             sessions.remove(session.sessionId)
             publishClientsLocked()
         }
+        panels?.ownerClosed(session)
     }
 
     internal fun sessionChanged() {
@@ -228,6 +258,7 @@ class BridgeHub(
             for ((src, subs) in subsBySource) {
                 if (subs.isEmpty() || src !in available) continue
                 val spec = SensorCatalog[src] ?: continue
+                if (spec.pcScoped) continue // routed per PC by the services, not by the platform
                 wanted[src] = if (spec.mode == SensorMode.CONTINUOUS) {
                     Demand(subs.maxOf { it.rateHz ?: 0.0 })
                 } else {

@@ -5,6 +5,13 @@ import io.github.melker12345.phonetopc.protocol.approval.ApprovalOutcome
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalParams
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalWhy
+import io.github.melker12345.phonetopc.protocol.panels.NotifyParams
+import io.github.melker12345.phonetopc.protocol.panels.PanelOwner
+import io.github.melker12345.phonetopc.protocol.panels.PanelService
+import io.github.melker12345.phonetopc.protocol.panels.PanelShowParams
+import io.github.melker12345.phonetopc.protocol.panels.PanelUpdateParams
+import io.github.melker12345.phonetopc.protocol.panels.PcRef
+import io.github.melker12345.phonetopc.protocol.panels.Rules
 import io.github.melker12345.phonetopc.protocol.security.TokenHash
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CompletableDeferred
@@ -55,7 +62,7 @@ class Session internal constructor(
     val remote: String,
     /** Source address, for rate-limiting failed hellos in secure mode. */
     val remoteHost: String = remote,
-) {
+) : PanelOwner {
     private class Out(val text: String, val kind: Int, val close: CloseRequest? = null)
 
     private val queue = Channel<Out>(Channel.UNLIMITED)
@@ -149,6 +156,8 @@ class Session internal constructor(
         val reply = respond(text) ?: return
         reply.text?.let { enqueueResponse(it) }
         reply.closeAfter?.let { closeAfterQueued(it) }
+        // PANELS.md §4.4: held panel events and the stroke replay go out after the response.
+        reply.afterResponse?.invoke()
         // Spec §4.3: a new subscription's events (including its initial value) may only be
         // queued once its subscribe response is.
         reply.newSubscription?.let { hub.startSubscription(it) }
@@ -231,6 +240,7 @@ class Session internal constructor(
         val text: String?,
         val newSubscription: Subscription? = null,
         val closeAfter: CloseRequest? = null,
+        val afterResponse: (() -> Unit)? = null,
     )
 
     /**
@@ -275,7 +285,7 @@ class Session internal constructor(
             return error(replyId, RpcException(RpcError.HELLO_REQUIRED))
         }
         // request_approval exists only in secure mode (APPROVAL.md §1).
-        if (method.content !in METHODS && !(method.content == APPROVAL_METHOD && hub.security != null)) {
+        if (!methodExists(method.content)) {
             return error(replyId, RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: ${method.content}"))
         }
         // Spec §2: explicit null params count as absent; any other non-object is -32602.
@@ -290,7 +300,7 @@ class Session internal constructor(
         return try {
             val handled = dispatch(method.content, params, replyId)
             val result = handled.result ?: return null // answered later (request_approval)
-            Reply(Rpc.result(replyId, result), handled.newSubscription)
+            Reply(Rpc.result(replyId, result), handled.newSubscription, afterResponse = handled.afterResponse)
         } catch (e: RateLimited) {
             // SECURITY.md §5: a limited address is closed with 1013, even with a valid token.
             Reply(null, closeAfter = CloseRequest(CloseCodes.TRY_AGAIN_LATER, "too many failed hellos; try again later"))
@@ -324,18 +334,79 @@ class Session internal constructor(
     }
 
     /** [result] `null`: the response is sent later. */
-    private class Handled(val result: JsonElement?, val newSubscription: Subscription? = null)
+    private class Handled(
+        val result: JsonElement?,
+        val newSubscription: Subscription? = null,
+        val afterResponse: (() -> Unit)? = null,
+    )
+
+    /**
+     * request_approval exists only in secure mode (APPROVAL.md §1); notifications and panels
+     * only when the phone offers them (PANELS.md §1).
+     */
+    private fun methodExists(method: String): Boolean = when (method) {
+        in METHODS -> true
+        APPROVAL_METHOD -> hub.security != null
+        in NOTIFY_METHODS -> hub.notifications != null
+        in PANEL_METHODS -> hub.panels != null
+        else -> false
+    }
+
+    /** Who this session's notifications and panels belong to (PANELS.md §1). */
+    private val pcRef: PcRef get() = PcRef.of(pc)
+
+    /** Deliver a PC-scoped event to this session's subscriptions of its source (PANELS.md §2). */
+    internal fun deliverDirect(reading: Reading) {
+        if (closed) return
+        val id = hub.deviceId
+        for (sub in subscriptions.values) if (sub.spec.source == reading.source) sub.offer(reading, id)
+    }
+
+    override fun deliverPanelEvent(reading: Reading) = deliverDirect(reading)
 
     private suspend fun dispatch(method: String, params: JsonObject, replyId: JsonElement): Handled {
         return when (method) {
             "hello" -> Handled(hello(params))
             "list_sensors" -> Handled(
-                ProtocolJson.encodeToJsonElement(ListSensorsResult.serializer(), ListSensorsResult(hub.describe())),
+                ProtocolJson.encodeToJsonElement(ListSensorsResult.serializer(), ListSensorsResult(hub.describe(pcRef))),
             )
             "subscribe" -> subscribe(params)
             "unsubscribe" -> Handled(unsubscribe(params))
             "get" -> Handled(get(params))
             APPROVAL_METHOD -> requestApproval(params, replyId)
+            "notify" -> {
+                val parsed = NotifyParams.parse(params)
+                Handled(buildJsonObject { put("id", JsonPrimitive(hub.notifications!!.notify(pcRef, parsed))) })
+            }
+            "notify_cancel" -> {
+                val id = with(Rules) { params.requiredId("id") }
+                hub.notifications!!.cancel(pcRef, id)
+                Handled(EMPTY)
+            }
+            "panel_show" -> {
+                val parsed = PanelShowParams.parse(params)
+                hub.panels!!.show(this, pcRef, parsed).let { Handled(it.result, afterResponse = it.afterResponse) }
+            }
+            "panel_attach" -> {
+                val (panel, after) = PanelService.parseAttach(params)
+                hub.panels!!.attach(this, pcRef, panel, after).let { Handled(it.result, afterResponse = it.afterResponse) }
+            }
+            "panel_update" -> {
+                val parsed = PanelUpdateParams.parse(params)
+                hub.panels!!.update(pcRef, parsed)
+                Handled(EMPTY)
+            }
+            "panel_close" -> {
+                val panel = with(Rules) { params.requiredId("panel") }
+                hub.panels!!.close(pcRef, panel)
+                Handled(EMPTY)
+            }
+            "panel_list" -> Handled(hub.panels!!.list(pcRef))
+            "canvas_clear" -> {
+                val (panel, widget) = PanelService.parseCanvasClear(params)
+                hub.panels!!.clearCanvas(pcRef, panel, widget)
+                Handled(EMPTY)
+            }
             else -> throw RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: $method")
         }
     }
@@ -375,7 +446,13 @@ class Session internal constructor(
             protocol = PROTOCOL_VERSION,
             server = hub.serverInfo,
             device = hub.deviceInfo(),
-            capabilities = if (approval != null) listOf("events", "get", "approval") else listOf("events", "get"),
+            capabilities = buildList {
+                add("events")
+                add("get")
+                if (approval != null) add("approval")
+                if (hub.notifications != null) add("notify")
+                if (hub.panels != null) add("panels")
+            },
             pc = pcInfo,
             approval = approval,
         )
@@ -444,7 +521,7 @@ class Session internal constructor(
             throw RpcException(RpcError.INVALID_PARAMS, "min_delta must be >= 0")
         }
         val spec = lookup(sourceName, type)
-        val info = hub.info(sourceName)
+        val info = hub.info(sourceName, pcRef)
 
         val rate = if (spec.mode == SensorMode.CONTINUOUS) {
             effectiveRate(requestedRate, info)
@@ -488,7 +565,7 @@ class Session internal constructor(
         if (type != null && type !in spec.types) {
             throw RpcException(RpcError.INVALID_PARAMS, "Unknown type \"$type\" for source $sourceName")
         }
-        if (!hub.info(sourceName).available) {
+        if (!hub.info(sourceName, pcRef).available) {
             throw RpcException(RpcError.SOURCE_UNAVAILABLE, "Source unavailable: $sourceName")
         }
         return spec
@@ -513,6 +590,8 @@ class Session internal constructor(
         val EMPTY = JsonObject(emptyMap())
         val METHODS = setOf("hello", "list_sensors", "subscribe", "unsubscribe", "get")
         const val APPROVAL_METHOD = "request_approval"
+        val NOTIFY_METHODS = setOf("notify", "notify_cancel")
+        val PANEL_METHODS = setOf("panel_show", "panel_attach", "panel_update", "panel_close", "panel_list", "canvas_clear")
 
         /** Largest magnitude of an integer id (2^53-1), so every JSON library keeps it exact. */
         const val MAX_SAFE_ID = (1L shl 53) - 1
