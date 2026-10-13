@@ -8,6 +8,7 @@ import io.github.melker12345.phonetopc.data.AppSettings
 import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.PairedPc
 import io.github.melker12345.phonetopc.data.PhoneKey
+import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.service.BridgeStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +72,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** SECURITY.md §5: forget the PC; the server closes its open sessions with 1008. */
     fun revoke(id: String) {
         graph.appScope.launch { graph.pairedPcs.remove(id) }
+    }
+
+    /** PANELS.md §1: notifications or panels for a paired PC, or ([pcId] `null`) the dev-mode PC. */
+    fun setOutputAllowed(pcId: String?, feature: Feature, allowed: Boolean) {
+        graph.appScope.launch {
+            if (pcId == null) graph.settings.setDevOutputAllowed(feature, allowed) else graph.pairedPcs.setAllowed(pcId, feature, allowed)
+        }
     }
 
     fun hardwarePresent(source: String) = graph.sensorSource.hardwarePresent(source)

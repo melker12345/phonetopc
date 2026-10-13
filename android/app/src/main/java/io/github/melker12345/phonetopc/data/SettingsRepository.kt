@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
+import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.server.DEFAULT_PORT
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -36,6 +37,11 @@ data class AppSettings(
     val desiredRunning: Boolean = false,
     /** "Start on boot": also bring the server back after a reboot, not just after an update. */
     val startOnBoot: Boolean = false,
+    /**
+     * PANELS.md §1: what the dev-mode PC (every client in developer mode) may do: notifications
+     * and panels, each off until turned on.
+     */
+    val devOutput: Set<Feature> = emptySet(),
 )
 
 /** The per-sensor allow toggles of Settings › Sensors. */
@@ -84,6 +90,11 @@ class SettingsRepository(context: Context) {
 
     suspend fun setStartOnBoot(enabled: Boolean) = store.edit { it[START_ON_BOOT] = enabled }
 
+    suspend fun setDevOutputAllowed(feature: Feature, allowed: Boolean) = store.edit {
+        val on = it[DEV_OUTPUT].orEmpty()
+        it[DEV_OUTPUT] = if (allowed) on + feature.wireName else on - feature.wireName
+    }
+
     /** Random id generated on first run and kept for the lifetime of the install (spec §4.1). */
     suspend fun deviceId(): String {
         store.data.first()[DEVICE_ID]?.let { return it }
@@ -101,6 +112,7 @@ class SettingsRepository(context: Context) {
         onboardingDone = this[ONBOARDING_DONE] ?: false,
         desiredRunning = this[DESIRED_RUNNING] ?: false,
         startOnBoot = this[START_ON_BOOT] ?: false,
+        devOutput = Feature.entries.filter { it.wireName in this[DEV_OUTPUT].orEmpty() }.toSet(),
     )
 
     companion object {
@@ -115,6 +127,7 @@ class SettingsRepository(context: Context) {
         private val DESIRED_RUNNING = booleanPreferencesKey("desired_running")
         private val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         private val DEVICE_ID = stringPreferencesKey("device_id")
+        private val DEV_OUTPUT = stringSetPreferencesKey("dev_output")
 
         private fun newDeviceId(): String {
             val bytes = ByteArray(8).also { SecureRandom().nextBytes(it) }

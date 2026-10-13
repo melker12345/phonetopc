@@ -1,10 +1,12 @@
 package io.github.melker12345.phonetopc.data
 
 import io.github.melker12345.phonetopc.pairing.NewPairing
+import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.protocol.security.Secrets
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PairedPcListTest {
@@ -54,6 +56,21 @@ class PairedPcListTest {
         assertEquals(list, decoded)
         assertEquals(99L, decoded.first { it.id == "pc-b" }.lastConnected)
         assertNull(decoded.first { it.id == "pc-a" }.lastConnected)
+    }
+
+    @Test fun outputPermissionsRoundTripAndResetOnRepairing() {
+        var list = PairedPcList.upsert(PairedPcList.upsert(emptyList(), a, 1), b, 2)
+        list = PairedPcList.setAllowed(list, "pc-a", Feature.NOTIFY, true)
+        list = PairedPcList.setAllowed(list, "pc-a", Feature.PANELS, true)
+        val decoded = PairedPcList.decode(PairedPcList.encode(list))
+        assertEquals(list, decoded)
+        assertTrue(decoded.first { it.id == "pc-a" }.allowNotify)
+        assertTrue(decoded.first { it.id == "pc-a" }.allowPanels)
+        assertFalse(decoded.first { it.id == "pc-b" }.allowPanels)
+        // Whoever pairs as pc-a again has to be allowed again.
+        val repaired = PairedPcList.upsert(list, a.copy(token = Secrets.newToken()), 3).first { it.id == "pc-a" }
+        assertFalse(repaired.allowNotify)
+        assertFalse(repaired.allowPanels)
     }
 
     @Test fun decodeToleratesGarbage() {

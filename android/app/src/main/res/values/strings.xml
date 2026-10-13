@@ -178,6 +178,12 @@
     <string name="devices_revoke_title">Revoke %1$s?</string>
     <string name="devices_revoke_body">It\'s disconnected right away and can\'t connect again until you pair it again.</string>
     <string name="devices_pin">Key %1$s</string>
+    <string name="devices_allow_notify">Notifications</string>
+    <string name="devices_allow_notify_summary">Let this PC post notifications on the phone</string>
+    <string name="devices_allow_panels">Screen panels</string>
+    <string name="devices_allow_panels_summary">Let this PC show full-screen panels: buttons, sliders, text and a drawing canvas</string>
+    <string name="devices_dev_pc_body">Every client in developer mode counts as this one PC. It isn\'t verified, so allow only what you need.</string>
+    <string name="panel_dev_pc_name">Unverified PC (dev mode)</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

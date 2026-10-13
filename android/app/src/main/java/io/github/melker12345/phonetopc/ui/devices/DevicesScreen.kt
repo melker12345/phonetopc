@@ -1,6 +1,10 @@
 package io.github.melker12345.phonetopc.ui.devices
 
+import android.Manifest
+import android.os.Build
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,15 +19,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -41,15 +49,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.data.PairedPc
+import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.ui.MainViewModel
+import io.github.melker12345.phonetopc.ui.SystemSettings
 import io.github.melker12345.phonetopc.ui.components.EmptyState
 import io.github.melker12345.phonetopc.ui.components.IconBadge
 import io.github.melker12345.phonetopc.ui.theme.PhonetopcTheme
@@ -60,8 +72,21 @@ import java.util.Date
 fun DevicesScreen(vm: MainViewModel, onPair: () -> Unit) {
     val pcs by vm.pairedPcs.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val connected = status.clients.mapNotNull { it.pc?.id }.toSet()
-    DevicesContent(pcs, connected, onPair, onRevoke = vm::revoke)
+    val context = LocalContext.current
+    // Android 13+: notifications and panel requests need POST_NOTIFICATIONS; ask when either is turned on.
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    DevicesContent(
+        pcs, connected, onPair, onRevoke = vm::revoke,
+        devOutput = settings?.takeIf { it.devMode }?.devOutput,
+        onSetAllowed = { pcId, feature, allowed ->
+            if (allowed && !SystemSettings.notificationsGranted(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            vm.setOutputAllowed(pcId, feature, allowed)
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,13 +96,17 @@ private fun DevicesContent(
     connected: Set<String>,
     onPair: () -> Unit,
     onRevoke: (String) -> Unit,
+    /** What the dev-mode PC may do, or `null` when developer mode is off (no such PC then). */
+    devOutput: Set<Feature>? = null,
+    /** A PC's id, `null` for the dev-mode PC. */
+    onSetAllowed: (String?, Feature, Boolean) -> Unit = { _, _, _ -> },
 ) {
     var revoking by rememberSaveable { mutableStateOf<String?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.devices_title)) }) }) { padding ->
         when {
             pcs == null -> Box(Modifier.fillMaxSize().padding(padding))
-            pcs.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            pcs.isEmpty() && devOutput == null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Rounded.Devices,
                     title = stringResource(R.string.devices_empty_title),
@@ -93,8 +122,11 @@ private fun DevicesContent(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (devOutput != null) {
+                    item(key = "dev") { DevPcCard(devOutput, onSetAllowed = { f, on -> onSetAllowed(null, f, on) }) }
+                }
                 items(pcs.sortedByDescending { it.lastConnected ?: it.pairedAt }, key = { it.id }) { pc ->
-                    PcCard(pc, pc.id in connected, onRevoke = { revoking = pc.id })
+                    PcCard(pc, pc.id in connected, onRevoke = { revoking = pc.id }, onSetAllowed = { f, on -> onSetAllowed(pc.id, f, on) })
                 }
                 item {
                     OutlinedButton(onClick = onPair, modifier = Modifier.padding(top = 4.dp)) {
@@ -126,7 +158,7 @@ private fun DevicesContent(
 }
 
 @Composable
-private fun PcCard(pc: PairedPc, connectedNow: Boolean, onRevoke: () -> Unit) {
+private fun PcCard(pc: PairedPc, connectedNow: Boolean, onRevoke: () -> Unit, onSetAllowed: (Feature, Boolean) -> Unit) {
     OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
         Row(Modifier.padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp), verticalAlignment = Alignment.Top) {
             IconBadge(
@@ -169,6 +201,60 @@ private fun PcCard(pc: PairedPc, connectedNow: Boolean, onRevoke: () -> Unit) {
                 Icon(Icons.Rounded.LinkOff, contentDescription = stringResource(R.string.devices_revoke))
             }
         }
+        OutputSwitches(notify = pc.allowNotify, panels = pc.allowPanels, onSetAllowed)
+    }
+}
+
+/** Developer mode: every client counts as one unverified PC with its own two switches (PANELS.md §1). */
+@Composable
+private fun DevPcCard(allowed: Set<Feature>, onSetAllowed: (Feature, Boolean) -> Unit) {
+    OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+            IconBadge(
+                Icons.Rounded.Code,
+                container = MaterialTheme.colorScheme.errorContainer,
+                content = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.panel_dev_pc_name), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.devices_dev_pc_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        OutputSwitches(notify = Feature.NOTIFY in allowed, panels = Feature.PANELS in allowed, onSetAllowed)
+    }
+}
+
+/** The per-PC switches of PANELS.md §1, both off until the user turns them on. */
+@Composable
+private fun OutputSwitches(notify: Boolean, panels: Boolean, onSetAllowed: (Feature, Boolean) -> Unit) {
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        HorizontalDivider()
+        OutputSwitch(stringResource(R.string.devices_allow_notify), stringResource(R.string.devices_allow_notify_summary), notify) {
+            onSetAllowed(Feature.NOTIFY, it)
+        }
+        OutputSwitch(stringResource(R.string.devices_allow_panels), stringResource(R.string.devices_allow_panels_summary), panels) {
+            onSetAllowed(Feature.PANELS, it)
+        }
+    }
+}
+
+@Composable
+private fun OutputSwitch(title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().toggleable(checked, role = Role.Switch, onValueChange = onChange).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -193,12 +279,13 @@ private fun DevicesPreview() = PhonetopcTheme(dynamicColor = false) {
     val now = System.currentTimeMillis()
     DevicesContent(
         pcs = listOf(
-            PairedPc("a", "arch-desktop", "sha256/89Nebgssmdcpo6zU3xFLFXCRqV4YpVYbvJbyq99cMGA", "h", now - 86_400_000, now - 60_000),
+            PairedPc("a", "arch-desktop", "sha256/89Nebgssmdcpo6zU3xFLFXCRqV4YpVYbvJbyq99cMGA", "h", now - 86_400_000, now - 60_000, allowPanels = true),
             PairedPc("b", "work-laptop", "sha256/tQITurCV6l1Rq9Rk0X_kPrHlWaaKPnkI6CGl03GEaBc", "h", now - 7 * 86_400_000),
         ),
         connected = setOf("a"),
         onPair = {},
         onRevoke = {},
+        devOutput = setOf(Feature.NOTIFY),
     )
 }
 

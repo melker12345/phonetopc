@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import io.github.melker12345.phonetopc.pairing.NewPairing
 import io.github.melker12345.phonetopc.protocol.PcInfo
 import io.github.melker12345.phonetopc.protocol.ProtocolJson
+import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.protocol.security.ConstantTime
 import io.github.melker12345.phonetopc.protocol.security.TokenHash
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
@@ -37,13 +39,20 @@ data class PairedPc(
     val tokenHash: String,
     val pairedAt: Long,
     val lastConnected: Long? = null,
+    /** PANELS.md §1: the user lets this PC post notifications. Off until turned on. */
+    val allowNotify: Boolean = false,
+    /** PANELS.md §1: the user lets this PC show panels. Off until turned on. */
+    val allowPanels: Boolean = false,
 ) {
     val info: PcInfo get() = PcInfo(id, name)
 }
 
 /** Pure list operations and the storage format, kept apart so they can be unit-tested. */
 object PairedPcList {
-    /** §4.4: re-pairing a PC we know (same id) replaces its token. */
+    /**
+     * §4.4: re-pairing a PC we know (same id) replaces its token. The new entry starts with
+     * notifications and panels off: whoever paired as that id has to be allowed again.
+     */
     fun upsert(list: List<PairedPc>, pairing: NewPairing, now: Long): List<PairedPc> {
         val entry = PairedPc(pairing.pcId, pairing.pcName, pairing.pin, TokenHash.of(pairing.token), now)
         return list.filterNot { it.id == pairing.pcId } + entry
@@ -53,6 +62,14 @@ object PairedPcList {
 
     fun touch(list: List<PairedPc>, id: String, now: Long) =
         list.map { if (it.id == id) it.copy(lastConnected = now) else it }
+
+    /** Turns notifications or panels (PANELS.md §1) on or off for one PC. */
+    fun setAllowed(list: List<PairedPc>, id: String, feature: Feature, allowed: Boolean) = list.map {
+        if (it.id != id) it else when (feature) {
+            Feature.NOTIFY -> it.copy(allowNotify = allowed)
+            Feature.PANELS -> it.copy(allowPanels = allowed)
+        }
+    }
 
     /**
      * The PC a token belongs to. Hashes the token once and compares it with every stored hash
@@ -74,6 +91,8 @@ object PairedPcList {
                 put("token_sha256", pc.tokenHash)
                 put("paired_at", pc.pairedAt)
                 pc.lastConnected?.let { put("last_connected", it) }
+                if (pc.allowNotify) put("allow_notify", true)
+                if (pc.allowPanels) put("allow_panels", true)
             },
         )
     }.toString()
@@ -85,6 +104,7 @@ object PairedPcList {
             val o = e as? JsonObject ?: return@mapNotNull null
             fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
             fun l(k: String) = (o[k] as? JsonPrimitive)?.longOrNull
+            fun b(k: String) = (o[k] as? JsonPrimitive)?.booleanOrNull ?: false
             PairedPc(
                 id = s("id") ?: return@mapNotNull null,
                 name = s("name") ?: "",
@@ -92,6 +112,8 @@ object PairedPcList {
                 tokenHash = s("token_sha256") ?: return@mapNotNull null,
                 pairedAt = l("paired_at") ?: 0,
                 lastConnected = l("last_connected"),
+                allowNotify = b("allow_notify"),
+                allowPanels = b("allow_panels"),
             )
         }
     }
@@ -128,6 +150,8 @@ class PairedPcRepository(context: Context, scope: CoroutineScope) {
     suspend fun remove(id: String) = update { PairedPcList.remove(it, id) }
 
     suspend fun touch(id: String, now: Long = System.currentTimeMillis()) = update { PairedPcList.touch(it, id, now) }
+
+    suspend fun setAllowed(id: String, feature: Feature, allowed: Boolean) = update { PairedPcList.setAllowed(it, id, feature, allowed) }
 
     private suspend fun update(transform: (List<PairedPc>) -> List<PairedPc>) {
         val saved = store.edit { prefs ->
