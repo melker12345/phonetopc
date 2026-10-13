@@ -268,8 +268,7 @@ def test_sync_panel(threaded_server: FakeServer) -> None:
         panel = phone.show_panel("deck", "Deck", DECK)
         assert [p.panel for p in phone.list_panels()] == ["deck"]
         panel.update("status", text="Busy")
-        loop = phone._runner.loop
-        asyncio.run_coroutine_threadsafe(threaded_server.press("deck", "mute"), loop).result(2)
+        threaded_server.run_threadsafe(threaded_server.press("deck", "mute"))
         ev = next(iter(panel))
         assert isinstance(ev, phonetopc.PressEvent) and ev.widget == "mute"
         assert panel.last_pseq == 0

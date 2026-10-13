@@ -82,7 +82,7 @@ async def main_async(args: argparse.Namespace) -> None:
         try:
             await watch(args.addr, chain)
         except (
-            phonetopc.PhonetopcError,  # e.g. tile source disabled, or this PC was revoked
+            phonetopc.ServerError,  # e.g. tile source disabled, or this PC was revoked
             phonetopc.PinMismatch,
             phonetopc.NotPaired,
             phonetopc.AmbiguousDevice,

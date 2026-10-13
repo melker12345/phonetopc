@@ -1,8 +1,18 @@
 """Exception hierarchy.
 
-Everything raised by this package derives from :class:`Error`. JSON-RPC error
-responses from the server become :class:`PhonetopcError` (or one of its
-subclasses, picked by error code; see PROTOCOL.md section 7).
+Two bases matter when catching:
+
+* :class:`Error` is the root of *everything* this package raises: server
+  error replies, lost connections, timeouts, pairing and TLS-pin problems.
+  Catch it for "anything phonetopc went wrong".
+* :class:`ServerError` (a subclass of :class:`Error`) is only for JSON-RPC
+  error *responses*: the server understood the request and said no. The
+  concrete subclass is picked by error code (PROTOCOL.md section 7), e.g.
+  :class:`UnknownSource` or :class:`NotAllowed`. Catch it when the phone
+  refusing a request is expected and recoverable.
+
+``PhonetopcError`` is the older name of :class:`ServerError`, kept as an alias
+so existing ``except phonetopc.PhonetopcError`` clauses keep working.
 """
 
 from __future__ import annotations
@@ -34,6 +44,7 @@ __all__ = [
     "ProtocolError",
     "RateLimited",
     "RequestTimeout",
+    "ServerError",
     "SourceUnavailable",
     "SubscriptionOverflow",
     "TooManyPanels",
@@ -182,8 +193,14 @@ class ApprovalDependencyMissing(Error, ImportError):
     """Verifying approvals needs the ``cryptography`` package (``phonetopc[approval]``)."""
 
 
-class PhonetopcError(Error):
-    """A JSON-RPC error response from the server."""
+class ServerError(Error):
+    """A JSON-RPC error response from the server (the request was refused).
+
+    Only error *replies* are ``ServerError``; connection, timeout, pairing and
+    other local failures are other :class:`Error` subclasses. ``code``,
+    ``message`` and ``data`` are the reply's ``error`` members. Also available
+    as ``PhonetopcError``, its original name.
+    """
 
     #: The spec's error code for this class (``None`` on the generic base class).
     CODE: int | None = None
@@ -212,30 +229,34 @@ class PhonetopcError(Error):
         )
 
 
+#: Original name of :class:`ServerError`, kept for backward compatibility.
+PhonetopcError = ServerError
+
+
 # Standard JSON-RPC 2.0 errors.
 
 
-class ParseError(PhonetopcError):
+class ParseError(ServerError):
     CODE = -32700
     NAME = "parse_error"
 
 
-class InvalidRequest(PhonetopcError):
+class InvalidRequest(ServerError):
     CODE = -32600
     NAME = "invalid_request"
 
 
-class MethodNotFound(PhonetopcError):
+class MethodNotFound(ServerError):
     CODE = -32601
     NAME = "method_not_found"
 
 
-class InvalidParams(PhonetopcError):
+class InvalidParams(ServerError):
     CODE = -32602
     NAME = "invalid_params"
 
 
-class InternalError(PhonetopcError):
+class InternalError(ServerError):
     CODE = -32603
     NAME = "internal_error"
 
@@ -243,28 +264,28 @@ class InternalError(PhonetopcError):
 # phonetopc application errors (PROTOCOL.md section 7).
 
 
-class UnknownSource(PhonetopcError):
+class UnknownSource(ServerError):
     """``source`` is not in the server's catalog."""
 
     CODE = -32001
     NAME = "unknown_source"
 
 
-class SourceUnavailable(PhonetopcError):
+class SourceUnavailable(ServerError):
     """Known source, but absent or disabled on this device."""
 
     CODE = -32002
     NAME = "source_unavailable"
 
 
-class HelloRequired(PhonetopcError):
+class HelloRequired(ServerError):
     """A request was sent before a successful ``hello``."""
 
     CODE = -32003
     NAME = "hello_required"
 
 
-class UnsupportedProtocol(PhonetopcError):
+class UnsupportedProtocol(ServerError):
     """The server doesn't speak our protocol version."""
 
     CODE = -32004
@@ -280,21 +301,21 @@ class UnsupportedProtocol(PhonetopcError):
         return []
 
 
-class UnknownSubscription(PhonetopcError):
+class UnknownSubscription(ServerError):
     """``unsubscribe`` with an id that isn't in this session."""
 
     CODE = -32005
     NAME = "unknown_subscription"
 
 
-class NoValue(PhonetopcError):
+class NoValue(ServerError):
     """``get`` has nothing to return yet."""
 
     CODE = -32006
     NAME = "no_value"
 
 
-class Unauthorized(PhonetopcError):
+class Unauthorized(ServerError):
     """Secure mode: the phone doesn't accept this PC's token (``-32010``).
 
     The PC was revoked on the phone, or the phone forgot the pairing. The
@@ -315,7 +336,7 @@ class Unauthorized(PhonetopcError):
 # Notifications and panels (PANELS.md section 9).
 
 
-class NotAllowed(PhonetopcError):
+class NotAllowed(ServerError):
     """The user hasn't allowed notifications or panels for this PC (``-32030``).
 
     ``permission`` is ``"notify"`` or ``"panels"``. Both are off by default:
@@ -343,29 +364,29 @@ class NotAllowed(PhonetopcError):
         return None
 
 
-class UnknownPanel(PhonetopcError):
+class UnknownPanel(ServerError):
     """No panel of this PC has that id: never created, closed, or expired (``-32031``)."""
 
     CODE = -32031
     NAME = "unknown_panel"
 
 
-class TooManyPanels(PhonetopcError):
+class TooManyPanels(ServerError):
     """``panel_show`` of a new panel when the PC already has 8 (``-32032``)."""
 
     CODE = -32032
     NAME = "too_many_panels"
 
 
-class RateLimited(PhonetopcError):
+class RateLimited(ServerError):
     """``notify`` above the phone's rate limit (``-32033``)."""
 
     CODE = -32033
     NAME = "rate_limited"
 
 
-_BY_CODE: dict[int, type[PhonetopcError]] = {}
-_BY_NAME: dict[str, type[PhonetopcError]] = {}
+_BY_CODE: dict[int, type[ServerError]] = {}
+_BY_NAME: dict[str, type[ServerError]] = {}
 for _cls in (
     ParseError,
     InvalidRequest,
@@ -389,7 +410,7 @@ for _cls in (
     _BY_NAME[_cls.NAME] = _cls
 
 
-def error_from_response(error: Any) -> PhonetopcError:
+def error_from_response(error: Any) -> ServerError:
     """Build the right exception from a JSON-RPC ``error`` object.
 
     The numeric code wins; ``data.name`` is only used when the code is unknown,
@@ -397,7 +418,7 @@ def error_from_response(error: Any) -> PhonetopcError:
     clauses that match on the name.
     """
     if not isinstance(error, dict):
-        return PhonetopcError(-32603, f"malformed error object: {error!r}")
+        return ServerError(-32603, f"malformed error object: {error!r}")
     raw_code = error.get("code")
     code = raw_code if isinstance(raw_code, int) and not isinstance(raw_code, bool) else -32603
     message = error.get("message")
@@ -407,4 +428,4 @@ def error_from_response(error: Any) -> PhonetopcError:
     cls = _BY_CODE.get(code)
     if cls is None and isinstance(data, dict) and isinstance(data.get("name"), str):
         cls = _BY_NAME.get(data["name"])
-    return (cls or PhonetopcError)(code, message, data)
+    return (cls or ServerError)(code, message, data)

@@ -76,7 +76,22 @@ _TONES = ("default", "accent", "good", "warn", "bad")
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _COLOR = re.compile(r"#[0-9A-Fa-f]{6}")
-_BIDI = frozenset("؜‎‏‪‫‬‭‮⁦⁧⁨⁩")
+#: Bidirectional control characters: they can make shown text read differently
+#: from its bytes, so titles, labels and approval reasons must not contain them.
+_BIDI = frozenset(
+    "\u061c"  # ARABIC LETTER MARK
+    "\u200e"  # LEFT-TO-RIGHT MARK
+    "\u200f"  # RIGHT-TO-LEFT MARK
+    "\u202a"  # LEFT-TO-RIGHT EMBEDDING
+    "\u202b"  # RIGHT-TO-LEFT EMBEDDING
+    "\u202c"  # POP DIRECTIONAL FORMATTING
+    "\u202d"  # LEFT-TO-RIGHT OVERRIDE
+    "\u202e"  # RIGHT-TO-LEFT OVERRIDE
+    "\u2066"  # LEFT-TO-RIGHT ISOLATE
+    "\u2067"  # RIGHT-TO-LEFT ISOLATE
+    "\u2068"  # FIRST STRONG ISOLATE
+    "\u2069"  # POP DIRECTIONAL ISOLATE
+)
 
 
 # -- value rules (section 8) ------------------------------------------------------

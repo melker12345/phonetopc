@@ -129,7 +129,12 @@ async def connection_loop(addr: str | None, out: queue.Queue[Item]) -> None:
                 print("the drawing pad was closed on the phone")
                 return
             last_pseq = handled
-        except (phonetopc.NotAllowed, phonetopc.PinMismatch, phonetopc.NotPaired):
+        except (
+            phonetopc.NotAllowed,
+            phonetopc.PinMismatch,
+            phonetopc.NotPaired,
+            phonetopc.Unauthorized,
+        ):
             raise  # retrying won't help
         except (phonetopc.Error, OSError) as exc:
             print(f"disconnected ({exc}); retrying in {RECONNECT_S:g} s")

@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import ApprovalDependencyMissing
+from .panels import _BIDI
 
 __all__ = [
     "APPROVAL_GRACE",
@@ -132,10 +133,8 @@ def check_reason(reason: str) -> str:
     return reason
 
 
-#: Characters that can make shown text read differently from its bytes.
-_BIDI_CONTROLS = frozenset(
-    "؜‎‏" + "".join(map(chr, range(0x202A, 0x202F))) + "".join(map(chr, range(0x2066, 0x206A)))
-)
+#: Bidirectional control characters (one definition, shared with panel text checks).
+_BIDI_CONTROLS = _BIDI
 
 
 def approval_message(phone_id: str, pc_id: str, nonce: str, reason: str) -> bytes:

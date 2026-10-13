@@ -196,9 +196,9 @@ The client subscribes to the `panel` source once per connection, before its firs
 
 ## API overview
 
-### `phonetopc.connect(addr=None, *, device=None, dev=False, client_name=..., request_timeout=10.0, open_timeout=10.0, queue_size=256, **ws_kwargs)`
+### `phonetopc.connect(addr=None, *, device=None, dev=False, client_name="phonetopc-python", client_version=__version__, request_timeout=10.0, open_timeout=10.0, queue_size=256, **ws_kwargs)`
 
-Opens the WebSocket (see [which phone, at which address](#which-phone-at-which-address)) and runs `hello`. Use it as `async with connect(...) as phone:` or `phone = await connect(...)` followed by `await phone.close()`. Extra keyword arguments go to `websockets.asyncio.client.connect`, except `ssl`, which secure mode sets itself.
+Opens the WebSocket (see [which phone, at which address](#which-phone-at-which-address)) and runs `hello`, introducing itself as `client_name`/`client_version`. Use it as `async with connect(...) as phone:` or `phone = await connect(...)` followed by `await phone.close()`. Extra keyword arguments go to `websockets.asyncio.client.connect`, except `ssl`, which secure mode sets itself.
 
 ### `Phone`
 
@@ -215,6 +215,7 @@ Opens the WebSocket (see [which phone, at which address](#which-phone-at-which-a
 | `approval_key`, `await accept_approval_key()` | Pin of the phone's approval key in this session (`None` if it has none); trust that key after it changed |
 | `await call(method, params=None, timeout=...)` | Raw JSON-RPC call, for methods newer than this client |
 | `closed`, `closed_reason`, `await wait_closed()`, `await close()` | Connection state |
+| `request_timeout`, `queue_size` | Defaults for later requests and subscriptions; can be changed |
 
 Requests can run concurrently: one reader task matches responses to requests by `id` and routes events to their subscription.
 
@@ -247,11 +248,11 @@ A frozen dataclass: `source`, `type`, `value`, `unit`, `ts` (Unix ms), `ts_mono_
 
 ### Errors
 
-All exceptions derive from `phonetopc.Error`.
+All exceptions derive from `phonetopc.Error`: catch it for "anything went wrong". Error *replies* from the phone (the request was understood and refused) are `phonetopc.ServerError`, a subclass; catch that when a refusal is expected and recoverable, e.g. a source the user disabled. `PhonetopcError` is the old name of `ServerError` and still works.
 
 | Exception | When |
 |---|---|
-| `PhonetopcError(code, message, data)` | Any JSON-RPC error response. The subclass is picked by code: |
+| `ServerError(code, message, data)` | Any JSON-RPC error response (`.code`, `.message`, `.data`, `.name`). The subclass is picked by code: |
 | ↳ `UnknownSource` (-32001), `SourceUnavailable` (-32002), `HelloRequired` (-32003), `UnsupportedProtocol` (-32004, `.supported`), `UnknownSubscription` (-32005), `NoValue` (-32006), `Unauthorized` (-32010), `NotAllowed` (-32030, `.permission`), `UnknownPanel` (-32031), `TooManyPanels` (-32032), `RateLimited` (-32033) | phonetopc errors |
 | ↳ `ParseError`, `InvalidRequest`, `MethodNotFound`, `InvalidParams`, `InternalError` | standard JSON-RPC errors |
 | `ConnectionClosed` (`.code`, `.reason`) | The connection is closed or was lost |
@@ -287,6 +288,8 @@ with phonetopc.sync.connect() as phone:  # same arguments as phonetopc.connect
         for ev in events:
             print(ev.value)
 ```
+
+`SyncPhone`, `SyncSubscription` and `SyncPanel` have every member of `Phone`, `Subscription` and `Panel` with the same parameters: coroutines become blocking calls, `async with`/`async for` become `with`/`for`, and attributes are read-only views (except `SyncPhone.request_timeout` and `queue_size`). `.phone`, `.subscription` and `.panel` give the wrapped async object. `tests/test_sync_parity.py` fails when the two drift apart.
 
 ## Development
 

@@ -142,7 +142,7 @@ def test_subscribe_result_parse() -> None:
         (-32004, phonetopc.UnsupportedProtocol),
         (-32005, phonetopc.UnknownSubscription),
         (-32006, phonetopc.NoValue),
-        (-32099, phonetopc.PhonetopcError),
+        (-32099, phonetopc.ServerError),
     ],
 )
 def test_error_mapping(code: int, cls: type) -> None:
@@ -156,8 +156,17 @@ def test_error_mapping_by_name_and_malformed() -> None:
     err = error_from_response({"code": -32050, "message": "m", "data": {"name": "no_value"}})
     assert isinstance(err, phonetopc.NoValue) and err.code == -32050
     err = error_from_response("bad")
-    assert type(err) is phonetopc.PhonetopcError
+    assert type(err) is phonetopc.ServerError
     err = error_from_response({"code": "x"})
     assert err.code == -32603 and err.message == "unknown error"
     assert type(err) is phonetopc.InternalError
     assert "InternalError(code=-32603" in repr(err)
+
+
+def test_server_error_old_name() -> None:
+    # PhonetopcError is the original name of ServerError; old except clauses still match.
+    assert phonetopc.PhonetopcError is phonetopc.ServerError
+    assert issubclass(phonetopc.UnknownSource, phonetopc.ServerError)
+    assert issubclass(phonetopc.ServerError, phonetopc.Error)
+    assert not issubclass(phonetopc.ConnectionClosed, phonetopc.ServerError)
+    assert {"ServerError", "PhonetopcError"} <= set(phonetopc.__all__)

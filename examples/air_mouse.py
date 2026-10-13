@@ -107,7 +107,7 @@ async def run(args: argparse.Namespace, mouse: AirMouse) -> None:
                 async with phone.subscribe("ui", type="tile_tap") as taps:
                     async for _ in taps:
                         mouse.click()
-            except phonetopc.PhonetopcError as exc:
+            except phonetopc.ServerError as exc:
                 print(f"(no tile clicks: {exc.message})")
 
         click_task = asyncio.ensure_future(clicks())

@@ -42,14 +42,16 @@ import math
 import ssl
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import jsonschema
 from websockets.asyncio.server import Server, ServerConnection, serve
 
 from phonetopc.panels import MAX_PANELS, request_problem, update_problem
+
+T = TypeVar("T")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PATH = REPO_ROOT / "spec" / "schemas" / "phonetopc-1.schema.json"
@@ -393,10 +395,13 @@ class FakeServer:
         self._sub_ids = itertools.count(1)
         self._server: Server | None = None
         self.port = 0
+        #: The event loop the server runs on (set by start()).
+        self.loop: asyncio.AbstractEventLoop | None = None
 
     # -- lifecycle --------------------------------------------------------
 
     async def start(self) -> None:
+        self.loop = asyncio.get_running_loop()
         ctx = None
         if self.secure:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -408,6 +413,11 @@ class FakeServer:
         )
         sock = next(iter(self._server.sockets))
         self.port = sock.getsockname()[1]
+
+    def run_threadsafe(self, coro: Coroutine[Any, Any, T], timeout: float = 2.0) -> T:
+        """Run a helper (``press``, ``emit``, ...) from another thread, e.g. sync-API tests."""
+        assert self.loop is not None, "server not started"
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
 
     async def stop(self) -> None:
         if self._server is not None:

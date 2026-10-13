@@ -474,7 +474,7 @@ class Phone:
     ) -> Any:
         """Send a raw JSON-RPC request and return its ``result``.
 
-        Raises a :class:`~phonetopc.errors.PhonetopcError` subclass on an error
+        Raises a :class:`~phonetopc.errors.ServerError` subclass on an error
         response. ``timeout`` (seconds, ``None`` = forever) defaults to
         ``request_timeout``.
         """

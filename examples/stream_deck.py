@@ -202,7 +202,12 @@ async def main_async(args: argparse.Namespace) -> None:
                 print(f"connected to {phone.device.name}; audio via {audio.name}")
                 await run(phone, audio)
             return  # the user closed the panel: done
-        except (phonetopc.NotAllowed, phonetopc.PinMismatch, phonetopc.NotPaired):
+        except (
+            phonetopc.NotAllowed,
+            phonetopc.PinMismatch,
+            phonetopc.NotPaired,
+            phonetopc.Unauthorized,
+        ):
             raise  # retrying won't help
         except (phonetopc.Error, OSError) as exc:
             print(f"disconnected ({exc}); retrying in {RECONNECT_S:g} s")
