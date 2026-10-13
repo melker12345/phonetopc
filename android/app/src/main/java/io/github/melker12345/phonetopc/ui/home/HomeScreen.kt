@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lock
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -72,6 +75,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.melker12345.phonetopc.R
+import io.github.melker12345.phonetopc.output.displayName
+import io.github.melker12345.phonetopc.panels.PanelActivity
+import io.github.melker12345.phonetopc.panels.PanelKey
+import io.github.melker12345.phonetopc.panels.key
 import io.github.melker12345.phonetopc.protocol.ClientSnapshot
 import io.github.melker12345.phonetopc.protocol.Demand
 import io.github.melker12345.phonetopc.protocol.PcInfo
@@ -94,6 +101,8 @@ fun HomeScreen(vm: MainViewModel, onPair: () -> Unit) {
     val status by vm.status.collectAsStateWithLifecycle()
     val addresses by vm.addresses.collectAsStateWithLifecycle()
     val paired by vm.pairedPcs.collectAsStateWithLifecycle()
+    val panels by vm.panels.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     HomeContent(
         devMode = settings?.devMode ?: false,
         configuredPort = settings?.port ?: DEFAULT_PORT,
@@ -104,8 +113,13 @@ fun HomeScreen(vm: MainViewModel, onPair: () -> Unit) {
         onStop = vm::stopServer,
         onPause = vm::setPaused,
         onPair = onPair,
+        panels = panels.map { OpenPanel(it.key, it.title, it.pc.displayName(context), it.attached) },
+        onOpenPanel = { context.startActivity(PanelActivity.intent(context, it)) },
     )
 }
+
+/** A panel a PC has open on this phone, as Home lists it. */
+private data class OpenPanel(val key: PanelKey, val title: String, val pcName: String, val attached: Boolean)
 
 private enum class HomeState { STOPPED, STARTING, RUNNING, PAUSED }
 
@@ -121,6 +135,8 @@ private fun HomeContent(
     onStop: () -> Unit,
     onPause: (Boolean) -> Unit,
     onPair: () -> Unit,
+    panels: List<OpenPanel> = emptyList(),
+    onOpenPanel: (PanelKey) -> Unit = {},
 ) {
     // While running, the mode the server actually runs in; otherwise the one it will start in.
     val secure = status.secure ?: !devMode
@@ -150,6 +166,10 @@ private fun HomeContent(
         ) {
             item(key = "status") {
                 StatusCard(state, status, secure, hasPairedPcs, onStart, onStop, onPause, onPair)
+            }
+            // Panels come first: a PC showing one is waiting for the user (PANELS.md §4.3).
+            items(panels, key = { "panel/${it.key.pcKey}/${it.key.panel}" }) { panel ->
+                PanelCard(panel, onOpen = { onOpenPanel(panel.key) })
             }
             item(key = "address") {
                 AddressCard(addresses, status.port ?: configuredPort, secure, dimmed = state != HomeState.RUNNING)
@@ -436,6 +456,43 @@ private fun AddressCard(addresses: List<String>, port: Int, secure: Boolean, dim
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+/** An open panel of a PC: tapping it opens the panel screen on it. */
+@Composable
+private fun PanelCard(panel: OpenPanel, onOpen: () -> Unit) {
+    Card(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(
+                Icons.Rounded.Dashboard,
+                container = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f),
+                content = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(panel.title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(
+                        R.string.home_panel_from,
+                        panel.pcName,
+                        stringResource(if (panel.attached) R.string.panel_connected else R.string.panel_disconnected),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.home_panel_open), style = MaterialTheme.typography.labelLarge)
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null)
+        }
+    }
+}
+
 @Composable
 private fun ClientCard(client: ClientSnapshot) {
     OutlinedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
@@ -530,6 +587,7 @@ private fun HomeRunningPreview() = PhonetopcTheme(dynamicColor = false) {
         ),
         addresses = listOf("192.168.1.23"), hasPairedPcs = true,
         onStart = {}, onStop = {}, onPause = {}, onPair = {},
+        panels = listOf(OpenPanel(PanelKey("pc/1", "pad"), "Drawing pad", "omarchy", attached = true)),
     )
 }
 

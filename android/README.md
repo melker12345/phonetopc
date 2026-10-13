@@ -125,8 +125,9 @@ A paired PC can post notifications and show full-screen panels on the phone (PAN
   widgets. Text fields say which PC they send to, and there is no password field.
 - **Getting it on screen.** Android doesn't let a background app open a screen, so a new panel
   replaces what's shown only when a panel of the same PC is in front. Otherwise a
-  "*PC* wants to show *title*" notification opens it. **Devices → Show open panels** gets you back
-  to panels you left.
+  "*PC* wants to show *title*" notification opens it. Every open panel is also a card on
+  **Home** (title, PC, Connected/Disconnected) that opens it, and **Devices → Show open panels**
+  gets you back to panels you left.
 - **Canvas.** Ink is drawn locally at once. Strokes go to the PC while you draw: the touch-down
   point immediately, then one chunk per frame and finger from the `MotionEvent` history, and
   the end the moment you lift. Ktor CIO and the TLS frontend both set `TCP_NODELAY`, so small

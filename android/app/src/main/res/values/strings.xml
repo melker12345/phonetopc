@@ -75,6 +75,8 @@
     <string name="home_also_reachable">Also reachable at %1$s</string>
     <string name="home_usb_title">Over USB</string>
     <string name="home_usb_body">adb forward tcp:%1$d tcp:%1$d, then use 127.0.0.1:%1$d</string>
+    <string name="home_panel_from">From %1$s · %2$s</string>
+    <string name="home_panel_open">Open</string>
     <string name="home_clients_header">Connected clients</string>
     <string name="home_clients_empty">No clients yet. Point a client on your PC at the address above.</string>
     <string name="home_clients_empty_secure">No clients yet. Paired PCs connect on their own, for example with phonetopc tail.</string>
