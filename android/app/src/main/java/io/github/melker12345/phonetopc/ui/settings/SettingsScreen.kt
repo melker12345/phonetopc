@@ -536,7 +536,7 @@ private fun AboutGroup(deviceId: String?, phoneKey: PhoneKeyInfo?) {
             colors = transparentItem,
             leadingContent = { IconBadge(Icons.Rounded.Info, size = 36.dp) },
             headlineContent = { Text(stringResource(R.string.settings_version)) },
-            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 3)") },
+            supportingContent = { Text("${BuildConfig.VERSION_NAME} · $PROTOCOL_VERSION (draft 4)") },
         )
         // SECURITY.md §2: the pin a PC stores for this phone, for comparing by eye.
         ListItem(
