@@ -202,6 +202,7 @@ class BridgeService : Service() {
                 security = security,
                 approvals = approvals,
                 notifications = graph.notifications,
+                panels = graph.panels,
                 outputPermissions = graph.outputAccess,
             )
             val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)

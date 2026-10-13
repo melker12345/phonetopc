@@ -1,7 +1,6 @@
 package io.github.melker12345.phonetopc.ui.devices
 
 import android.Manifest
-import android.os.Build
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +29,7 @@ import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.data.PairedPc
+import io.github.melker12345.phonetopc.panels.PanelActivity
 import io.github.melker12345.phonetopc.protocol.panels.Feature
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.ui.MainViewModel
@@ -73,6 +75,7 @@ fun DevicesScreen(vm: MainViewModel, onPair: () -> Unit) {
     val pcs by vm.pairedPcs.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val panels by vm.panels.collectAsStateWithLifecycle()
     val connected = status.clients.mapNotNull { it.pc?.id }.toSet()
     val context = LocalContext.current
     // Android 13+: notifications and panel requests need POST_NOTIFICATIONS; ask when either is turned on.
@@ -80,8 +83,11 @@ fun DevicesScreen(vm: MainViewModel, onPair: () -> Unit) {
     DevicesContent(
         pcs, connected, onPair, onRevoke = vm::revoke,
         devOutput = settings?.takeIf { it.devMode }?.devOutput,
+        openPanels = panels.size,
+        onOpenPanels = { context.startActivity(PanelActivity.intent(context, null)) },
         onSetAllowed = { pcId, feature, allowed ->
-            if (allowed && !SystemSettings.notificationsGranted(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // notificationsGranted is true below Android 13, where there is nothing to ask.
+            if (allowed && !SystemSettings.notificationsGranted(context)) {
                 permission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             vm.setOutputAllowed(pcId, feature, allowed)
@@ -98,6 +104,8 @@ private fun DevicesContent(
     onRevoke: (String) -> Unit,
     /** What the dev-mode PC may do, or `null` when developer mode is off (no such PC then). */
     devOutput: Set<Feature>? = null,
+    openPanels: Int = 0,
+    onOpenPanels: () -> Unit = {},
     /** A PC's id, `null` for the dev-mode PC. */
     onSetAllowed: (String?, Feature, Boolean) -> Unit = { _, _, _ -> },
 ) {
@@ -106,7 +114,7 @@ private fun DevicesContent(
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.devices_title)) }) }) { padding ->
         when {
             pcs == null -> Box(Modifier.fillMaxSize().padding(padding))
-            pcs.isEmpty() && devOutput == null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            pcs.isEmpty() && devOutput == null && openPanels == 0 -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Rounded.Devices,
                     title = stringResource(R.string.devices_empty_title),
@@ -122,6 +130,13 @@ private fun DevicesContent(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (openPanels > 0) {
+                    item(key = "panels") {
+                        FilledTonalButton(onClick = onOpenPanels, modifier = Modifier.fillMaxWidth()) {
+                            Text(pluralStringResource(R.plurals.devices_open_panels, openPanels, openPanels))
+                        }
+                    }
+                }
                 if (devOutput != null) {
                     item(key = "dev") { DevPcCard(devOutput, onSetAllowed = { f, on -> onSetAllowed(null, f, on) }) }
                 }
@@ -286,6 +301,7 @@ private fun DevicesPreview() = PhonetopcTheme(dynamicColor = false) {
         onPair = {},
         onRevoke = {},
         devOutput = setOf(Feature.NOTIFY),
+        openPanels = 2,
     )
 }
 

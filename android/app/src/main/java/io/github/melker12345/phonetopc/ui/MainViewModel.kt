@@ -9,6 +9,7 @@ import io.github.melker12345.phonetopc.data.ApprovalKey
 import io.github.melker12345.phonetopc.data.PairedPc
 import io.github.melker12345.phonetopc.data.PhoneKey
 import io.github.melker12345.phonetopc.protocol.panels.Feature
+import io.github.melker12345.phonetopc.protocol.panels.PanelSnapshot
 import io.github.melker12345.phonetopc.service.BridgeStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _deviceId = MutableStateFlow<String?>(null)
     val deviceId: StateFlow<String?> = _deviceId.asStateFlow()
+
+    /** Panels PCs have shown (PANELS.md §4), for a way back to the panel screen. */
+    val panels: StateFlow<List<PanelSnapshot>> = graph.panels.snapshots
 
     /** `null` until loaded. */
     val pairedPcs: StateFlow<List<PairedPc>?> = graph.pairedPcs.loaded

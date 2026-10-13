@@ -109,6 +109,17 @@
             android:name=".approval.ApprovalActionReceiver"
             android:exported="false" />
 
+        <!-- Panels a PC shows (PANELS.md §4): full screen in their own task, so they can stay
+             open next to the app. Not showWhenLocked: a panel never shows over the lock screen. -->
+        <activity
+            android:name=".panels.PanelActivity"
+            android:configChanges="screenSize|screenLayout|smallestScreenSize|keyboardHidden|orientation"
+            android:exported="false"
+            android:label="@string/panel_label"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.panels"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Actions, taps and dismissals of PC notifications (PANELS.md §3.2). -->
         <receiver
             android:name=".output.PcNotificationReceiver"

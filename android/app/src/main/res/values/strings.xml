@@ -189,6 +189,22 @@
     <string name="pc_notification_high_channel_name">PC notifications: high priority</string>
     <string name="pc_notification_high_channel_description">PC notifications posted with high priority. They can pop up on screen.</string>
     <string name="pc_notification_public_title">Notification from a PC</string>
+    <string name="panel_label">PC panel</string>
+    <string name="panel_connected">Connected</string>
+    <string name="panel_disconnected">Disconnected</string>
+    <string name="panel_close">Close panel</string>
+    <string name="panel_switch">Switch panel</string>
+    <string name="panel_sent_to">Sent to %1$s</string>
+    <string name="panel_send">Send</string>
+    <string name="panel_canvas_full">Canvas full</string>
+    <string name="panel_request_channel_name">Panel requests</string>
+    <string name="panel_request_channel_description">A paired PC wants to show a panel. Tap the notification to open it.</string>
+    <string name="panel_request_title">%1$s wants to show %2$s</string>
+    <string name="panel_request_text">Tap to open the panel</string>
+    <plurals name="devices_open_panels">
+        <item quantity="one">Show %1$d open panel</item>
+        <item quantity="other">Show %1$d open panels</item>
+    </plurals>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
