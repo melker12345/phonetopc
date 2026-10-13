@@ -289,9 +289,9 @@ func TestRateLimitIsPerAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.fail("192.0.2.1")
-	l.fail("192.0.2.1")
-	if !l.blocked("192.0.2.1") || l.blocked("192.0.2.2") {
+	l.failures.Fail("192.0.2.1")
+	l.failures.Fail("192.0.2.1")
+	if !l.failures.Blocked("192.0.2.1") || l.failures.Blocked("192.0.2.2") {
 		t.Error("the limit must apply per source address")
 	}
 }

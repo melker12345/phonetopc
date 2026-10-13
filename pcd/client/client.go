@@ -1,14 +1,27 @@
 // Package client is a small Go client for the phonetopc/1 protocol.
 //
 // It connects to a phone (or the mock phone, or later the phonetopcd daemon),
-// performs the hello handshake, and offers typed calls for list_sensors,
-// subscribe, unsubscribe and get. Responses are correlated by id while events
-// are delivered to per-subscription channels; all methods are safe for
-// concurrent use.
+// performs the hello handshake, and offers typed calls for the methods of
+// draft 4:
+//
+//   - sensors (spec/PROTOCOL.md §4): ListSensors, Subscribe (and
+//     Subscription.Unsubscribe) and Get;
+//   - fingerprint approval (spec/APPROVAL.md): RequestApproval, which
+//     verifies the phone's signature itself;
+//   - notifications and panels (spec/PANELS.md): Notify,
+//     CancelNotification, ShowPanel, AttachPanel, UpdatePanel, ClosePanel,
+//     ListPanels and ClearCanvas, whose input arrives as events of the
+//     "notification" and "panel" sources;
+//   - anything else through Call.
+//
+// Responses are correlated by id while events are delivered to
+// per-subscription channels; all methods are safe for concurrent use.
 //
 // Secure mode (SECURITY.md) needs the phone's pin and the token from
-// pairing. DialPaired takes both from the PC's credential store and finds
-// the phone; Dial with WithPin and WithToken connects to a known address:
+// pairing (`phonetopc pair`). DialPaired takes both from the PC's
+// credential store and finds the phone (mDNS, then its stored addresses);
+// PairedDevices lists the paired phones. Dial with WithPin and WithToken
+// connects to a known address:
 //
 //	c, err := client.DialPaired(ctx, "")    // the only paired phone
 //	c, err := client.Dial(ctx, client.SecureURL("192.168.1.153:8765"),
@@ -41,6 +54,7 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
+	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
 
 // Re-exported protocol types, so users of this package don't need to import
@@ -234,7 +248,7 @@ type callResult struct {
 // the hello handshake.
 func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	o := options{
-		clientInfo:  protocol.ClientInfo{Name: "phonetopc-go", Version: "0.1.0"},
+		clientInfo:  protocol.ClientInfo{Name: "phonetopc-go", Version: version.Version},
 		protocol:    protocol.Version,
 		eventBuffer: DefaultEventBuffer,
 	}
@@ -247,10 +261,11 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	}
 	conn, _, err := websocket.Dial(ctx, url, dopts)
 	if err != nil {
-		if errors.Is(err, ErrPinMismatch) {
-			var pm *PinMismatchError
-			errors.As(err, &pm)
-			return nil, fmt.Errorf("phonetopc: dial %s: %w", url, pm)
+		// Report a pin mismatch itself, not the WebSocket and TLS layers
+		// wrapped around it; errors.Is and errors.As match either way.
+		var pm *PinMismatchError
+		if errors.As(err, &pm) {
+			err = pm
 		}
 		return nil, fmt.Errorf("phonetopc: dial %s: %w", url, err)
 	}

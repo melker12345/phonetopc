@@ -96,40 +96,41 @@ func approvalInfo(key *ecdsa.PrivateKey) *protocol.ApprovalInfo {
 }
 
 // requestApproval handles request_approval (§4). Valid requests that can
-// be shown get their answer later (errAsync), once the Approver decided or
-// the timeout passed; if the session closes first, the prompt is cancelled
-// and nothing is sent.
-func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (any, *protocol.Error) {
+// be shown get their answer later: then async is true and the caller sends
+// nothing now; the answer follows once the Approver decided or the timeout
+// passed, and if the session closes first, the prompt is cancelled and
+// nothing is sent.
+func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (result any, async bool, rpcErr *protocol.Error) {
 	var p struct {
 		Reason    *string         `json:"reason"`
 		Nonce     *string         `json:"nonce"`
 		TimeoutMS json.RawMessage `json:"timeout_ms"`
 	}
-	if err := decodeParams(params, &p); err != nil {
-		return nil, err
+	if err := protocol.DecodeParams(params, &p); err != nil {
+		return nil, false, err
 	}
 	if p.Reason == nil {
-		return nil, protocol.NewError(protocol.CodeInvalidParams, "params.reason is required")
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.reason is required")
 	}
 	if err := protocol.CheckReason(*p.Reason); err != nil {
-		return nil, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
 	}
 	if p.Nonce == nil {
-		return nil, protocol.NewError(protocol.CodeInvalidParams, "params.nonce is required")
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.nonce is required")
 	}
 	if n, err := security.DecodeB64(*p.Nonce); err != nil || len(n) != protocol.ApprovalNonceSize {
-		return nil, protocol.NewError(protocol.CodeInvalidParams, "params.nonce must be base64url of %d bytes", protocol.ApprovalNonceSize)
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.nonce must be base64url of %d bytes", protocol.ApprovalNonceSize)
 	}
 	timeout := protocol.DefaultApprovalTimeout
 	if t := bytes.TrimSpace(p.TimeoutMS); len(t) > 0 {
 		// An integer literal only: no fraction, exponent or null.
 		ms, err := strconv.ParseInt(string(t), 10, 64)
 		if err != nil {
-			return nil, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be an integer")
+			return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be an integer")
 		}
 		timeout = time.Duration(ms) * time.Millisecond
 		if timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout {
-			return nil, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be %d-%d",
+			return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be %d-%d",
 				protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds())
 		}
 	}
@@ -138,10 +139,10 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (a
 	key, pc := s.approvalKey, s.pc
 	s.mu.Unlock()
 	if key == nil || pc == nil {
-		return protocol.RequestApprovalResult{Why: protocol.WhyUnavailable}, nil
+		return protocol.RequestApprovalResult{Why: protocol.WhyUnavailable}, false, nil
 	}
 	if !s.srv.beginApproval() {
-		return protocol.RequestApprovalResult{Why: protocol.WhyBusy}, nil
+		return protocol.RequestApprovalResult{Why: protocol.WhyBusy}, false, nil
 	}
 	req := ApprovalRequest{PC: *pc, Reason: *p.Reason, Timeout: timeout, Remote: s.remote}
 	nonce := *p.Nonce
@@ -187,12 +188,8 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (a
 		end() // before the answer, so the PC may ask again at once
 		s.send(protocol.NewResult(id, res))
 	})
-	return nil, errAsyncResponse
+	return nil, true, nil
 }
-
-// errAsyncResponse is returned by requestApproval when the answer follows
-// later; it is never sent.
-var errAsyncResponse = &protocol.Error{Message: "answered asynchronously"}
 
 // tamper corrupts a base64url signature so that it no longer verifies
 // (a test hook for clients).

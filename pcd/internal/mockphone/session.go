@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/melker12345/phonetopc/pcd/internal/hostlimit"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 )
 
@@ -168,7 +168,7 @@ func (s *session) readLoop() error {
 		}
 		resp, after := s.handle(data)
 		if resp == nil {
-			continue // a client notification: no reply
+			continue // a client notification, or a request answered later
 		}
 		if !s.send(resp) {
 			return s.ctx.Err()
@@ -301,51 +301,23 @@ func (s *session) stopAll() {
 
 // handle processes one text frame and returns the response to send, plus an
 // optional function to run after the response has been queued. resp is nil
-// for a client notification, which gets no reply.
+// when nothing is to be sent now: for a client notification, which gets no
+// reply, and for a request answered later (request_approval).
 func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
-	fail := func(id json.RawMessage, code protocol.ErrorCode, format string, args ...any) (*protocol.Response, func()) {
-		return protocol.NewErrorResponse(id, protocol.NewError(code, format, args...)), nil
+	id, method, params, errResp := protocol.ParseRequest(data)
+	if errResp != nil {
+		return errResp, nil
 	}
-
-	if !json.Valid(data) {
-		return fail(nil, protocol.CodeParseError, "parse error: frame is not valid JSON")
-	}
-	trimmed := bytes.TrimLeft(data, " \t\r\n")
-	if trimmed[0] == '[' {
-		return fail(nil, protocol.CodeInvalidRequest, "batch requests are not supported")
-	}
-	if trimmed[0] != '{' {
-		return fail(nil, protocol.CodeInvalidRequest, "request must be a JSON object")
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return fail(nil, protocol.CodeInvalidRequest, "invalid request: %v", err)
-	}
-
-	id, hasID := fields["id"]
 	// Spec §2: an object without id is a client notification. None are
 	// defined, so it is ignored without a reply, whatever else it contains.
-	if !hasID {
+	if id == nil {
 		return nil, nil
 	}
-	if !protocol.ValidRequestID(id) {
-		return fail(nil, protocol.CodeInvalidRequest, "id must be a string or an integer within ±(2^53-1)")
-	}
-	var version string
-	if json.Unmarshal(fields["jsonrpc"], &version) != nil || version != protocol.JSONRPCVersion {
-		return fail(id, protocol.CodeInvalidRequest, `jsonrpc must be "2.0"`)
-	}
-	// Any string passes this step, even ""; it is then an unknown method.
-	var method string
-	if m := bytes.TrimSpace(fields["method"]); len(m) == 0 || m[0] != '"' || json.Unmarshal(m, &method) != nil {
-		return fail(id, protocol.CodeInvalidRequest, "method must be a string")
-	}
-	params := fields["params"]
 
 	// Spec §3: any request other than hello before a successful hello is
 	// rejected, including unknown methods.
 	if method != protocol.MethodHello && !s.helloed {
-		return fail(id, protocol.CodeHelloRequired, "send hello first")
+		return protocol.NewErrorResponse(id, protocol.NewError(protocol.CodeHelloRequired, "send hello first")), nil
 	}
 
 	var (
@@ -361,7 +333,7 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		case rpcErr.Code == protocol.CodeUnauthorized:
 			// SECURITY.md §5: -32010, then close with 1008.
 			s.rejected = true
-			s.srv.noteAuthFailure(remoteHost(s.remote))
+			s.srv.authFailures.Fail(hostlimit.Host(s.remote))
 			after = func() { s.closeAfterFlush(websocket.StatusPolicyViolation, "unauthorized") }
 		case wasHelloed && s.srv.Secure():
 			// SECURITY.md §5: a failed hello after a successful one also
@@ -372,7 +344,7 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	case protocol.MethodListSensors:
 		// list_sensors takes no params, but if present they must still be an
 		// object (spec §2); its members are ignored.
-		if rpcErr = decodeParams(params, &struct{}{}); rpcErr == nil {
+		if rpcErr = protocol.DecodeParams(params, &struct{}{}); rpcErr == nil {
 			result = protocol.ListSensorsResult{Sensors: s.srv.sensors()}
 		}
 	case protocol.MethodSubscribe:
@@ -387,9 +359,10 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 			rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found (approvals need secure mode)", method)
 			break
 		}
-		result, rpcErr = s.requestApproval(id, params)
-		if rpcErr == errAsyncResponse {
-			return nil, nil // answered later
+		var async bool
+		result, async, rpcErr = s.requestApproval(id, params)
+		if async {
+			return nil, nil // answered later, by requestApproval
 		}
 	case protocol.MethodNotify:
 		result, rpcErr = s.notify(params)
@@ -416,32 +389,13 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 	return protocol.NewResult(id, result), after
 }
 
-// decodeParams decodes params into v. Absent or null params decode as {}.
-func decodeParams(params json.RawMessage, v any) *protocol.Error {
-	p := bytes.TrimSpace(params)
-	if len(p) == 0 || string(p) == "null" {
-		p = []byte("{}")
-	}
-	if p[0] != '{' {
-		return protocol.NewError(protocol.CodeInvalidParams, "params must be an object")
-	}
-	if err := json.Unmarshal(p, v); err != nil {
-		var te *json.UnmarshalTypeError
-		if errors.As(err, &te) && te.Field != "" {
-			return protocol.NewError(protocol.CodeInvalidParams, "params.%s has the wrong type (%s)", te.Field, te.Value)
-		}
-		return protocol.NewError(protocol.CodeInvalidParams, "invalid params: %v", err)
-	}
-	return nil
-}
-
 func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	var p struct {
 		Protocol string               `json:"protocol"`
 		Client   *protocol.ClientInfo `json:"client"`
 		Auth     json.RawMessage      `json:"auth"`
 	}
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if p.Protocol == "" {
@@ -518,7 +472,7 @@ func requireSource(source string) *protocol.Error {
 
 func (s *session) subscribe(params json.RawMessage) (any, func(), *protocol.Error) {
 	var p protocol.SubscribeParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, nil, err
 	}
 	if err := requireSource(p.Source); err != nil {
@@ -564,7 +518,7 @@ func (s *session) subscribe(params json.RawMessage) (any, func(), *protocol.Erro
 
 func (s *session) unsubscribe(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.UnsubscribeParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if p.Subscription == "" {
@@ -585,7 +539,7 @@ func (s *session) unsubscribe(params json.RawMessage) (any, *protocol.Error) {
 
 func (s *session) get(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.GetParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := requireSource(p.Source); err != nil {
@@ -607,123 +561,4 @@ func (s *session) get(params json.RawMessage) (any, *protocol.Error) {
 		return nil, protocol.NewError(protocol.CodeNoValue, "no value for %q yet", info.Source)
 	}
 	return r, nil
-}
-
-// subscription is one active subscription of a session.
-type subscription struct {
-	sess     *session
-	id       string
-	info     protocol.SensorInfo
-	types    []string
-	rate     float64 // effective rate; 0 for on_change
-	minDelta float64
-
-	mu      sync.Mutex
-	started bool // set by start: events before the subscribe response are not sent
-	closed  bool
-	seq     uint64
-	last    json.RawMessage // value of the last event actually queued
-	stopFn  func()
-}
-
-// start begins producing events.
-func (sub *subscription) start() {
-	sub.mu.Lock()
-	sub.started = true
-	sub.mu.Unlock()
-	switch sub.info.Source {
-	case protocol.SourcePanel, protocol.SourceNotification:
-		return // delivered by the panel hub (session.deliver), not the world
-	}
-	if sub.info.Mode == protocol.ModeContinuous {
-		stop := make(chan struct{})
-		sub.setStop(func() { close(stop) })
-		go sub.generate(stop)
-		return
-	}
-	sub.setStop(sub.sess.srv.world.listen(sub.info.Source, sub.emit))
-}
-
-func (sub *subscription) setStop(f func()) {
-	sub.mu.Lock()
-	if sub.closed { // closed before it started (session ended)
-		sub.mu.Unlock()
-		f()
-		return
-	}
-	sub.stopFn = f
-	sub.mu.Unlock()
-}
-
-func (sub *subscription) generate(stop <-chan struct{}) {
-	period := time.Duration(float64(time.Second) / sub.rate)
-	rng := sub.sess.srv.newRand()
-	t := time.NewTicker(period)
-	defer t.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-sub.sess.ctx.Done():
-			return
-		case now := <-t.C:
-			r, err := sub.sess.srv.sampleContinuous(sub.info.Source, now, rng)
-			if err != nil {
-				sub.sess.srv.logf("mock: %v", err)
-				return
-			}
-			sub.emit(r)
-		}
-	}
-}
-
-// emit filters, numbers and queues one reading. It never blocks.
-func (sub *subscription) emit(r protocol.Reading) {
-	if !slices.Contains(sub.types, r.Type) {
-		return
-	}
-	sub.mu.Lock()
-	defer sub.mu.Unlock()
-	if sub.closed || !sub.started {
-		return
-	}
-	if sub.minDelta > 0 && sub.last != nil {
-		d, err := protocol.ValueDistance(sub.info.Shape, sub.last, r.Value)
-		if err == nil && d < sub.minDelta {
-			return // filtered: not sent, so no seq consumed
-		}
-	}
-	ev := &protocol.Event{Subscription: sub.id, Seq: sub.seq, Reading: r}
-	b, err := json.Marshal(protocol.NewEventNotification(ev))
-	if err != nil {
-		sub.sess.srv.logf("mock: marshal event: %v", err)
-		return
-	}
-	if sub.sess.trySend(b, sub.info.Mode == protocol.ModeContinuous) {
-		sub.seq++
-		sub.last = r.Value
-		return
-	}
-	// Queue full: the client isn't keeping up (spec §5, backpressure).
-	if sub.info.Mode == protocol.ModeContinuous {
-		sub.seq++ // dropped; the client sees a seq gap
-		return
-	}
-	sub.sess.srv.logf("mock: %s: on_change queue overflow, closing", sub.sess.remote)
-	sub.sess.closeWith(websocket.StatusPolicyViolation, fmt.Sprintf("event queue overflow (%s)", sub.info.Source))
-}
-
-// close stops the subscription. After it returns, emit queues nothing more.
-func (sub *subscription) close() {
-	sub.mu.Lock()
-	if sub.closed {
-		sub.mu.Unlock()
-		return
-	}
-	sub.closed = true
-	stop := sub.stopFn
-	sub.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 }

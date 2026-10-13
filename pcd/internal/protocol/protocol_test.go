@@ -280,3 +280,61 @@ func TestValueDistance(t *testing.T) {
 		}
 	}
 }
+
+// TestParseRequest covers the framing steps 1-4 of PROTOCOL.md §2 that the
+// phone server and the pairing listener share.
+func TestParseRequest(t *testing.T) {
+	for _, tc := range []struct {
+		in     string
+		code   ErrorCode // 0: no error
+		echoID bool      // the error response carries the request's id
+		notif  bool
+	}{
+		{in: `{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}`},
+		{in: ` {"jsonrpc":"2.0","id":"a","method":""}`},
+		{in: `nope`, code: CodeParseError},
+		{in: `{"id":1} x`, code: CodeParseError},
+		{in: `[{"jsonrpc":"2.0","id":1,"method":"hello"}]`, code: CodeInvalidRequest},
+		{in: `42`, code: CodeInvalidRequest},
+		{in: `{"jsonrpc":"1.0","method":7}`, notif: true},
+		{in: `{"jsonrpc":"2.0","id":1.5,"method":"hello"}`, code: CodeInvalidRequest},
+		{in: `{"jsonrpc":"1.0","id":1,"method":"hello"}`, code: CodeInvalidRequest, echoID: true},
+		{in: `{"jsonrpc":"2.0","id":1,"method":7}`, code: CodeInvalidRequest, echoID: true},
+	} {
+		id, _, _, resp := ParseRequest([]byte(tc.in))
+		switch {
+		case tc.code == 0 && !tc.notif:
+			if resp != nil || id == nil {
+				t.Errorf("%s: got %v, id %s; want a request", tc.in, resp, id)
+			}
+		case tc.notif:
+			if resp != nil || id != nil {
+				t.Errorf("%s: got %v, id %s; want a notification", tc.in, resp, id)
+			}
+		default:
+			if resp == nil || resp.Error == nil || resp.Error.Code != tc.code {
+				t.Errorf("%s: got %+v, want error %d", tc.in, resp, tc.code)
+				continue
+			}
+			if (resp.ID != nil) != tc.echoID {
+				t.Errorf("%s: response id %s, echo %v", tc.in, resp.ID, tc.echoID)
+			}
+		}
+	}
+}
+
+func TestDecodeParams(t *testing.T) {
+	var p struct {
+		Source string `json:"source"`
+	}
+	for _, ok := range []string{``, `null`, ` {} `, `{"source":"gyro","extra":1}`} {
+		if err := DecodeParams(json.RawMessage(ok), &p); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{`[]`, `"x"`, `1`, `{"source":1}`} {
+		if err := DecodeParams(json.RawMessage(bad), &p); err == nil || err.Code != CodeInvalidParams {
+			t.Errorf("%q: got %v, want -32602", bad, err)
+		}
+	}
+}

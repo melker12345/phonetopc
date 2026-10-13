@@ -30,9 +30,8 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/client"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
-
-const version = "0.1.0"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -137,7 +136,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return c.usageError(err)
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, "phonetopc", version)
+		fmt.Fprintln(stdout, "phonetopc", version.Version)
 		return 0
 	}
 	if global.NArg() == 0 {
@@ -278,7 +277,7 @@ func parse(fs *flag.FlagSet, args []string, wantPos int, posName string) ([]stri
 func (c *cli) dial(ctx context.Context) (*client.Client, error) {
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	info := client.WithClientInfo("phonetopc-cli", version)
+	info := client.WithClientInfo("phonetopc-cli", version.Version)
 	if c.dev {
 		addr := c.addr
 		if addr == "" {

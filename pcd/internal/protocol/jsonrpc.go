@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strconv"
 )
 
@@ -142,4 +143,72 @@ func ValidRequestID(id json.RawMessage) bool {
 		return err == nil && i >= -MaxSafeID && i <= MaxSafeID
 	}
 	return false
+}
+
+// ParseRequest applies the framing checks of PROTOCOL.md §2, steps 1-4, to
+// one text frame: strict JSON (-32700), a JSON object (-32600; a batch array
+// gets its own message, §1), then the id, jsonrpc and method members
+// (-32600). It returns an error response with the first failure, or the
+// request's parts. id is nil (and errResp nil) for a client notification,
+// which gets no reply (§2 step 3), whatever else the object contains.
+//
+// The pairing listener frames its messages the same way (SECURITY.md §4.1,
+// "(1)–(4) as in PROTOCOL.md §2"), so both servers share this.
+func ParseRequest(data []byte) (id json.RawMessage, method string, params json.RawMessage, errResp *Response) {
+	fail := func(id json.RawMessage, code ErrorCode, format string, args ...any) (json.RawMessage, string, json.RawMessage, *Response) {
+		return nil, "", nil, NewErrorResponse(id, NewError(code, format, args...))
+	}
+	if !json.Valid(data) {
+		return fail(nil, CodeParseError, "parse error: frame is not valid JSON")
+	}
+	switch bytes.TrimLeft(data, " \t\r\n")[0] {
+	case '{':
+	case '[':
+		return fail(nil, CodeInvalidRequest, "batch requests are not supported")
+	default:
+		return fail(nil, CodeInvalidRequest, "request must be a JSON object")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fail(nil, CodeInvalidRequest, "invalid request: %v", err)
+	}
+	id, hasID := fields["id"]
+	if !hasID {
+		return nil, "", nil, nil
+	}
+	// Only an invalid id is answered with "id": null; later step-4 errors
+	// echo it.
+	if !ValidRequestID(id) {
+		return fail(nil, CodeInvalidRequest, "id must be a string or an integer within ±(2^53-1)")
+	}
+	var version string
+	if json.Unmarshal(fields["jsonrpc"], &version) != nil || version != JSONRPCVersion {
+		return fail(id, CodeInvalidRequest, `jsonrpc must be "2.0"`)
+	}
+	// Any string passes this step, even ""; it is then an unknown method.
+	if m := bytes.TrimSpace(fields["method"]); len(m) == 0 || m[0] != '"' || json.Unmarshal(m, &method) != nil {
+		return fail(id, CodeInvalidRequest, "method must be a string")
+	}
+	return id, method, fields["params"], nil
+}
+
+// DecodeParams decodes a request's params into v (PROTOCOL.md §2): they
+// must be an object if present, and absent or null params decode as {}.
+// Unknown members are ignored. Every failure is -32602.
+func DecodeParams(params json.RawMessage, v any) *Error {
+	p := bytes.TrimSpace(params)
+	if len(p) == 0 || string(p) == "null" {
+		p = []byte("{}")
+	}
+	if p[0] != '{' {
+		return NewError(CodeInvalidParams, "params must be an object")
+	}
+	if err := json.Unmarshal(p, v); err != nil {
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &te) && te.Field != "" {
+			return NewError(CodeInvalidParams, "params.%s has the wrong type (%s)", te.Field, te.Value)
+		}
+		return NewError(CodeInvalidParams, "invalid params: %v", err)
+	}
+	return nil
 }

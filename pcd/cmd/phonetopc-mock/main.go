@@ -34,6 +34,7 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/pairing"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
+	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
 
 const usage = `Usage:
@@ -212,7 +213,7 @@ func serve(ctx context.Context, args []string) error {
 		scheme = "wss"
 		ln = tls.NewListener(ln, security.ServerTLSConfig(ident.Cert))
 		log.Printf("phonetopc-mock %s serving %s://%s%s, secure mode (device %s %q, pin %s, state %s, approvals: %s)",
-			mockphone.Version, scheme, ln.Addr(), protocol.WSPath, ident.ID, ident.Name, ident.Pin, *stateDir, *approval)
+			version.Version, scheme, ln.Addr(), protocol.WSPath, ident.ID, ident.Name, ident.Pin, *stateDir, *approval)
 		// Pairings and revocations may come from other processes
 		// (phonetopc-mock pair/revoke): close sessions of revoked PCs.
 		go func() {
@@ -233,7 +234,7 @@ func serve(ctx context.Context, args []string) error {
 		}()
 	} else {
 		log.Printf("phonetopc-mock %s serving %s://%s%s, dev mode: no TLS, no authentication (device %s)",
-			mockphone.Version, scheme, ln.Addr(), protocol.WSPath, opts.Device.ID)
+			version.Version, scheme, ln.Addr(), protocol.WSPath, opts.Device.ID)
 	}
 	if *mdns {
 		txt := map[string]string{"id": mock.DeviceID(), "proto": "1"}

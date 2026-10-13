@@ -11,7 +11,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -19,11 +18,10 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/melker12345/phonetopc/pcd/internal/hostlimit"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
-
-// Version is the mock's server version reported in hello.
-const Version = "0.1.0"
 
 // ServerName is the mock's server name reported in hello.
 const ServerName = "phonetopc-mock"
@@ -187,10 +185,12 @@ type Server struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu           sync.Mutex
-	sessions     map[*session]struct{}
-	seedSeq      uint64
-	authFailures map[string][]time.Time // by remote host
+	mu       sync.Mutex
+	sessions map[*session]struct{}
+	seedSeq  uint64
+
+	// authFailures counts failed hellos per remote host (SECURITY.md §5).
+	authFailures *hostlimit.Limiter
 
 	approvalPending bool // one approval at a time per phone (APPROVAL.md §4)
 }
@@ -206,7 +206,7 @@ func New(opts Options) *Server {
 		cancel:   cancel,
 		sessions: make(map[*session]struct{}),
 
-		authFailures: make(map[string][]time.Time),
+		authFailures: hostlimit.New(opts.MaxAuthFailures, time.Minute),
 	}
 	s.world = newWorld(s)
 	s.panels = newPanelHub(s)
@@ -249,7 +249,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		s.logf("mock: accept from %s: %v", r.RemoteAddr, err)
 		return
 	}
-	if s.Secure() && s.authBlocked(remoteHost(r.RemoteAddr)) {
+	if s.Secure() && s.authFailures.Blocked(hostlimit.Host(r.RemoteAddr)) {
 		s.logf("mock: %s: too many failed hellos, closing with 1013", r.RemoteAddr)
 		conn.Close(websocket.StatusTryAgainLater, "too many failed hellos, try again later")
 		return
@@ -271,36 +271,6 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		s.wg.Done()
 	}()
 	sess.run()
-}
-
-func remoteHost(addr string) string {
-	if h, _, err := net.SplitHostPort(addr); err == nil {
-		return h
-	}
-	return addr
-}
-
-// authBlocked reports whether host failed too many hellos in the last minute.
-func (s *Server) authBlocked(host string) bool {
-	if s.opts.MaxAuthFailures < 0 {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cutoff := time.Now().Add(-time.Minute)
-	f := slices.DeleteFunc(s.authFailures[host], func(t time.Time) bool { return t.Before(cutoff) })
-	if len(f) == 0 {
-		delete(s.authFailures, host)
-	} else {
-		s.authFailures[host] = f
-	}
-	return len(f) >= s.opts.MaxAuthFailures
-}
-
-func (s *Server) noteAuthFailure(host string) {
-	s.mu.Lock()
-	s.authFailures[host] = append(s.authFailures[host], time.Now())
-	s.mu.Unlock()
 }
 
 // Recheck re-validates the token of every authenticated session and closes
@@ -375,7 +345,7 @@ func (s *Server) sensor(source string) (protocol.SensorInfo, bool) {
 func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInfo) protocol.HelloResult {
 	h := protocol.HelloResult{
 		Protocol:     protocol.Version,
-		Server:       protocol.ServerInfo{Name: ServerName, Version: Version},
+		Server:       protocol.ServerInfo{Name: ServerName, Version: version.Version},
 		Device:       s.opts.Device,
 		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet, protocol.CapabilityNotify, protocol.CapabilityPanels},
 		PC:           pc,

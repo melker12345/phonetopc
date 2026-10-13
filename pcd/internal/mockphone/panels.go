@@ -289,7 +289,7 @@ func (s *Server) AllowPanels(on bool) {
 
 func (s *session) notify(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.NotifyParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := protocol.CheckNotify(p); err != nil {
@@ -326,7 +326,7 @@ func (s *session) notify(params json.RawMessage) (any, *protocol.Error) {
 
 func (s *session) notifyCancel(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.NotifyCancelParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := protocol.CheckID(p.ID); err != nil {
@@ -378,7 +378,7 @@ func (s *session) panelShow(params json.RawMessage) (any, func(), *protocol.Erro
 		KeepAwake   bool            `json:"keep_awake"`
 		Orientation *string         `json:"orientation"`
 	}
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, nil, err
 	}
 	if err := protocol.CheckID(p.Panel); err != nil {
@@ -456,7 +456,7 @@ func (s *session) panelShow(params json.RawMessage) (any, func(), *protocol.Erro
 
 func (s *session) panelAttach(params json.RawMessage) (any, func(), *protocol.Error) {
 	var p protocol.PanelAttachParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, nil, err
 	}
 	if err := protocol.CheckID(p.Panel); err != nil {
@@ -522,7 +522,7 @@ func (s *session) panelUpdate(params json.RawMessage) (any, *protocol.Error) {
 			Set    json.RawMessage `json:"set"`
 		} `json:"updates"`
 	}
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := protocol.CheckID(p.Panel); err != nil {
@@ -583,7 +583,7 @@ func (s *session) panelUpdate(params json.RawMessage) (any, *protocol.Error) {
 
 func (s *session) panelClose(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.PanelRef
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := protocol.CheckID(p.Panel); err != nil {
@@ -605,7 +605,7 @@ func (s *session) panelClose(params json.RawMessage) (any, *protocol.Error) {
 }
 
 func (s *session) panelList(params json.RawMessage) (any, *protocol.Error) {
-	if err := decodeParams(params, &struct{}{}); err != nil {
+	if err := protocol.DecodeParams(params, &struct{}{}); err != nil {
 		return nil, err
 	}
 	h := s.srv.panels
@@ -623,7 +623,7 @@ func (s *session) panelList(params json.RawMessage) (any, *protocol.Error) {
 
 func (s *session) canvasClear(params json.RawMessage) (any, *protocol.Error) {
 	var p protocol.CanvasClearParams
-	if err := decodeParams(params, &p); err != nil {
+	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, err
 	}
 	if err := protocol.CheckID(p.Panel); err != nil {
