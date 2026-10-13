@@ -201,6 +201,8 @@ class BridgeService : Service() {
                 deviceInfoProvider = { DeviceIdentity.info(applicationContext, deviceId) },
                 security = security,
                 approvals = approvals,
+                notifications = graph.notifications,
+                outputPermissions = graph.outputAccess,
             )
             val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)
             // Tracked before it starts: start() blocks and can't be cancelled, so a Stop

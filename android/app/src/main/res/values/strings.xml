@@ -184,6 +184,11 @@
     <string name="devices_allow_panels_summary">Let this PC show full-screen panels: buttons, sliders, text and a drawing canvas</string>
     <string name="devices_dev_pc_body">Every client in developer mode counts as this one PC. It isn\'t verified, so allow only what you need.</string>
     <string name="panel_dev_pc_name">Unverified PC (dev mode)</string>
+    <string name="pc_notification_channel_name">PC notifications</string>
+    <string name="pc_notification_channel_description">Notifications that a paired PC posts, once you allow it on the Devices screen.</string>
+    <string name="pc_notification_high_channel_name">PC notifications: high priority</string>
+    <string name="pc_notification_high_channel_description">PC notifications posted with high priority. They can pop up on screen.</string>
+    <string name="pc_notification_public_title">Notification from a PC</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

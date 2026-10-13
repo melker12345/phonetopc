@@ -109,6 +109,11 @@
             android:name=".approval.ApprovalActionReceiver"
             android:exported="false" />
 
+        <!-- Actions, taps and dismissals of PC notifications (PANELS.md §3.2). -->
+        <receiver
+            android:name=".output.PcNotificationReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.BridgeService"
             android:exported="false"
