@@ -1,12 +1,17 @@
-# phonetopc security — pairing, TLS and tokens (draft 3)
+# phonetopc security — pairing, TLS and tokens (draft 4)
 
-This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md). It is milestone M2 of [`plan.md`](../plan.md).
+This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md).
 The key words MUST, SHOULD and MAY are used as in RFC 2119.
+
+Draft numbers are shared by the whole spec (see `PROTOCOL.md`). This document is unchanged in draft 4.
 
 **Changes in draft 3** (from the first three implementations and the first real pairing): default pairing port
 8766; results of `pair_qr` and `pair_sas_confirm`; long-pending pairing answers; order of checks for pairing and
 for secure `hello`; close codes; the listener survives refusals; re-pairing closes old sessions; exact QR encoding;
-trying several addresses; locking and updating `devices.json`; the stored `approval_key`. Fingerprint approval
+trying several addresses; locking and updating `devices.json`; the stored `approval_key`; the form of phone ids;
+one connection per pairing and the 20-second start; one prompt per QR secret; prompts that need an explicit yes;
+the limit of 3 failed code comparisons; no code comparison without a person; replacing a paired phone that has a
+different key; the TLS handshake deadline and the limit on unauthenticated connections. Fingerprint approval
 itself is in [`APPROVAL.md`](APPROVAL.md).
 
 ## 1. Goals and threat model
@@ -190,6 +195,8 @@ Both ways end with the phone issuing a token to the PC:
 
 ### 4.5 Pairing errors
 
+These codes occur only on the pairing connection. `PROTOCOL.md` §7 lists them with every other code.
+
 | Code | Name | When |
 |---|---|---|
 | `-32020` | `bad_secret` | `pair_qr` secret doesn't match |
@@ -264,15 +271,15 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
   others, and is reported only if no address works. Once connected, move the working address to the front of
   `addresses` (never storing loopback addresses, e.g. from `adb forward`), and update `port` only from mDNS.
 - If `hello.device.id` differs from the stored id, clients SHOULD warn; the pin already proved the key.
-- In milestone M3, `phonetopcd` becomes the main user of this file, and scripts talk to the daemon instead.
 
-## 7. Error codes added to PROTOCOL.md §7
+## 7. Error codes
 
-| Code | Name | When |
-|---|---|---|
-| `-32010` | `unauthorized` | Secure mode `hello` without a valid token |
+Secure sessions add `-32010` (`unauthorized`): a secure mode `hello` without a valid token (§5). Pairing adds the
+codes of §4.5. `PROTOCOL.md` §7 is the complete list.
 
 ## 8. What this doesn't solve yet
 
 - A phone with many PCs, or a PC with many phones, works, but there's no UI for choosing a default yet beyond
   "the only one" or `--device`.
+- Every program on the PC reads `devices.json` and connects to the phone itself. A planned PC daemon,
+  `phonetopcd`, would become the main user of this file, and programs would talk to the daemon instead.

@@ -1,8 +1,10 @@
 # Conformance material
 
 Conformance material for `phonetopc/1` (draft 4) lives here.
-[`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md),
-[`../APPROVAL.md`](../APPROVAL.md) and [`../PANELS.md`](../PANELS.md) are still the normative reference.
+The prose of [`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md),
+[`../APPROVAL.md`](../APPROVAL.md) and [`../PANELS.md`](../PANELS.md) is the normative reference. The cases,
+vectors and transcripts here follow it, like the JSON Schema; where one of them disagrees with the prose, the
+prose wins and the case is a bug.
 
 - [`server-cases.json`](server-cases.json): a language-neutral suite of single-request cases that
   every **server** implementation runs in its own tests. It pins down how a server answers
@@ -125,8 +127,8 @@ above, with these differences:
   per minute: the cases fail many hellos from one address.
 - Otherwise as for `server-cases.json` (catalog, availability, values).
 
-**Choices the cases make.** §5 doesn't say where the token check sits in the order of checks of
-`PROTOCOL.md` §2. The cases take this order for `hello` in secure mode:
+**Order of checks.** `SECURITY.md` §5 places the token check within the order of checks of
+`PROTOCOL.md` §2. The cases test this order for `hello` in secure mode:
 
 1. Steps 1–6 as usual; before a successful `hello` other requests still get `-32003`, without
    closing.
@@ -136,9 +138,9 @@ above, with these differences:
    not a non-empty string, or with an unknown or revoked token: `-32010`, then close 1008.
 4. Then the protocol version: `-32004` with `data.supported` (no close).
 
-So an unauthenticated client learns nothing but `-32010`. SECURITY.md draft 3 settled this order
-and adds: any failing `hello` after a successful one (`-32010`, `-32602` or `-32004`) closes the
-connection with 1008 after the error response (`rehello_*` cases).
+So an unauthenticated client learns nothing but `-32010`. `SECURITY.md` §5 also says that any
+failing `hello` after a successful one (`-32010`, `-32602` or `-32004`) closes the connection with
+1008 after the error response (`rehello_*` cases).
 
 ## Approval server cases (`approval-server-cases.json`)
 

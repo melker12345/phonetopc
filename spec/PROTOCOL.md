@@ -1,11 +1,17 @@
 # phonetopc protocol — version `phonetopc/1` (draft 4)
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
-JSON Schemas for every message live in [`schemas/`](schemas/).
 
 This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
-tokens (milestone M2). [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
+tokens. [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
 [`PANELS.md`](PANELS.md) covers notifications and panels, PC → phone output (`notify`, `panel_show`, …).
+The four documents share one draft number: this is draft 4 of all of them.
+
+The prose of these documents is the normative reference. The JSON Schema
+[`schemas/phonetopc-1.schema.json`](schemas/phonetopc-1.schema.json) describes the session messages (every
+request, response and `event` on `/v1/ws`), not the pairing messages (`pair_*`, `SECURITY.md` §4). It and the cases
+in [`conformance/`](conformance/) follow the prose; where they disagree with it, the prose wins and the schema or
+case is a bug.
 
 **Changes in draft 4:** notifications and panels (`notify`, `notify_cancel`, `panel_show`, `panel_attach`,
 `panel_update`, `panel_close`, `panel_list`, `canvas_clear`), capabilities `notify` and `panels`, sources
@@ -13,6 +19,7 @@ tokens (milestone M2). [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval 
 
 **Changes in draft 3:** `request_approval`, capability `approval` and `hello.approval`; see `APPROVAL.md`.
 Sources `rotation_vector`, `magnetometer`, `compass`, `barometer`, `location` and `nfc` (§6); `proximity` clarified.
+Resource limits (§3). Pairing and secure sessions made precise; see the draft 3 notes in `SECURITY.md`.
 
 **Changes in draft 2:** secure mode (`wss://` with a pinned certificate) is the default; `hello` gains `auth`
 and its result gains `pc`; new error `-32010`; mDNS TXT gains `tls=1`. See `SECURITY.md`.
@@ -29,7 +36,6 @@ are ignored; `get` documents `type`; `unsubscribe` result and per-method results
 - Dev mode has no TLS and no authentication. The phone app MUST make dev mode an explicit, off-by-default setting.
 - Each WebSocket text frame carries exactly one UTF-8 JSON object. Batching multiple messages into one frame (JSON-RPC batch arrays) is NOT supported; a server MUST answer a batch array with error `-32600`.
 - Binary frames are reserved. Servers MUST close the connection with code 1003 on receiving one.
-- The PC daemon `phonetopcd` exposes the **same protocol** to local clients (Unix socket / localhost WS) in a later milestone.
 
 ## 2. Message format: JSON-RPC 2.0
 
@@ -227,7 +233,8 @@ New sources and types MAY be added in any draft. Clients MUST tolerate unknown s
 
 ## 7. Errors
 
-Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal error). Application codes:
+This section lists every error code of the spec; other documents explain theirs but defer to this list.
+Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal error). Application codes on `/v1/ws`:
 
 | Code | Name | When |
 |---|---|---|
@@ -243,6 +250,19 @@ Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `
 | `-32032` | `too_many_panels` | The PC already has 8 panels (`PANELS.md` §9) |
 | `-32033` | `rate_limited` | Too many notifications (`PANELS.md` §9) |
 
+`request_approval` adds no codes: its user-level outcomes are results (`APPROVAL.md` §4.1, §6).
+
+Pairing (`SECURITY.md` §4) runs on its own connection, `/v1/pair` on the PC, with protocol `phonetopc-pair/1`. It
+uses the standard codes, `-32004` as above, and these codes, which occur only there:
+
+| Code | Name | When |
+|---|---|---|
+| `-32020` | `bad_secret` | `pair_qr` secret doesn't match (`SECURITY.md` §4.2) |
+| `-32021` | `rejected` | The PC user declined (`SECURITY.md` §4.2–§4.4) |
+| `-32022` | `out_of_order` | A pairing method sent at the wrong step (`SECURITY.md` §4.1) |
+| `-32023` | `sas_mismatch` | A user said the codes differ, or the commitment check failed (`SECURITY.md` §4.3) |
+| `-32024` | `expired` | The pairing listener timed out (`SECURITY.md` §4.1) |
+
 Every error has `message` (human-readable) and SHOULD have `data.name`: the application names above, or `parse_error`, `invalid_request`, `method_not_found`, `invalid_params`, `internal_error` for the standard codes.
 
 ## 8. Discovery
@@ -253,3 +273,5 @@ This draft uses a manual address. Servers SHOULD additionally advertise `_phonet
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
 - `command` (vibrate, …) for PC → phone actions other than approval, notifications and panels.
+- A PC daemon, `phonetopcd`, that keeps one connection to the phone and offers this same protocol to local
+  programs (Unix socket or localhost WebSocket). Until then, every program connects to the phone itself.

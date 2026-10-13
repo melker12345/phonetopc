@@ -342,6 +342,8 @@ from the request alone, including the whole layout. Step 8 then checks, in this 
 the panel exists (`-32031`) or the limit (`-32032`), what depends on the panel's widgets (`-32602`, e.g. an
 unknown widget in `panel_update`), then `-32033`.
 
+The codes below are added in draft 4; `PROTOCOL.md` §7 lists them with every other code.
+
 | Code | Name | When |
 |---|---|---|
 | `-32030` | `not_allowed` | The user hasn't allowed this feature for this PC; `data.permission` is `"notify"` or `"panels"` |

@@ -22,13 +22,21 @@ Prior art. Apple Handoff and Continuity, the same idea but walled to same-vendor
 
 ## Status
 
-Milestone M1 (walking skeleton) from [plan.md](plan.md): protocol draft 1 in plaintext **dev mode only**. No pairing or encryption yet, so only use it on a network you trust.
+Protocol `phonetopc/1`, draft 4 ([`spec/`](spec/)). What works:
+
+- **Secure mode by default.** A PC pairs once with `phonetopc pair`, by scanning a QR code or by picking the PC on the phone and comparing a 6-digit code. After that every connection is `wss://` with the phone's key pinned and a per-PC token, and the phone can revoke any PC. Unencrypted dev mode is an opt-in setting in the app.
+- **Sensors:** accelerometer, gyroscope, orientation, magnetic field, compass, light, proximity, battery, barometer, location, NFC tags and a Quick Settings tile.
+- **Fingerprint approval:** a PC program asks for a fingerprint on the phone and verifies the phone's signature itself.
+- **Notifications and panels:** a PC program posts notifications on the phone or shows a panel there (buttons, toggles, sliders, text, a drawing canvas) and gets the input back as events.
+- **On the PC:** the `phonetopc` CLI, the `phonetopc-mock` fake phone and a Go client library, plus a Python client library.
+
+Not there yet (see [plan.md](plan.md)): the `phonetopcd` background daemon that shares one phone connection between programs, so today each program connects to the phone itself; unlocking the PC with a fingerprint (the PAM module); packages (AUR, `.deb`, `.rpm`, APK releases).
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), [`PANELS.md`](spec/PANELS.md) (notifications and panels), JSON Schema, conformance transcripts and cases |
+| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), [`SECURITY.md`](spec/SECURITY.md) (pairing, TLS and tokens), [`APPROVAL.md`](spec/APPROVAL.md) (fingerprint approval), [`PANELS.md`](spec/PANELS.md) (notifications and panels), JSON Schema, conformance transcripts and cases |
 | [`android/`](android/) | Phone app (Kotlin, Jetpack Compose, Ktor) |
 | [`pcd/`](pcd/) | PC side in Go: `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
 | [`clients/python/`](clients/python/) | Python client library |
@@ -39,15 +47,15 @@ Milestone M1 (walking skeleton) from [plan.md](plan.md): protocol draft 1 in pla
 No phone needed — use the mock:
 
 ```sh
-cd pcd && CGO_ENABLED=0 go build -o bin/ ./cmd/...
-bin/phonetopc-mock &                 # fake phone on 127.0.0.1:8765
-bin/phonetopc tail gyro --rate 10    # stream from the Go CLI
+(cd pcd && CGO_ENABLED=0 go build -o bin/ ./cmd/...)
+pcd/bin/phonetopc-mock &             # fake phone on 127.0.0.1:8765, in dev mode
+pcd/bin/phonetopc --insecure-dev tail gyro --rate 10   # stream from the Go CLI
 
 pip install -e clients/python
 python examples/print_gyro.py ws://127.0.0.1:8765   # same stream from Python (ws:// = dev mode, no pairing)
 python examples/stream_deck.py --addr ws://127.0.0.1:8765 --backend none   # a panel; the mock's simulated user presses its buttons (none: leave your real audio alone)
 ```
 
-With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb forward tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
+With a real phone: build and install the app (see [`android/README.md`](android/README.md)), run `pcd/bin/phonetopc pair` on the PC and pair from the app, start the server in the app, then run e.g. `pcd/bin/phonetopc tail gyro`. The CLI and the client libraries find the paired phone themselves (see [`pcd/README.md`](pcd/README.md)). Over USB, `adb forward tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765` (`phonetopc --addr 127.0.0.1:8765 …`).
 
-Any language with a WebSocket library can talk to the phone: send JSON-RPC 2.0 to `ws://<phone>:8765/v1/ws`, starting with `hello`. See [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
+Any language with a WebSocket library can talk to the phone: send JSON-RPC 2.0 to `wss://<phone>:8765/v1/ws` with the phone's key pinned, starting with `hello` and the token from pairing ([`spec/SECURITY.md`](spec/SECURITY.md)), or to `ws://<phone>:8765/v1/ws` in dev mode. See [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
