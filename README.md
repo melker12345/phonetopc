@@ -2,7 +2,7 @@
 
 Project: a device-agnostic bridge between phone sensors and a PC. Target platforms are Android, specifically Samsung, and Linux, specifically Arch. iOS is explicitly out of scope.
 
-Overview and goals. Build the infrastructure and protocol that make it easy to wire phone sensors to a PC, not a collection of prebuilt features. Users write their own logic, ideally Python on the PC, without touching Android code. Motivating examples: unlock or wake the PC when a fingerprint matches on the phone; use the phone's gyroscope as an air-mouse or presentation clicker; presence detection, where the PC locks itself when the phone leaves the room.
+Overview and goals. Build the infrastructure and protocol that make it easy to wire phone sensors to a PC, not a collection of prebuilt features. Users write their own logic, ideally Python on the PC, without touching Android code. Motivating examples: unlock or wake the PC when a fingerprint matches on the phone; use the phone's gyroscope as an air-mouse or presentation clicker; presence detection, where the PC locks itself when the phone leaves the room. It also works the other way: a PC program can post notifications on the phone and show panels there, such as a stream deck, a status screen or a drawing pad, and get the user's input back as events.
 
 Non-goals. Not building each feature as a toggle inside the app. No iOS support. Not requiring users to write or compile Android apps.
 
@@ -28,11 +28,11 @@ Milestone M1 (walking skeleton) from [plan.md](plan.md): protocol draft 1 in pla
 
 | Path | What |
 |---|---|
-| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), JSON Schema, conformance transcripts and cases |
+| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), [`PANELS.md`](spec/PANELS.md) (notifications and panels), JSON Schema, conformance transcripts and cases |
 | [`android/`](android/) | Phone app (Kotlin, Jetpack Compose, Ktor) |
 | [`pcd/`](pcd/) | PC side in Go: `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
 | [`clients/python/`](clients/python/) | Python client library |
-| [`examples/`](examples/) | Python recipes: print gyro, compass, air mouse, lock PC from a phone tile |
+| [`examples/`](examples/) | Python recipes: print gyro, compass, air mouse, lock PC from a phone tile, stream deck, drawing pad, notify when a command is done |
 
 ## Quick start
 
@@ -45,6 +45,7 @@ bin/phonetopc tail gyro --rate 10    # stream from the Go CLI
 
 pip install -e clients/python
 python examples/print_gyro.py ws://127.0.0.1:8765   # same stream from Python (ws:// = dev mode, no pairing)
+python examples/stream_deck.py --addr ws://127.0.0.1:8765 --backend none   # a panel; the mock's simulated user presses its buttons (none: leave your real audio alone)
 ```
 
 With a real phone: build and install the app (see [`android/README.md`](android/README.md)), enable *Developer mode (unencrypted)* in its settings, then point the CLI or a script at the address shown in the app, e.g. `phonetopc --addr 192.168.1.20:8765 list`. Over USB, `adb forward tcp:8765 tcp:8765` makes the phone reachable on `127.0.0.1:8765`.
