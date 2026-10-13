@@ -25,16 +25,20 @@ __all__ = [
     "InvalidRequest",
     "MethodNotFound",
     "NoValue",
+    "NotAllowed",
     "NotPaired",
     "ParseError",
     "PhoneUnreachable",
     "PhonetopcError",
     "PinMismatch",
     "ProtocolError",
+    "RateLimited",
     "RequestTimeout",
     "SourceUnavailable",
     "SubscriptionOverflow",
+    "TooManyPanels",
     "Unauthorized",
+    "UnknownPanel",
     "UnknownSource",
     "UnknownSubscription",
     "UnsupportedProtocol",
@@ -308,6 +312,58 @@ class Unauthorized(PhonetopcError):
         )
 
 
+# Notifications and panels (PANELS.md section 9).
+
+
+class NotAllowed(PhonetopcError):
+    """The user hasn't allowed notifications or panels for this PC (``-32030``).
+
+    ``permission`` is ``"notify"`` or ``"panels"``. Both are off by default:
+    turn them on for this PC in the phone app (*Notifications*, *Screen panels*).
+    """
+
+    CODE = -32030
+    NAME = "not_allowed"
+
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
+        super().__init__(code, message, data)
+        setting = {"notify": "Notifications", "panels": "Screen panels"}.get(
+            self.permission or "", "Notifications / Screen panels"
+        )
+        self.args = (
+            f"{message} (code {code}): turn on {setting} for this PC in the phone app "
+            "(both are off by default)",
+        )
+
+    @property
+    def permission(self) -> str | None:
+        """``data.permission``: ``"notify"`` or ``"panels"``."""
+        if isinstance(self.data, dict) and isinstance(self.data.get("permission"), str):
+            return str(self.data["permission"])
+        return None
+
+
+class UnknownPanel(PhonetopcError):
+    """No panel of this PC has that id: never created, closed, or expired (``-32031``)."""
+
+    CODE = -32031
+    NAME = "unknown_panel"
+
+
+class TooManyPanels(PhonetopcError):
+    """``panel_show`` of a new panel when the PC already has 8 (``-32032``)."""
+
+    CODE = -32032
+    NAME = "too_many_panels"
+
+
+class RateLimited(PhonetopcError):
+    """``notify`` above the phone's rate limit (``-32033``)."""
+
+    CODE = -32033
+    NAME = "rate_limited"
+
+
 _BY_CODE: dict[int, type[PhonetopcError]] = {}
 _BY_NAME: dict[str, type[PhonetopcError]] = {}
 for _cls in (
@@ -323,6 +379,10 @@ for _cls in (
     UnknownSubscription,
     NoValue,
     Unauthorized,
+    NotAllowed,
+    UnknownPanel,
+    TooManyPanels,
+    RateLimited,
 ):
     assert _cls.CODE is not None and _cls.NAME is not None
     _BY_CODE[_cls.CODE] = _cls

@@ -42,7 +42,7 @@ async def test_hello(server: FakeServer, phone: Phone) -> None:
     assert phone.device.name == "Fake Phone"
     assert phone.device.model == "FP-1"
     assert phone.server.name == "fake"
-    assert phone.capabilities == ("events", "get")
+    assert phone.capabilities == ("events", "get", "notify", "panels")
     (hello,) = server.requests("hello")
     assert hello["params"] == {
         "protocol": "phonetopc/1",

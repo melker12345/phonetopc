@@ -6,6 +6,14 @@ spec/conformance/vectors/ (or the PC one, to provoke a pin mismatch), checks
 ``hello.auth.token`` against ``tokens``, answers ``-32010`` and closes with 1008
 on a bad token, and reports ``pc`` in the ``hello`` result (SECURITY.md 5).
 
+Notifications and panels (PANELS.md) work in both modes, allowed by default
+(``permissions``; the real phone starts with both off). Panels belong to the
+PC (``"dev"`` in dev mode): they survive the owner session as detached panels,
+and ``panel_attach`` replays their kept strokes. The ``press``, ``change``,
+``submit``, ``draw``, ``set_state`` and ``notification_event`` helpers play
+the user on the phone. Params are checked with :mod:`phonetopc.panels`, the
+client's own rules; panel-server-cases.json pins both down.
+
 Fingerprint approval (APPROVAL.md) works in secure mode after
 :meth:`FakeServer.enable_approval`, with a software P-256 key (needs the
 ``cryptography`` package). ``approval_mode`` picks the outcome, and
@@ -40,6 +48,8 @@ from typing import Any
 
 import jsonschema
 from websockets.asyncio.server import Server, ServerConnection, serve
+
+from phonetopc.panels import MAX_PANELS, request_problem, update_problem
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PATH = REPO_ROOT / "spec" / "schemas" / "phonetopc-1.schema.json"
@@ -113,6 +123,10 @@ SENSORS: list[dict[str, Any]] = [
      "mode": "on_change", "available": True},
     {"source": "nfc", "types": ["tag"], "unit": "", "shape": "object",
      "mode": "on_change", "available": True},
+    {"source": "notification", "types": ["action", "tap", "dismiss"], "unit": "",
+     "shape": "object", "mode": "on_change", "available": True},
+    {"source": "panel", "types": ["state", "press", "change", "submit", "stroke"], "unit": "",
+     "shape": "object", "mode": "on_change", "available": True},
     # Not in the spec's catalog: clients must tolerate it.
     {"source": "thermometer", "types": ["temperature"], "unit": "C", "shape": "number",
      "mode": "continuous", "min_rate_hz": 1, "max_rate_hz": 25, "default_rate_hz": 5,
@@ -141,7 +155,25 @@ ERRORS = {
     "invalid_request": -32600,
     "parse_error": -32700,
     "unauthorized": -32010,
+    "not_allowed": -32030,
+    "unknown_panel": -32031,
+    "too_many_panels": -32032,
+    "rate_limited": -32033,
 }
+
+#: Methods of PANELS.md, and the permission each needs.
+PANEL_METHODS = {
+    "notify": "notify",
+    "notify_cancel": "notify",
+    "panel_show": "panels",
+    "panel_attach": "panels",
+    "panel_update": "panels",
+    "panel_close": "panels",
+    "panel_list": "panels",
+    "canvas_clear": "panels",
+}
+#: Notifications one PC may have on the phone (PANELS.md 3.1).
+MAX_NOTIFICATIONS = 16
 
 
 def sample_value(source: str, n: int) -> Any:
@@ -191,6 +223,8 @@ def _params_problem(method: str, params: Any) -> str | None:
     """Why ``params`` are invalid (-32602), or None. Unknown params are ignored."""
     if not isinstance(params, dict):
         return "params must be an object"
+    if method in PANEL_METHODS:
+        return request_problem(method, params)
     required, optional = _STR_PARAMS.get(method, ((), ()))
     for key in required:
         if not isinstance(params.get(key), str):
@@ -250,6 +284,41 @@ class Session:
         task.add_done_callback(self.tasks.discard)
 
 
+class FakePanel:
+    """A panel on the fake phone (PANELS.md 4)."""
+
+    def __init__(self, panel: str, title: str, layout: dict[str, Any], owner: Session) -> None:
+        self.id = panel
+        self.title = title
+        self.layout = copy.deepcopy(layout)
+        #: Widgets with an id, by id (the dicts inside ``layout``).
+        self.widgets: dict[str, dict[str, Any]] = {}
+        stack: list[Any] = [self.layout]
+        while stack:
+            w = stack.pop()
+            if isinstance(w.get("id"), str):
+                self.widgets[w["id"]] = w
+            stack.extend(w.get("children", []))
+        #: The session that gets the events; None while detached.
+        self.owner: Session | None = owner
+        self.visible = False
+        self.next_pseq = 0
+        #: Stroke event values kept since each canvas's last clear (7.3).
+        self.strokes: list[dict[str, Any]] = []
+        self.next_stroke: dict[str, int] = {}
+
+    def values(self) -> dict[str, Any]:
+        """Current value of every toggle and slider (panel_attach)."""
+        out: dict[str, Any] = {}
+        for wid, w in self.widgets.items():
+            if w["type"] == "toggle":
+                out[wid] = w.get("value", False)
+            elif w["type"] == "slider":
+                lo, hi = w.get("min", 0), w.get("max", 1)
+                out[wid] = min(max(w.get("value", lo), lo), hi)
+        return out
+
+
 class FakeServer:
     def __init__(self, *, secure: bool = False, cert: str = "phone") -> None:
         #: Serve wss:// with the test-vector certificate ``cert`` ("phone" or "pc").
@@ -304,6 +373,18 @@ class FakeServer:
         self.approval_signed: list[bytes] = []
         self._approval_key: Any = None
         self._approval_pending = False
+
+        # Notifications and panels (PANELS.md).
+        #: What the "user" allowed (for every PC).
+        self.permissions = {"notify": True, "panels": True}
+        #: Panels by PC (pc id, or "dev") and panel id, in creation order.
+        self.panels: dict[str, dict[str, FakePanel]] = {}
+        #: Notification params by PC and notification id, oldest first.
+        self.notifications: dict[str, dict[str, dict[str, Any]]] = {}
+        #: Answer notify with rate_limited after this many notifications.
+        self.notify_limit: int | None = None
+        self._notify_count = 0
+        self._notify_ids = itertools.count(1)
 
         self.received: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []
@@ -449,6 +530,119 @@ class FakeServer:
                         v = value if value is not None else sample_value(source, sub["seq"])
                         await self._send_event(session, sub_id, sub, v)
 
+    # -- the user on the phone (PANELS.md) --------------------------------
+
+    def _pc(self, pc: str | None) -> str:
+        if pc is not None:
+            return pc
+        return PC["id"] if self.secure else "dev"
+
+    def panel(self, panel: str, pc: str | None = None) -> FakePanel:
+        return self.panels[self._pc(pc)][panel]
+
+    async def panel_event(
+        self, panel: str, type: str, pc: str | None = None, **fields: Any
+    ) -> dict[str, Any]:
+        """Send a ``panel`` event of ``type`` to the panel's owner; returns its value."""
+        p = self.panel(panel, pc)
+        value = {"panel": p.id, "pseq": p.next_pseq, **fields}
+        p.next_pseq += 1
+        if type == "stroke":
+            p.strokes.append(value)
+        if p.owner is not None:
+            await self._deliver(p.owner, "panel", type, value)
+        return value
+
+    async def press(self, panel: str, widget: str, pc: str | None = None) -> None:
+        await self.panel_event(panel, "press", pc, widget=widget)
+
+    async def change(
+        self,
+        panel: str,
+        widget: str,
+        value: Any,
+        *,
+        final: bool | None = None,
+        pc: str | None = None,
+    ) -> None:
+        self.panel(panel, pc).widgets[widget]["value"] = value
+        fields: dict[str, Any] = {"widget": widget, "value": value}
+        if final is not None:
+            fields["final"] = final
+        await self.panel_event(panel, "change", pc, **fields)
+
+    async def submit(self, panel: str, widget: str, text: str, pc: str | None = None) -> None:
+        await self.panel_event(panel, "submit", pc, widget=widget, value=text)
+
+    async def draw(
+        self,
+        panel: str,
+        widget: str,
+        points: list[tuple[float, float]],
+        *,
+        chunk: int = 2,
+        tool: str = "finger",
+        size: tuple[float, float] = (360.0, 640.0),
+        pc: str | None = None,
+    ) -> int:
+        """Draw one stroke through ``points`` (start, moves, end); returns its stroke id."""
+        p = self.panel(panel, pc)
+        stroke = p.next_stroke.get(widget, 0)
+        p.next_stroke[widget] = stroke + 1
+        pts = [[x, y, 0.5, 8 * i] for i, (x, y) in enumerate(points)]
+        chunks = [pts[i : i + chunk] for i in range(0, len(pts), chunk)]
+        common = {"widget": widget, "stroke": stroke, "tool": tool}
+        await self.panel_event(
+            panel, "stroke", pc, **common, phase="start", points=chunks[0], size=list(size)
+        )
+        for c in chunks[1:]:
+            await self.panel_event(panel, "stroke", pc, **common, phase="move", points=c)
+        await self.panel_event(panel, "stroke", pc, **common, phase="end", points=[])
+        return stroke
+
+    async def set_state(
+        self, panel: str, state: str, *, reason: str | None = None, pc: str | None = None
+    ) -> None:
+        """``visible``, ``hidden``, or ``closed`` (removes the panel) as on the phone."""
+        p = self.panel(panel, pc)
+        p.visible = state == "visible"
+        fields: dict[str, Any] = {"state": state}
+        if reason is not None:
+            fields["reason"] = reason
+        await self.panel_event(panel, "state", pc, **fields)
+        if state == "closed":
+            del self.panels[self._pc(pc)][panel]
+
+    async def notification_event(
+        self, notification: str, type: str, action: str | None = None, pc: str | None = None
+    ) -> None:
+        """The user answers a notification: ``type`` is ``action``, ``tap`` or ``dismiss``."""
+        key = self._pc(pc)
+        self.notifications.get(key, {}).pop(notification, None)
+        value: dict[str, Any] = {"notification": notification}
+        if action is not None:
+            value["action"] = action
+        for session in list(self.sessions):
+            if self._pc_of(session) == key:
+                await self._deliver(session, "notification", type, value)
+
+    async def set_permission(self, feature: str, allowed: bool, pc: str | None = None) -> None:
+        """The user toggles *Notifications* (``notify``) or *Screen panels* (``panels``)."""
+        self.permissions[feature] = allowed
+        if allowed:
+            return
+        key = self._pc(pc)
+        if feature == "notify":
+            self.notifications.pop(key, None)
+        else:
+            for panel in list(self.panels.get(key, {})):
+                await self.set_state(panel, "closed", reason="revoked", pc=key)
+
+    async def _deliver(self, session: Session, source: str, type: str, value: Any) -> None:
+        for sub_id, sub in list(session.subs.items()):
+            if sub["source"] == source and type in sub["types"]:
+                await self._send_event(session, sub_id, sub, value, type)
+
     async def send_raw(self, data: str | bytes) -> None:
         for session in self.sessions:
             await session.ws.send(data)
@@ -483,13 +677,15 @@ class FakeServer:
         err = {"code": ERRORS[name], "message": message, "data": {"name": name, **data}}
         await self._send(session, {"jsonrpc": "2.0", "id": req_id, "error": err})
 
-    def _event_params(self, sub_id: str, sub: dict[str, Any], value: Any) -> dict[str, Any]:
+    def _event_params(
+        self, sub_id: str, sub: dict[str, Any], value: Any, type: str | None = None
+    ) -> dict[str, Any]:
         info = next(s for s in SENSORS if s["source"] == sub["source"])
         return {
             "subscription": sub_id,
             "seq": sub["seq"],
             "source": sub["source"],
-            "type": info["types"][0],
+            "type": type or info["types"][0],
             "value": value,
             "unit": info["unit"],
             "ts": int(time.time() * 1000),
@@ -498,7 +694,12 @@ class FakeServer:
         }
 
     async def _send_event(
-        self, session: Session, sub_id: str, sub: dict[str, Any], value: Any
+        self,
+        session: Session,
+        sub_id: str,
+        sub: dict[str, Any],
+        value: Any,
+        type: str | None = None,
     ) -> None:
         # min_delta filters before seq is assigned (PROTOCOL.md section 5), and
         # only applies to number / vec3 / quat values (section 4.3).
@@ -507,7 +708,7 @@ class FakeServer:
             if d is not None and d < sub["min_delta"]:
                 return
         sub["last"] = value
-        params = self._event_params(sub_id, sub, value)
+        params = self._event_params(sub_id, sub, value, type)
         sub["seq"] += 1
         if params["seq"] in self.skip_seqs:  # dropped "for backpressure": a seq gap
             return
@@ -557,6 +758,10 @@ class FakeServer:
             session.subs.clear()
             for task in list(session.tasks):
                 task.cancel()
+            for panels in self.panels.values():  # PANELS.md 4.1: now detached
+                for panel in panels.values():
+                    if panel.owner is session:
+                        panel.owner = None
 
     async def _dispatch(self, session: Session, msg: dict[str, Any]) -> None:
         method = msg.get("method")
@@ -600,7 +805,7 @@ class FakeServer:
                 "protocol": "phonetopc/1",
                 "server": {"name": "fake", "version": "0.0.1"},
                 "device": DEVICE,
-                "capabilities": ["events", "get"],
+                "capabilities": ["events", "get", "notify", "panels"],
             }
             if self.secure:  # SECURITY.md section 5; auth is ignored in dev mode
                 auth = params.get("auth")
@@ -622,7 +827,7 @@ class FakeServer:
         if method == "list_sensors":
             sensors = copy.deepcopy(SENSORS)
             for s in sensors:
-                s["available"] = s["source"] not in self.unavailable
+                s["available"] = not self._unavailable(s["source"])
             await self._result(session, req_id, {"sensors": sensors})
         elif method == "subscribe":
             await self._subscribe(session, req_id, params)
@@ -640,6 +845,107 @@ class FakeServer:
                 await self._error(session, req_id, "method_not_found", "no method in dev mode")
                 return
             await self._request_approval(session, req_id, params)
+        elif method in PANEL_METHODS:
+            await self._panel_method(session, req_id, method, params)
+
+    def _pc_of(self, session: Session) -> str:
+        """Who owns panels and notifications: the PC, or the one dev-mode PC (PANELS.md 1)."""
+        return session.pc["id"] if session.pc is not None else "dev"
+
+    def _unavailable(self, source: str) -> bool:
+        if source == "panel":
+            return not self.permissions["panels"]
+        if source == "notification":
+            return not self.permissions["notify"]
+        return source in self.unavailable
+
+    async def _panel_method(
+        self, session: Session, req_id: Any, method: str, params: dict[str, Any]
+    ) -> None:
+        # Step 8 of PANELS.md 9: permission, panel exists / limit, widgets, rate limit.
+        feature = PANEL_METHODS[method]
+        if not self.permissions[feature]:
+            await self._error(
+                session, req_id, "not_allowed", f"{feature} not allowed", permission=feature
+            )
+            return
+        pc = self._pc_of(session)
+        if method == "notify":
+            if self.notify_limit is not None and self._notify_count >= self.notify_limit:
+                await self._error(session, req_id, "rate_limited", "too many notifications")
+                return
+            self._notify_count += 1
+            notes = self.notifications.setdefault(pc, {})
+            nid = params.get("id") or f"n-{next(self._notify_ids)}"
+            notes.pop(nid, None)
+            notes[nid] = params
+            while len(notes) > MAX_NOTIFICATIONS:
+                del notes[next(iter(notes))]
+            await self._result(session, req_id, {"id": nid})
+            return
+        if method == "notify_cancel":
+            self.notifications.get(pc, {}).pop(params["id"], None)
+            await self._result(session, req_id, {})
+            return
+        panels = self.panels.setdefault(pc, {})
+        if method == "panel_list":
+            listed = [
+                {"panel": p.id, "title": p.title, "attached": p.owner is not None,
+                 "visible": p.visible}
+                for p in panels.values()
+            ]  # fmt: skip
+            await self._result(session, req_id, {"panels": listed})
+            return
+        panel_id = params["panel"]
+        if method == "panel_show":
+            if panel_id not in panels and len(panels) >= MAX_PANELS:
+                await self._error(session, req_id, "too_many_panels", "a PC has at most 8")
+                return
+            panels[panel_id] = FakePanel(panel_id, params["title"], params["layout"], session)
+            await self._result(session, req_id, {"panel": panel_id, "visible": False})
+            return
+        panel = panels.get(panel_id)
+        if panel is None:
+            await self._error(session, req_id, "unknown_panel", f"no panel {panel_id!r}")
+            return
+        if method == "panel_attach":
+            panel.owner = session
+            after = params.get("after_pseq", -1)
+            result = {
+                "panel": panel.id,
+                "title": panel.title,
+                "visible": panel.visible,
+                "last_pseq": panel.next_pseq - 1,
+                "values": panel.values(),
+            }
+            await self._result(session, req_id, result)
+            for value in list(panel.strokes):  # replayed right after the response (4.4)
+                if value["pseq"] > after:
+                    await self._deliver(session, "panel", "stroke", {**value, "replayed": True})
+        elif method == "panel_update":
+            for u in params["updates"]:
+                widget = panel.widgets.get(u["widget"])
+                problem = (
+                    update_problem(widget, u["set"])
+                    if widget is not None
+                    else f"no widget {u['widget']!r}"
+                )
+                if problem:
+                    await self._error(session, req_id, "invalid_params", problem)
+                    return
+            for u in params["updates"]:  # all valid: apply them all (atomic, 4.5)
+                panel.widgets[u["widget"]].update(u["set"])
+            await self._result(session, req_id, {})
+        elif method == "panel_close":
+            del panels[panel_id]
+            await self._result(session, req_id, {})
+        elif method == "canvas_clear":
+            widget = panel.widgets.get(params["widget"])
+            if widget is None or widget["type"] != "canvas":
+                await self._error(session, req_id, "invalid_params", "not a canvas")
+                return
+            panel.strokes = [v for v in panel.strokes if v["widget"] != params["widget"]]
+            await self._result(session, req_id, {})
 
     def _check_token(self, token: Any) -> dict[str, str] | None:
         if not isinstance(token, str):
@@ -663,7 +969,7 @@ class FakeServer:
         if "type" in params and params["type"] not in info["types"]:
             await self._error(session, req_id, "invalid_params", "unknown type")
             return False
-        if source in self.unavailable:
+        if self._unavailable(source):
             await self._error(session, req_id, "source_unavailable", f"{source} unavailable")
             return False
         return True
@@ -675,15 +981,21 @@ class FakeServer:
         info = self._sensor(source)
         assert info is not None
         sub_id = f"s-{next(self._sub_ids)}"
+        types = [params["type"]] if "type" in params else list(info["types"])
         result: dict[str, Any] = {
             "subscription": sub_id,
             "source": source,
-            "types": [params.get("type", info["types"][0])],
+            "types": types,
             "mode": info["mode"],
         }
         if self.omit_mode:
             del result["mode"]
-        sub: dict[str, Any] = {"source": source, "seq": 0, "min_delta": params.get("min_delta")}
+        sub: dict[str, Any] = {
+            "source": source,
+            "types": types,
+            "seq": 0,
+            "min_delta": params.get("min_delta"),
+        }
         if info["mode"] == "continuous":
             rate = params.get("rate_hz", info["default_rate_hz"])
             rate = min(max(rate, info["min_rate_hz"]), info["max_rate_hz"])
