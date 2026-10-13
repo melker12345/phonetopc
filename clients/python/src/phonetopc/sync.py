@@ -16,15 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Coroutine, Iterator, Mapping
-from typing import Any, TypeVar
+from collections.abc import Coroutine, Iterable, Iterator, Mapping
+from typing import Any, Literal, TypeVar
 
 from .approval import DEFAULT_APPROVAL_TIMEOUT, ApprovalResult
 from .client import DEFAULT_QUEUE_SIZE, DEFAULT_REQUEST_TIMEOUT, Overflow, Phone, Subscription
 from .client import connect as _async_connect
 from .models import DeviceInfo, Event, HelloResult, PCInfo, SensorInfo
+from .panels import AttachResult, Orientation, Panel, PanelEvent, PanelInfo
 
-__all__ = ["SyncPhone", "SyncSubscription", "connect"]
+__all__ = ["SyncPanel", "SyncPhone", "SyncSubscription", "connect"]
 
 T = TypeVar("T")
 
@@ -103,6 +104,69 @@ async def _next_or_none(sub: Subscription) -> Event | None:
         return None
 
 
+class SyncPanel:
+    """Blocking counterpart of :class:`~phonetopc.panels.Panel`; iterate it for events."""
+
+    def __init__(self, runner: _LoopThread, panel: Panel) -> None:
+        self._runner = runner
+        self._panel = panel
+
+    @property
+    def panel(self) -> Panel:
+        """The underlying async :class:`~phonetopc.panels.Panel`."""
+        return self._panel
+
+    @property
+    def id(self) -> str:
+        return self._panel.id
+
+    @property
+    def last_pseq(self) -> int:
+        return self._panel.last_pseq
+
+    @property
+    def visible(self) -> bool:
+        return self._panel.visible
+
+    @property
+    def attach_result(self) -> AttachResult | None:
+        return self._panel.attach_result
+
+    def update(self, widget: str, **props: Any) -> None:
+        self._runner.run(self._panel.update(widget, **props))
+
+    def update_many(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+        self._runner.run(self._panel.update_many(updates))
+
+    def clear_canvas(self, widget: str) -> None:
+        self._runner.run(self._panel.clear_canvas(widget))
+
+    def close(self) -> None:
+        self._runner.run(self._panel.close())
+
+    def __enter__(self) -> SyncPanel:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __iter__(self) -> Iterator[PanelEvent]:
+        return self
+
+    def __next__(self) -> PanelEvent:
+        ev = self._runner.run(_next_panel_event(self._panel))
+        if ev is None:
+            raise StopIteration
+        return ev
+
+
+async def _next_panel_event(panel: Panel) -> PanelEvent | None:
+    try:
+        return await panel.__anext__()
+    except StopAsyncIteration:
+        return None
+
+
 class SyncPhone:
     """Blocking counterpart of :class:`~phonetopc.client.Phone`."""
 
@@ -151,6 +215,54 @@ class SyncPhone:
     @property
     def approval_key(self) -> str | None:
         return self._phone.approval_key
+
+    def notify(
+        self,
+        title: str,
+        body: str | None = None,
+        *,
+        id: str | None = None,
+        actions: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+        priority: Literal["default", "high"] | None = None,
+    ) -> str:
+        """Blocking :meth:`Phone.notify <phonetopc.Phone.notify>`."""
+        return self._runner.run(
+            self._phone.notify(title, body, id=id, actions=actions, priority=priority)
+        )
+
+    def notify_cancel(self, id: str) -> None:
+        self._runner.run(self._phone.notify_cancel(id))
+
+    def show_panel(
+        self,
+        panel: str,
+        title: str,
+        layout: Mapping[str, Any],
+        *,
+        keep_awake: bool | None = None,
+        orientation: Orientation | None = None,
+        validate: bool = True,
+    ) -> SyncPanel:
+        """Blocking :meth:`Phone.show_panel <phonetopc.Phone.show_panel>`."""
+        made = self._runner.run(
+            self._phone.show_panel(
+                panel,
+                title,
+                layout,
+                keep_awake=keep_awake,
+                orientation=orientation,
+                validate=validate,
+            )
+        )
+        return SyncPanel(self._runner, made)
+
+    def attach_panel(self, panel: str, *, after_pseq: int = -1) -> SyncPanel:
+        """Blocking :meth:`Phone.attach_panel <phonetopc.Phone.attach_panel>`."""
+        made = self._runner.run(self._phone.attach_panel(panel, after_pseq=after_pseq))
+        return SyncPanel(self._runner, made)
+
+    def list_panels(self) -> list[PanelInfo]:
+        return self._runner.run(self._phone.list_panels())
 
     def list_sensors(self) -> list[SensorInfo]:
         return self._runner.run(self._phone.list_sensors())

@@ -1,25 +1,49 @@
 """Notifications and panels: the phone as a screen for the PC (spec/PANELS.md).
 
+:meth:`Phone.show_panel <phonetopc.Phone.show_panel>` returns a :class:`Panel`,
+an async iterator of typed :class:`PanelEvent` objects (press, change, submit,
+stroke, state). Build layouts with :mod:`phonetopc.ui`.
+
 The ``*_problem`` functions implement the params rules of PANELS.md sections
-3-5 and 8 that can be checked from a request alone. A client can run them
+3-5 and 8 that can be checked from a request alone. The client runs them
 before sending, so mistakes surface as :class:`ValueError` with a clear
 message instead of a round trip to the phone.
 """
 
 from __future__ import annotations
 
+import asyncio
+import collections
 import math
 import re
 import unicodedata
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+
+from .errors import ProtocolError, SubscriptionOverflow
+from .models import Event
+
+if TYPE_CHECKING:
+    from .client import Phone
 
 __all__ = [
     "MAX_DEPTH",
     "MAX_PANELS",
     "MAX_WIDGETS",
     "WIDGET_TYPES",
+    "AttachResult",
+    "ChangeEvent",
+    "Panel",
+    "PanelEvent",
+    "PanelInfo",
+    "Point",
+    "PressEvent",
+    "StateEvent",
+    "StrokeEvent",
+    "SubmitEvent",
     "layout_problem",
+    "panel_event",
     "request_problem",
     "update_problem",
 ]
@@ -315,3 +339,343 @@ def request_problem(method: str, params: Mapping[str, Any]) -> str | None:
     elif method == "canvas_clear":
         return _id_problem(p.get("widget"), "widget")
     return None
+
+
+# -- results and events -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PanelInfo:
+    """One entry of ``panel_list``."""
+
+    panel: str
+    title: str
+    attached: bool
+    visible: bool
+
+    @classmethod
+    def from_json(cls, data: Any) -> PanelInfo:
+        if not isinstance(data, dict):
+            raise ProtocolError(f"panel_list: malformed entry {data!r}")
+        try:
+            return cls(
+                panel=str(data["panel"]),
+                title=str(data["title"]),
+                attached=bool(data["attached"]),
+                visible=bool(data["visible"]),
+            )
+        except KeyError as exc:
+            raise ProtocolError(f"panel_list: entry without {exc}") from None
+
+
+@dataclass(frozen=True)
+class AttachResult:
+    """Result of ``panel_attach`` (section 4.4).
+
+    ``values`` holds the current value of every toggle and slider, by widget
+    id; ``last_pseq`` is the panel's latest event number (-1: none yet).
+    """
+
+    panel: str
+    title: str
+    visible: bool
+    last_pseq: int
+    values: Mapping[str, bool | float]
+
+    @classmethod
+    def from_json(cls, data: Any) -> AttachResult:
+        if not isinstance(data, dict):
+            raise ProtocolError(f"panel_attach: malformed result {data!r}")
+        last: Any = data.get("last_pseq")
+        values = data.get("values")
+        if not _is_int(last) or not isinstance(values, dict):
+            raise ProtocolError(f"panel_attach: malformed result {data!r}")
+        return cls(
+            panel=str(data.get("panel")),
+            title=str(data.get("title")),
+            visible=bool(data.get("visible")),
+            last_pseq=last,
+            values=dict(values),
+        )
+
+
+class Point(NamedTuple):
+    """One point of a stroke: position in [0, 1] of the canvas, pressure, ms since start."""
+
+    x: float
+    y: float
+    pressure: float
+    t: int
+
+
+@dataclass(frozen=True)
+class PanelEvent:
+    """An event of a panel (section 6). Subclasses add the members of each ``type``."""
+
+    panel: str
+    pseq: int
+    """Number of this event in its panel; survives reconnects (section 6)."""
+    type: str
+    widget: str | None
+    replayed: bool
+    """True for strokes replayed by ``panel_attach`` (section 4.4)."""
+    event: Event = field(repr=False, compare=False)
+    """The underlying ``event`` notification."""
+
+
+@dataclass(frozen=True)
+class StateEvent(PanelEvent):
+    """The panel became ``visible`` or ``hidden``, or was ``closed`` (``reason`` user/revoked)."""
+
+    state: str = ""
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class PressEvent(PanelEvent):
+    """A button was pressed."""
+
+
+@dataclass(frozen=True)
+class ChangeEvent(PanelEvent):
+    """A toggle (``value`` bool) or slider (``value`` number) changed.
+
+    ``final`` is true when a slider is released.
+    """
+
+    value: bool | float = False
+    final: bool = False
+
+
+@dataclass(frozen=True)
+class SubmitEvent(PanelEvent):
+    """Text submitted from a ``text_input``."""
+
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class StrokeEvent(PanelEvent):
+    """A chunk of a canvas stroke (section 7).
+
+    ``phase`` is ``start``, ``move``, ``end`` or ``cancel``; ``size`` (canvas
+    width and height in dp) comes with ``start`` only.
+    """
+
+    stroke: int = 0
+    phase: str = ""
+    tool: str = "unknown"
+    points: tuple[Point, ...] = ()
+    size: tuple[float, float] | None = None
+
+
+def panel_event(ev: Event) -> PanelEvent:
+    """Parse a ``panel`` source event into its typed form."""
+    v = ev.value
+    if not isinstance(v, dict) or not isinstance(v.get("panel"), str) or not _is_int(v.get("pseq")):
+        raise ProtocolError(f"panel event without panel/pseq: {v!r}")
+    base: dict[str, Any] = {
+        "panel": v["panel"],
+        "pseq": v["pseq"],
+        "type": ev.type,
+        "widget": v.get("widget") if isinstance(v.get("widget"), str) else None,
+        "replayed": v.get("replayed") is True,
+        "event": ev,
+    }
+    if ev.type == "state":
+        reason = v.get("reason")
+        return StateEvent(
+            **base, state=str(v.get("state")), reason=reason if isinstance(reason, str) else None
+        )
+    if ev.type == "press":
+        return PressEvent(**base)
+    if ev.type == "change":
+        value = v.get("value")
+        if not isinstance(value, bool) and not _is_num(value):
+            raise ProtocolError(f"change event with value {value!r}")
+        return ChangeEvent(**base, value=cast("bool | float", value), final=v.get("final") is True)
+    if ev.type == "submit":
+        return SubmitEvent(**base, value=str(v.get("value", "")))
+    if ev.type == "stroke":
+        try:
+            points = tuple(
+                Point(float(p[0]), float(p[1]), float(p[2]), int(p[3])) for p in v["points"]
+            )
+            size = v.get("size")
+            return StrokeEvent(
+                **base,
+                stroke=int(v["stroke"]),
+                phase=str(v["phase"]),
+                tool=str(v.get("tool", "unknown")),
+                points=points,
+                size=(float(size[0]), float(size[1])) if size is not None else None,
+            )
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ProtocolError(f"malformed stroke event {v!r}: {exc!r}") from None
+    return PanelEvent(**base)  # a type from a later draft
+
+
+# -- Panel ----------------------------------------------------------------------------
+
+DEFAULT_PANEL_QUEUE = 4096
+
+
+class Panel:
+    """A panel on the phone, owned by this connection. Get one from
+    :meth:`Phone.show_panel <phonetopc.Phone.show_panel>` or
+    :meth:`Phone.attach_panel <phonetopc.Phone.attach_panel>`.
+
+    Iterate it for its events::
+
+        async for ev in panel:
+            if isinstance(ev, phonetopc.PressEvent) and ev.widget == "mute":
+                ...
+
+    Iteration ends when the panel is closed (by :meth:`close`, by the user on
+    the phone: a final ``StateEvent`` with ``state == "closed"``, or by
+    another ``show_panel`` with the same id) or the connection ends.
+    ``last_pseq`` is the ``pseq`` of the last event iteration returned: pass it
+    to :meth:`Phone.attach_panel` after a reconnect to get the strokes you
+    missed.
+    """
+
+    def __init__(
+        self,
+        phone: Phone,
+        panel: str,
+        title: str,
+        layout: Mapping[str, Any] | None,
+        *,
+        visible: bool = False,
+        last_pseq: int = -1,
+        queue_size: int = DEFAULT_PANEL_QUEUE,
+    ) -> None:
+        self._phone = phone
+        self.id = panel
+        self.title = title
+        #: The layout sent with ``show_panel`` (``None`` after ``attach_panel``),
+        #: kept up to date by :meth:`update`. Used to check updates locally.
+        self.layout = layout
+        #: Whether the panel is on screen, as far as this client knows.
+        self.visible = visible
+        #: ``pseq`` of the last event returned by iteration (-1: none yet).
+        self.last_pseq = last_pseq
+        self.queue_size = queue_size
+        #: Why iteration ended (``None`` while open or after a normal close).
+        self.closed_reason: BaseException | None = None
+        #: The ``panel_attach`` result, for a panel from ``attach_panel``.
+        self.attach_result: AttachResult | None = None
+        self._queue: collections.deque[PanelEvent] = collections.deque()
+        self._has_data = asyncio.Event()
+        self._ended = False
+        self._raise: BaseException | None = None
+
+    @property
+    def closed(self) -> bool:
+        return self._ended
+
+    async def update(self, widget: str, **props: Any) -> None:
+        """Change properties of one widget, e.g. ``update("msg", text="done", tone="good")``."""
+        await self.update_many({widget: props})
+
+    async def update_many(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+        """Change several widgets at once, atomically: ``{widget_id: {prop: value}}``."""
+        items: list[dict[str, Any]] = [{"widget": w, "set": dict(p)} for w, p in updates.items()]
+        widgets = _index(self.layout) if self.layout is not None else None
+        if widgets is not None:
+            for item in items:
+                w = widgets.get(item["widget"])
+                if w is None:
+                    raise ValueError(f"panel {self.id!r} has no widget {item['widget']!r}")
+                problem = update_problem(w, item["set"])
+                if problem:
+                    raise ValueError(problem)
+        await self._phone._panel_call("panel_update", {"panel": self.id, "updates": items})
+        if widgets is not None:
+            for item in items:
+                widgets[item["widget"]].update(item["set"])
+
+    async def clear_canvas(self, widget: str) -> None:
+        """Erase a canvas, and the strokes the phone keeps for it."""
+        await self._phone._panel_call("canvas_clear", {"panel": self.id, "widget": widget})
+
+    async def close(self) -> None:
+        """Remove the panel from the phone and end iteration."""
+        try:
+            if not self._ended and not self._phone.closed:
+                await self._phone._panel_call("panel_close", {"panel": self.id})
+        finally:
+            self._phone._forget_panel(self)
+            self._end(None)
+
+    async def __aenter__(self) -> Panel:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
+
+    def __aiter__(self) -> AsyncIterator[PanelEvent]:
+        return self
+
+    async def __anext__(self) -> PanelEvent:
+        while not self._queue:
+            if self._ended:
+                if self._raise is not None:
+                    raise self._raise
+                raise StopAsyncIteration
+            self._has_data.clear()
+            await self._has_data.wait()
+        ev = self._queue.popleft()
+        self.last_pseq = max(self.last_pseq, ev.pseq)
+        return ev
+
+    def __repr__(self) -> str:
+        state = " closed" if self._ended else (" visible" if self.visible else "")
+        return f"<Panel {self.id!r} title={self.title!r} last_pseq={self.last_pseq}{state}>"
+
+    # -- called by Phone (inside the reader task) --------------------------
+
+    def _push(self, ev: PanelEvent) -> None:
+        if self._ended:
+            return
+        if isinstance(ev, StateEvent):
+            self.visible = ev.state == "visible"
+        if len(self._queue) >= self.queue_size:
+            self._phone._forget_panel(self)
+            self._end(
+                SubscriptionOverflow(
+                    f"panel {self.id!r} overflowed its queue of {self.queue_size} events"
+                ),
+                raise_it=True,
+            )
+            return
+        self._queue.append(ev)
+        self._has_data.set()
+        if isinstance(ev, StateEvent) and ev.state == "closed":
+            self._phone._forget_panel(self)
+            self._end(None)
+
+    def _end(self, reason: BaseException | None, *, raise_it: bool = False) -> None:
+        if self._ended:
+            return
+        self._ended = True
+        self.closed_reason = reason
+        if raise_it:
+            self._raise = reason
+        self._has_data.set()
+
+
+def _index(layout: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Widgets with an id, by id (the dicts themselves, so updates can be applied)."""
+    found: dict[str, dict[str, Any]] = {}
+    stack: list[Any] = [layout]
+    while stack:
+        w = stack.pop()
+        if isinstance(w, dict):
+            if isinstance(w.get("id"), str):
+                found[w["id"]] = w
+            stack.extend(w.get("children") or [])
+    return found
+
+
+Orientation = Literal["any", "portrait", "landscape"]

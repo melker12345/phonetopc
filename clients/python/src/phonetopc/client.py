@@ -1,4 +1,5 @@
-"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md, SECURITY.md, APPROVAL.md).
+"""asyncio client for the phonetopc/1 protocol (spec/PROTOCOL.md, SECURITY.md, APPROVAL.md,
+PANELS.md).
 
 One :class:`Phone` owns one WebSocket and one reader task. The reader
 correlates responses with pending requests by ``id`` and routes ``event``
@@ -11,13 +12,14 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import copy
 import ipaddress
 import itertools
 import json
 import logging
 import os
 import ssl
-from collections.abc import AsyncIterator, Generator, Mapping
+from collections.abc import AsyncIterator, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -31,6 +33,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as _ws_connect
 
 from . import approval, discovery
+from . import panels as _panels
 from ._tls import PinCheckFailed, pinned_context, verify_transport
 from ._version import __version__
 from .errors import (
@@ -40,11 +43,13 @@ from .errors import (
     ApprovalNotSupported,
     ApprovalVerificationError,
     ConnectionClosed,
+    NotAllowed,
     NotPaired,
     PhoneUnreachable,
     PinMismatch,
     ProtocolError,
     RequestTimeout,
+    SourceUnavailable,
     SubscriptionOverflow,
     UnknownSubscription,
     error_from_response,
@@ -61,6 +66,7 @@ from .models import (
     ServerInfo,
     SubscribeResult,
 )
+from .panels import AttachResult, Orientation, Panel, PanelInfo
 from .pin import pin_from_spki, pins_equal
 from .store import (
     PairedDevice,
@@ -371,6 +377,29 @@ class Subscription:
             self._has_data.set()
 
 
+class _PanelRouter(Subscription):
+    """The connection's one subscription to the ``panel`` source.
+
+    Instead of queueing events it hands each one, inside the reader task, to
+    the :class:`~phonetopc.panels.Panel` it belongs to.
+    """
+
+    def _push(self, ev: Event) -> None:
+        if self._ended:
+            return
+        self.received += 1
+        try:
+            pe = _panels.panel_event(ev)
+        except ProtocolError as exc:
+            logger.warning("ignoring malformed panel event: %s", exc)
+            return
+        panel = self._phone._panels.get(pe.panel)
+        if panel is not None:
+            panel._push(pe)
+        else:
+            logger.debug("ignoring event of panel %r, not tracked by this connection", pe.panel)
+
+
 class Phone:
     """A connected phone (or ``phonetopcd``). Create it with :func:`connect`."""
 
@@ -397,6 +426,10 @@ class Phone:
         self.closed_reason: ConnectionClosed | None = None
         #: The pairing used (secure mode), ``None`` in dev mode.
         self.paired_device: PairedDevice | None = None
+        #: Panels this connection shows or attached, by id (PANELS.md).
+        self._panels: dict[str, Panel] = {}
+        self._panel_router: _PanelRouter | None = None
+        self._panel_router_lock = asyncio.Lock()
 
     # -- handshake info ---------------------------------------------------
 
@@ -611,6 +644,161 @@ class Phone:
         if not pins_equal(accepted, info.pin):
             raise ApprovalKeyChanged(paired.label(), accepted, info.pin)
         return info
+
+    # -- notifications and panels (PANELS.md) -----------------------------
+
+    async def notify(
+        self,
+        title: str,
+        body: str | None = None,
+        *,
+        id: str | None = None,
+        actions: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+        priority: Literal["default", "high"] | None = None,
+    ) -> str:
+        """Post a notification on the phone; returns its id.
+
+        ``title`` is up to 100 characters on one line, ``body`` up to 1000
+        with newlines. Posting again with the same ``id`` replaces it.
+        ``actions`` are up to 3 buttons, ``{action_id: label}`` (labels up to
+        30 characters). The user's answer comes as events of the
+        ``notification`` source: subscribe to it to get them
+        (``value == {"notification": id, "action": action_id}``).
+
+        Raises :class:`~phonetopc.errors.NotAllowed` until the user turns on
+        *Notifications* for this PC in the phone app, and ``ValueError`` for
+        params the phone would reject.
+        """
+        params: dict[str, Any] = {"title": title}
+        if body is not None:
+            params["body"] = body
+        if id is not None:
+            params["id"] = id
+        if actions is not None:
+            pairs = actions.items() if isinstance(actions, Mapping) else actions
+            params["actions"] = [{"id": a, "label": label} for a, label in pairs]
+        if priority is not None:
+            params["priority"] = priority
+        result = await self._panel_call("notify", params)
+        if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+            raise ProtocolError(f"notify: malformed result {result!r}")
+        return str(result["id"])
+
+    async def notify_cancel(self, id: str) -> None:
+        """Remove this PC's notification ``id`` (fine if it is already gone)."""
+        await self._panel_call("notify_cancel", {"id": id})
+
+    async def show_panel(
+        self,
+        panel: str,
+        title: str,
+        layout: Mapping[str, Any],
+        *,
+        keep_awake: bool | None = None,
+        orientation: Orientation | None = None,
+        validate: bool = True,
+    ) -> Panel:
+        """Show a panel on the phone, or replace this PC's panel with the same id.
+
+        ``layout`` is the root widget (build it with :mod:`phonetopc.ui`).
+        Returns a :class:`~phonetopc.panels.Panel` to iterate for events and to
+        update. The phone shows it at once if one of this PC's panels is on
+        screen, otherwise it asks the user with a notification; a
+        ``StateEvent`` with ``state == "visible"`` says when the user sees it.
+
+        The layout is checked before sending (``ValueError``); ``validate=False``
+        skips that, e.g. for widget types this client doesn't know yet. Raises
+        :class:`~phonetopc.errors.NotAllowed` until the user turns on *Screen
+        panels* for this PC in the phone app, and
+        :class:`~phonetopc.errors.TooManyPanels` for a 9th panel.
+        """
+        layout = copy.deepcopy(dict(layout))
+        params: dict[str, Any] = {"panel": panel, "title": title, "layout": layout}
+        if keep_awake is not None:
+            params["keep_awake"] = keep_awake
+        if orientation is not None:
+            params["orientation"] = orientation
+        if validate:
+            self._check_params("panel_show", params)
+        # Subscribe first, so no event of the new panel is missed (PANELS.md 2).
+        await self._ensure_panel_router()
+
+        def register(result: Any) -> Panel:
+            if not isinstance(result, dict) or not isinstance(result.get("visible"), bool):
+                raise ProtocolError(f"panel_show: malformed result {result!r}")
+            p = Panel(self, panel, title, layout if validate else None, visible=result["visible"])
+            self._track_panel(p)
+            return p
+
+        made: Panel = await self._call("panel_show", params, on_result=register)
+        return made
+
+    async def attach_panel(self, panel: str, *, after_pseq: int = -1) -> Panel:
+        """Take over an existing panel of this PC, typically after a reconnect.
+
+        Pass the ``last_pseq`` of the old :class:`~phonetopc.panels.Panel` as
+        ``after_pseq``: the phone then replays the canvas strokes made after it
+        (also while no connection was there), marked ``replayed``. With -1 you
+        get everything still on the canvases. The returned panel's
+        ``attach_result`` has the current toggle and slider ``values``.
+        Raises :class:`~phonetopc.errors.UnknownPanel` if the panel is gone.
+        """
+        params = {"panel": panel, "after_pseq": after_pseq}
+        self._check_params("panel_attach", params)
+        await self._ensure_panel_router()
+
+        def register(result: Any) -> Panel:
+            info = AttachResult.from_json(result)
+            p = Panel(self, panel, info.title, None, visible=info.visible, last_pseq=after_pseq)
+            p.attach_result = info
+            self._track_panel(p)
+            return p
+
+        made: Panel = await self._call("panel_attach", params, on_result=register)
+        return made
+
+    async def list_panels(self) -> list[PanelInfo]:
+        """``panel_list``: this PC's panels on the phone, in creation order."""
+        result = await self._panel_call("panel_list", None)
+        if not isinstance(result, dict) or not isinstance(result.get("panels"), list):
+            raise ProtocolError(f"panel_list: malformed result {result!r}")
+        return [PanelInfo.from_json(p) for p in result["panels"]]
+
+    def _check_params(self, method: str, params: Mapping[str, Any]) -> None:
+        problem = _panels.request_problem(method, params)
+        if problem is not None:
+            raise ValueError(f"{method}: {problem}")
+
+    async def _panel_call(self, method: str, params: Mapping[str, Any] | None) -> Any:
+        if params is not None:
+            self._check_params(method, params)
+        return await self._call(method, params)
+
+    async def _ensure_panel_router(self) -> None:
+        async with self._panel_router_lock:
+            if self._panel_router is not None and not self._panel_router.closed:
+                return
+            router = _PanelRouter(self, "panel", queue_size=1, overflow="error")
+            try:
+                await router.start()
+            except SourceUnavailable as exc:
+                # The panel source is unavailable exactly when panels aren't allowed.
+                raise NotAllowed(
+                    NotAllowed.CODE or -32030,
+                    "screen panels are not allowed for this PC",
+                    {"name": NotAllowed.NAME, "permission": "panels"},
+                ) from exc
+            self._panel_router = router
+
+    def _track_panel(self, panel: Panel) -> None:
+        old = self._panels.get(panel.id)
+        self._panels[panel.id] = panel
+        if old is not None and old is not panel:
+            old._end(None)  # replaced: the old object gets no more events
+
+    def _forget_panel(self, panel: Panel) -> None:
+        if self._panels.get(panel.id) is panel:
+            del self._panels[panel.id]
 
     # -- lifecycle --------------------------------------------------------
 
@@ -858,6 +1046,9 @@ class Phone:
         subs, self._subs = self._subs, {}
         for sub in subs.values():
             sub._end(self._closed_error())
+        panels, self._panels = self._panels, {}
+        for panel in panels.values():
+            panel._end(self._closed_error())
         self._closed_event.set()
 
 

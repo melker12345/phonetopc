@@ -20,10 +20,16 @@ asyncio can use :mod:`phonetopc.sync`.
 
 ``await phone.request_approval("Run deploy?")`` asks for a fingerprint on the
 phone and verifies the phone's signature (``pip install 'phonetopc[approval]'``).
+
+``await phone.notify("Build done")`` posts a notification, and
+``await phone.show_panel("deck", "Stream deck", layout)`` puts buttons, sliders,
+text or a drawing canvas on the phone's screen (layouts from :mod:`phonetopc.ui`);
+iterate the returned :class:`Panel` for what the user does.
 """
 
 from __future__ import annotations
 
+from . import ui
 from ._version import __version__
 from .approval import ApprovalResult
 from .client import (
@@ -53,6 +59,7 @@ from .errors import (
     InvalidParams,
     InvalidRequest,
     MethodNotFound,
+    NotAllowed,
     NotPaired,
     NoValue,
     ParseError,
@@ -60,10 +67,13 @@ from .errors import (
     PhoneUnreachable,
     PinMismatch,
     ProtocolError,
+    RateLimited,
     RequestTimeout,
     SourceUnavailable,
     SubscriptionOverflow,
+    TooManyPanels,
     Unauthorized,
+    UnknownPanel,
     UnknownSource,
     UnknownSubscription,
     UnsupportedProtocol,
@@ -79,6 +89,18 @@ from .models import (
     SensorInfo,
     ServerInfo,
     SubscribeResult,
+)
+from .panels import (
+    AttachResult,
+    ChangeEvent,
+    Panel,
+    PanelEvent,
+    PanelInfo,
+    Point,
+    PressEvent,
+    StateEvent,
+    StrokeEvent,
+    SubmitEvent,
 )
 from .store import InsecurePermissionsWarning, PairedDevice, load_devices
 
@@ -98,6 +120,8 @@ __all__ = [
     "ApprovalNotSupported",
     "ApprovalResult",
     "ApprovalVerificationError",
+    "AttachResult",
+    "ChangeEvent",
     "ConnectionClosed",
     "CredentialStoreError",
     "DeviceInfo",
@@ -111,24 +135,36 @@ __all__ = [
     "InvalidRequest",
     "MethodNotFound",
     "NoValue",
+    "NotAllowed",
     "NotPaired",
     "Overflow",
     "PCInfo",
     "PairedDevice",
+    "Panel",
+    "PanelEvent",
+    "PanelInfo",
     "ParseError",
     "Phone",
     "PhoneUnreachable",
     "PhonetopcError",
     "PinMismatch",
+    "Point",
+    "PressEvent",
     "ProtocolError",
+    "RateLimited",
     "RequestTimeout",
     "SensorInfo",
     "ServerInfo",
     "SourceUnavailable",
+    "StateEvent",
+    "StrokeEvent",
+    "SubmitEvent",
     "SubscribeResult",
     "Subscription",
     "SubscriptionOverflow",
+    "TooManyPanels",
     "Unauthorized",
+    "UnknownPanel",
     "UnknownSource",
     "UnknownSubscription",
     "UnsupportedProtocol",
@@ -136,4 +172,5 @@ __all__ = [
     "connect",
     "load_devices",
     "resolve_url",
+    "ui",
 ]
