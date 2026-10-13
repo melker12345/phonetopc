@@ -1,14 +1,14 @@
 package io.github.melker12345.phonetopc.protocol.panels
 
-import io.github.melker12345.phonetopc.protocol.panels.Rules.array
-import io.github.melker12345.phonetopc.protocol.panels.Rules.bool
+import io.github.melker12345.phonetopc.protocol.array
+import io.github.melker12345.phonetopc.protocol.bool
+import io.github.melker12345.phonetopc.protocol.integer
+import io.github.melker12345.phonetopc.protocol.number
 import io.github.melker12345.phonetopc.protocol.panels.Rules.choice
 import io.github.melker12345.phonetopc.protocol.panels.Rules.id
-import io.github.melker12345.phonetopc.protocol.panels.Rules.integer
 import io.github.melker12345.phonetopc.protocol.panels.Rules.invalid
-import io.github.melker12345.phonetopc.protocol.panels.Rules.number
-import io.github.melker12345.phonetopc.protocol.panels.Rules.string
 import io.github.melker12345.phonetopc.protocol.panels.Rules.text
+import io.github.melker12345.phonetopc.protocol.string
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject

@@ -1,5 +1,7 @@
 package io.github.melker12345.phonetopc.pairing
 
+import io.github.melker12345.phonetopc.protocol.lenientObj
+import io.github.melker12345.phonetopc.protocol.lenientString
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.protocol.security.Sas
@@ -165,7 +167,7 @@ class PairingClient(
                     },
                     userTimeout,
                 )
-                val pcName = result.obj("pc")?.string("name") ?: qr.pcName
+                val pcName = result.lenientObj("pc")?.lenientString("name") ?: qr.pcName
                 finish(ch, pin = qr.pin, fallbackId = qr.pcId, fallbackName = pcName)
             }
         }
@@ -192,14 +194,14 @@ class PairingClient(
                     if (e.code == PairingErrors.REJECTED) throw Failure(PairingFailure.QrOnly)
                     throw e
                 }
-                val pcInfo = begin.obj("pc")
-                val pcName = pcInfo?.string("name") ?: pc.name
-                val pcId = pcInfo?.string("id") ?: pc.id
-                val commitment = begin.string("commitment") ?: throw ProtocolError("pair_sas_begin result has no commitment")
+                val pcInfo = begin.lenientObj("pc")
+                val pcName = pcInfo?.lenientString("name") ?: pc.name
+                val pcId = pcInfo?.lenientString("id") ?: pc.id
+                val commitment = begin.lenientString("commitment") ?: throw ProtocolError("pair_sas_begin result has no commitment")
 
                 val nphone = Secrets.newNonce()
                 val reveal = ch.call("pair_sas_nonce", buildJsonObject { put("nonce", Base64Url.encode(nphone)) }, requestTimeout)
-                val npc = reveal.string("nonce")?.let(Base64Url::decode)
+                val npc = reveal.lenientString("nonce")?.let(Base64Url::decode)
                 if (npc == null || npc.size != Secrets.NONCE_BYTES || !Sas.verifyCommitment(commitment, npc)) {
                     // §4.3: a failed commitment check (including a missing or malformed nonce)
                     // sends match:false, so the PC discards everything, then aborts.
@@ -229,10 +231,10 @@ class PairingClient(
         _state.value = PairingState.Finishing(fallbackName)
         val token = Secrets.newToken()
         val result = ch.call("pair_finish", buildJsonObject { put("token", token) }, requestTimeout)
-        val pc = result.obj("pc")
-        val id = pc?.string("id")?.takeIf { it.isNotEmpty() } ?: fallbackId
+        val pc = result.lenientObj("pc")
+        val id = pc?.lenientString("id")?.takeIf { it.isNotEmpty() } ?: fallbackId
             ?: throw ProtocolError("pair_finish result has no pc.id")
-        val name = pc?.string("name")?.takeIf { it.isNotBlank() } ?: fallbackName
+        val name = pc?.lenientString("name")?.takeIf { it.isNotBlank() } ?: fallbackName
         store(NewPairing(id, name, pin, token))
         _state.value = PairingState.Paired(id, name)
     }

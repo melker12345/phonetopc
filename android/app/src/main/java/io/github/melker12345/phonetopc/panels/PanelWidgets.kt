@@ -66,6 +66,7 @@ import io.github.melker12345.phonetopc.protocol.panels.TextAlign
 import io.github.melker12345.phonetopc.protocol.panels.TextSize
 import io.github.melker12345.phonetopc.protocol.panels.Tone
 import io.github.melker12345.phonetopc.protocol.panels.Widget
+import io.github.melker12345.phonetopc.ui.formatNumber
 import kotlin.math.roundToInt
 
 /** What every widget needs besides itself. */
@@ -80,68 +81,52 @@ private class PanelContext(val snapshot: PanelSnapshot, val panels: PanelService
 @Composable
 fun PanelContent(snapshot: PanelSnapshot, panels: PanelService, modifier: Modifier) {
     val ctx = PanelContext(snapshot, panels, snapshot.pc.displayName(LocalContext.current))
-    Box(modifier) { RenderWidget(ctx, snapshot.layout, Modifier.fillMaxSize(), inner = Modifier.fillMaxSize()) }
+    val plan = remember(snapshot.layout) { PanelLayout.plan(snapshot.layout) }
+    Box(modifier) { RenderWidget(ctx, plan, Modifier) }
 }
 
-/** Whether a widget wants all the space it can get: a canvas, or a container holding one. */
-private fun fills(w: Widget): Boolean = when (w) {
-    is Widget.Canvas -> true
-    is Widget.Column -> w.children.any(::fills)
-    is Widget.Row -> w.children.any(::fills)
-    is Widget.Grid -> w.children.any(::fills)
-    else -> false
+/** Modifiers for a fill decision of [PanelLayout]. */
+private fun fill(width: Boolean, height: Boolean): Modifier = when {
+    width && height -> Modifier.fillMaxSize()
+    width -> Modifier.fillMaxWidth()
+    height -> Modifier.fillMaxHeight()
+    else -> Modifier
 }
-
-/** §5: `weight`, or 1 for a widget that fills (a canvas without a weight counts as 1). */
-private fun weightOf(w: Widget): Float? = w.weight?.toFloat() ?: if (fills(w)) 1f else null
 
 /**
- * [modifier] places the widget in its parent; [inner] sizes a leaf inside that place: filling a
- * grid cell, the width of a column, or its natural size in a row. [sized] says whether the parent
- * gave the widget its height (the root, a grid cell, a weighted child of a column, or a child of
- * such a row) rather than asking for its natural height.
+ * Draws [node] where [PanelLayout] put it. [place] is what only the parent's scope can add (a row
+ * or column `weight`, a grid cell's equal width); the fills follow it.
  */
 @Composable
-private fun RenderWidget(ctx: PanelContext, w: Widget, modifier: Modifier, inner: Modifier, sized: Boolean = true) {
+private fun RenderWidget(ctx: PanelContext, node: LayoutNode, place: Modifier) {
+    val w = node.widget
+    val p = node.placement
+    val modifier = place.then(fill(p.fillWidth, p.fillHeight))
     when (w) {
         is Widget.Column -> {
-            val weighted = w.children.any { weightOf(it) != null }
-            // Without weights a column has natural heights and may be taller than the screen.
-            val m = if (weighted) modifier else modifier.verticalScroll(rememberScrollState())
+            val m = if (node.scrolls) modifier.verticalScroll(rememberScrollState()) else modifier
             Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                w.children.forEach { child ->
-                    val weight = weightOf(child)
-                    val place = weight?.let { Modifier.weight(it).fillMaxWidth() } ?: Modifier.fillMaxWidth()
-                    RenderWidget(ctx, child, place, Modifier.fillMaxWidth(), sized = weight != null)
+                node.children.forEach { child ->
+                    RenderWidget(ctx, child, child.placement.weight?.let { Modifier.weight(it) } ?: Modifier)
                 }
             }
         }
         is Widget.Row -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            w.children.forEach { child ->
-                val weight = weightOf(child)
-                // Filling the height of a row that has none of its own would make the row take
-                // all the height a column offers it, leaving nothing for the column's weighted
-                // children, a canvas for example.
-                val place = weight?.let { if (sized) Modifier.weight(it).fillMaxHeight() else Modifier.weight(it) } ?: Modifier
-                RenderWidget(ctx, child, place, if (weight != null) Modifier.fillMaxWidth() else Modifier, sized = sized && weight != null)
+            node.children.forEach { child ->
+                RenderWidget(ctx, child, child.placement.weight?.let { Modifier.weight(it) } ?: Modifier)
             }
         }
         is Widget.Grid -> Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Cells are all the same width. Given a height (the root, a weight), the rows share it
-            // and widgets fill their cell; otherwise rows are as tall as their tallest widget, and
-            // widgets fill only the cell's width, so a row of buttons stays a row of buttons.
-            w.children.chunked(w.cols).forEach { row ->
+            // A sized grid shares its height between its rows; see PanelLayout for the rest.
+            node.children.chunked(w.cols).forEach { row ->
                 Row(
-                    if (sized) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth(),
+                    if (p.sized) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     row.forEach { child ->
-                        val cell = if (sized) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
-                        Box(cell, contentAlignment = Alignment.Center) {
-                            val fill = if (sized) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
-                            RenderWidget(ctx, child, fill, fill, sized = sized)
-                        }
+                        val cell = if (p.sized) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
+                        Box(cell, contentAlignment = Alignment.Center) { RenderWidget(ctx, child, Modifier) }
                     }
                     repeat(w.cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -149,7 +134,7 @@ private fun RenderWidget(ctx: PanelContext, w: Widget, modifier: Modifier, inner
         }
         is Widget.Canvas -> PanelCanvas(ctx.ref, w, ctx.snapshot.canvases[w.id], ctx.panels, modifier)
         else -> Box(if (ctx.attached) modifier else modifier.alpha(0.38f), contentAlignment = Alignment.Center) {
-            Leaf(ctx, w, inner)
+            Leaf(ctx, w, fill(p.innerFillWidth, p.innerFillHeight))
         }
     }
 }
@@ -221,7 +206,7 @@ private fun SliderWidget(ctx: PanelContext, w: Widget.Slider, enabled: Boolean, 
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (w.label.isNotEmpty()) Text(w.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             else Spacer(Modifier.weight(1f))
-            Text(formatNumber(w.normalize(local.toDouble())), style = MaterialTheme.typography.labelLarge)
+            Text(formatNumber(w.normalize(local.toDouble()), decimals = 2), style = MaterialTheme.typography.labelLarge)
         }
         Slider(
             value = local,
@@ -304,8 +289,5 @@ private fun buttonColors(tone: Tone): ButtonColors = when (tone) {
     }
     else -> ButtonDefaults.buttonColors()
 }
-
-private fun formatNumber(v: Double): String =
-    if (v == Math.rint(v) && kotlin.math.abs(v) < 1e15) v.toLong().toString() else "%.2f".format(v)
 
 private const val SLIDER_INTERVAL_MS = 50L

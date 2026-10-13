@@ -4,7 +4,7 @@ import io.github.melker12345.phonetopc.protocol.Reading
 import io.github.melker12345.phonetopc.protocol.RpcError
 import io.github.melker12345.phonetopc.protocol.RpcException
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
-import io.github.melker12345.phonetopc.protocol.panels.Rules.array
+import io.github.melker12345.phonetopc.protocol.array
 import io.github.melker12345.phonetopc.protocol.panels.Rules.choice
 import io.github.melker12345.phonetopc.protocol.panels.Rules.id
 import io.github.melker12345.phonetopc.protocol.panels.Rules.invalid

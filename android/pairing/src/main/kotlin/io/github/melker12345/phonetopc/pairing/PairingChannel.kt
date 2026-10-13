@@ -126,8 +126,3 @@ class WebSocketPairingChannel(private val ws: PinnedWebSocket) : PairingChannel 
         scope.cancel()
     }
 }
-
-internal fun JsonObject.string(key: String): String? =
-    (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-
-internal fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject

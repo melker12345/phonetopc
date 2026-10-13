@@ -24,7 +24,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.doubleOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -419,7 +418,7 @@ class Session internal constructor(
     private fun hello(params: JsonObject): JsonElement {
         val security = hub.security
         if (security != null && security.limiter.isBlocked(remoteHost)) throw RateLimited()
-        val protocol = params.requireString("protocol")
+        val protocol = params.requiredString("protocol")
         val auth = security?.let { authenticate(it, params) }
         if (protocol !in SUPPORTED_PROTOCOLS) {
             throw RpcException(
@@ -510,13 +509,13 @@ class Session internal constructor(
 
     private fun subscribe(params: JsonObject): Handled {
         // Spec §2 step 7: params that can be checked without the catalog, for any source.
-        val sourceName = params.requireString("source")
-        val type = params.optString("type")
-        val requestedRate = params.optNumber("rate_hz")
+        val sourceName = params.requiredString("source")
+        val type = params.string("type")
+        val requestedRate = params.number("rate_hz")
         if (requestedRate != null && requestedRate <= 0.0) {
             throw RpcException(RpcError.INVALID_PARAMS, "rate_hz must be > 0")
         }
-        val minDelta = params.optNumber("min_delta")
+        val minDelta = params.number("min_delta")
         if (minDelta != null && minDelta < 0.0) {
             throw RpcException(RpcError.INVALID_PARAMS, "min_delta must be >= 0")
         }
@@ -538,7 +537,7 @@ class Session internal constructor(
     }
 
     private fun unsubscribe(params: JsonObject): JsonElement {
-        val id = params.requireString("subscription")
+        val id = params.requiredString("subscription")
         val sub = subscriptions.remove(id)
             ?: throw RpcException(RpcError.UNKNOWN_SUBSCRIPTION, "Unknown subscription: $id")
         sub.deactivate()
@@ -547,8 +546,8 @@ class Session internal constructor(
     }
 
     private suspend fun get(params: JsonObject): JsonElement {
-        val sourceName = params.requireString("source")
-        val type = params.optString("type")
+        val sourceName = params.requiredString("source")
+        val type = params.string("type")
         lookup(sourceName, type)
         val reading = hub.read(sourceName)?.takeIf { type == null || it.type == type }
             ?: throw RpcException(RpcError.NO_VALUE, "No value yet for $sourceName")
@@ -622,27 +621,3 @@ class Session internal constructor(
 
 /** Default when a source doesn't advertise one. */
 const val DEFAULT_RATE_HZ = 50.0
-
-// ---- params helpers (unknown fields are ignored; explicit nulls count as absent) ----
-
-private fun JsonObject.present(key: String): JsonElement? = this[key]?.takeUnless { it is JsonNull }
-
-private fun JsonObject.requireString(key: String): String =
-    optString(key) ?: throw RpcException(RpcError.INVALID_PARAMS, "Missing required param: $key")
-
-private fun JsonObject.optString(key: String): String? {
-    val v = present(key) ?: return null
-    if (v !is JsonPrimitive || !v.isString) throw RpcException(RpcError.INVALID_PARAMS, "$key must be a string")
-    return v.content
-}
-
-private fun JsonObject.optNumber(key: String): Double? {
-    val v = present(key) ?: return null
-    val d = (v as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull
-        ?: throw RpcException(RpcError.INVALID_PARAMS, "$key must be a number")
-    if (d.isNaN() || d.isInfinite()) throw RpcException(RpcError.INVALID_PARAMS, "$key must be finite")
-    return d
-}
-
-private fun JsonObject.lenientString(key: String): String? =
-    (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content

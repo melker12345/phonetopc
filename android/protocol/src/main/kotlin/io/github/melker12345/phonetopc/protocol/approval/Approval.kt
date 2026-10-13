@@ -1,11 +1,12 @@
 package io.github.melker12345.phonetopc.protocol.approval
 
 import io.github.melker12345.phonetopc.protocol.PcInfo
-import io.github.melker12345.phonetopc.protocol.RpcError
 import io.github.melker12345.phonetopc.protocol.RpcException
+import io.github.melker12345.phonetopc.protocol.invalidParams
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.protocol.security.sha256
+import io.github.melker12345.phonetopc.protocol.string
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -141,26 +142,26 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
         fun parse(params: JsonObject): ApprovalParams {
             // Accepted or rejected exactly as received: never trimmed or normalized, because the
             // PC hashes the string it sent.
-            val reason = params.string("reason") ?: invalid("reason is required")
+            val reason = params.string("reason") ?: invalidParams("reason is required")
             if (!isDisplayable(reason)) {
-                invalid("reason must not contain control characters, bidirectional controls or unpaired surrogates")
+                invalidParams("reason must not contain control characters, bidirectional controls or unpaired surrogates")
             }
             val length = reason.codePointCount(0, reason.length)
-            if (length < 1) invalid("reason must not be empty")
-            if (length > MAX_REASON) invalid("reason must be at most $MAX_REASON code points")
+            if (length < 1) invalidParams("reason must not be empty")
+            if (length > MAX_REASON) invalidParams("reason must be at most $MAX_REASON code points")
             if (isSpace(reason.codePointAt(0)) || isSpace(reason.codePointBefore(reason.length))) {
-                invalid("reason must not start or end with whitespace")
+                invalidParams("reason must not start or end with whitespace")
             }
 
-            val nonce = params.string("nonce") ?: invalid("nonce is required")
-            if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalid("nonce must be $NONCE_BYTES bytes, base64url")
+            val nonce = params.string("nonce") ?: invalidParams("nonce is required")
+            if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalidParams("nonce must be $NONCE_BYTES bytes, base64url")
 
             val timeout = when (val t = params["timeout_ms"]) {
                 null, JsonNull -> DEFAULT_TIMEOUT_MS
-                else -> integer(t) ?: invalid("timeout_ms must be an integer")
+                else -> integer(t) ?: invalidParams("timeout_ms must be an integer")
             }
             if (timeout !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) {
-                invalid("timeout_ms must be between $MIN_TIMEOUT_MS and $MAX_TIMEOUT_MS")
+                invalidParams("timeout_ms must be between $MIN_TIMEOUT_MS and $MAX_TIMEOUT_MS")
             }
             return ApprovalParams(reason, nonce, timeout)
         }
@@ -196,12 +197,6 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
          */
         private fun isSpace(cp: Int) = Character.isWhitespace(cp) || Character.isSpaceChar(cp)
 
-        private fun JsonObject.string(key: String): String? = when (val v = this[key]) {
-            null, JsonNull -> null
-            is JsonPrimitive -> if (v.isString) v.content else invalid("$key must be a string")
-            else -> invalid("$key must be a string")
-        }
-
         /** A JSON integer spelled as one (`30000`, not `3e4` or `30000.0`). */
         private fun integer(e: JsonElement): Long? {
             val p = e as? JsonPrimitive ?: return null
@@ -210,7 +205,5 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
         }
 
         private val INTEGER = Regex("-?(0|[1-9][0-9]{0,17})")
-
-        private fun invalid(message: String): Nothing = throw RpcException(RpcError.INVALID_PARAMS, message)
     }
 }

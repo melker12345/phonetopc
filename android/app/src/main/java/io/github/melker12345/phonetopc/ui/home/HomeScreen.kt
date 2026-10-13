@@ -90,6 +90,7 @@ import io.github.melker12345.phonetopc.service.RunState
 import io.github.melker12345.phonetopc.ui.MainViewModel
 import io.github.melker12345.phonetopc.ui.components.IconBadge
 import io.github.melker12345.phonetopc.ui.components.SectionHeader
+import io.github.melker12345.phonetopc.ui.formatNumber
 import io.github.melker12345.phonetopc.ui.sensorUi
 import io.github.melker12345.phonetopc.ui.theme.PhonetopcTheme
 import kotlinx.coroutines.delay
@@ -359,8 +360,7 @@ private fun streamLabel(source: String, demand: Demand): String {
     return stringResource(R.string.home_streaming_at, name, formatHz(rate))
 }
 
-private fun formatHz(rate: Double): String =
-    if (rate == Math.floor(rate)) rate.toInt().toString() else "%.1f".format(rate)
+private fun formatHz(rate: Double): String = formatNumber(rate, decimals = 1)
 
 @Composable
 private fun AddressCard(addresses: List<String>, port: Int, secure: Boolean, dimmed: Boolean) {

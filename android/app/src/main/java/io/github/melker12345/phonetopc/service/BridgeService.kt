@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import io.github.melker12345.phonetopc.AppGraph
 import io.github.melker12345.phonetopc.BuildConfig
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.appGraph
@@ -24,6 +25,8 @@ import io.github.melker12345.phonetopc.protocol.SensorCatalog
 import io.github.melker12345.phonetopc.protocol.SensorMode
 import io.github.melker12345.phonetopc.protocol.ServerInfo
 import io.github.melker12345.phonetopc.server.PhonetopcServer
+import io.github.melker12345.phonetopc.server.TlsIdentity
+import io.github.melker12345.phonetopc.server.isPortInUse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -167,45 +170,26 @@ class BridgeService : Service() {
             val source = graph.sensorSource.apply { disabledSources = settings.disabledSources }
             refreshForeground()
 
-            // Secure mode (SECURITY.md §3): the Keystore key for TLS, and paired PCs' tokens.
-            val tls = if (!secure) {
+            val secureMode = if (!secure) {
                 null
             } else {
-                graph.pairedPcs.current() // loaded before the first hello can arrive
-                withContext(Dispatchers.IO) { runCatching { PhoneKey.identity() } }.getOrElse { e ->
-                    Log.e(TAG, "no TLS key", e)
+                secureMode(graph) ?: run {
                     fail(getString(R.string.error_tls_key))
                     return@launch
                 }
-            }
-            val security = if (!secure) {
-                null
-            } else {
-                SecureAccess(
-                    authenticate = { token -> graph.pairedPcs.authenticate(token)?.info },
-                    onAuthenticated = { pc -> graph.appScope.launch { graph.pairedPcs.touch(pc.id) } },
-                )
-            }
-            // APPROVAL.md: secure mode only. Create or check the approval key now, off the
-            // main thread, so the first hello doesn't wait for key generation.
-            val approvals = if (!secure) {
-                null
-            } else {
-                withContext(Dispatchers.IO) { ApprovalKey.status(applicationContext, fresh = true) }
-                ApprovalService(AndroidApprover(applicationContext), onError = { e -> Log.w(TAG, "approval failed", e) })
             }
             source.recheckAvailability()
             val newHub = BridgeHub(
                 source = source,
                 serverInfo = ServerInfo("phonetopc-android", BuildConfig.VERSION_NAME),
                 deviceInfoProvider = { DeviceIdentity.info(applicationContext, deviceId) },
-                security = security,
-                approvals = approvals,
+                security = secureMode?.security,
+                approvals = secureMode?.approvals,
                 notifications = graph.notifications,
                 panels = graph.panels,
                 outputPermissions = graph.outputAccess,
             )
-            val newServer = PhonetopcServer(newHub, port = settings.port, tls = tls)
+            val newServer = PhonetopcServer(newHub, port = settings.port, tls = secureMode?.tls)
             // Tracked before it starts: start() blocks and can't be cancelled, so a Stop
             // meanwhile must find it here; teardown() then stops it once start() is done.
             hub = newHub
@@ -222,7 +206,7 @@ class BridgeService : Service() {
             }
             started.exceptionOrNull()?.let { e ->
                 Log.w(TAG, "server start failed", e)
-                fail(getString(R.string.error_port_in_use, settings.port))
+                fail(if (isPortInUse(e)) getString(R.string.error_port_in_use, settings.port) else getString(R.string.error_start_failed))
                 return@launch
             }
             controller.update { it.copy(state = RunState.RUNNING, port = settings.port, secure = secure) }
@@ -232,6 +216,30 @@ class BridgeService : Service() {
 
             observe(newHub, graph.networkMonitor, devMode = settings.devMode)
         }
+    }
+
+    /** What secure mode adds to the bridge; dev mode has none of it. */
+    private class SecureMode(val tls: TlsIdentity, val security: SecureAccess, val approvals: ApprovalService)
+
+    /**
+     * Secure mode (SECURITY.md §3): the Keystore key for TLS, and paired PCs' tokens; approvals
+     * (APPROVAL.md) are secure mode only too. `null` if the TLS key can't be loaded.
+     */
+    private suspend fun secureMode(graph: AppGraph): SecureMode? {
+        graph.pairedPcs.current() // loaded before the first hello can arrive
+        val tls = withContext(Dispatchers.IO) { runCatching { PhoneKey.identity() } }.getOrElse { e ->
+            Log.e(TAG, "no TLS key", e)
+            return null
+        }
+        val security = SecureAccess(
+            authenticate = { token -> graph.pairedPcs.authenticate(token)?.info },
+            onAuthenticated = { pc -> graph.appScope.launch { graph.pairedPcs.touch(pc.id) } },
+        )
+        // Create or check the approval key now, off the main thread, so the first hello doesn't
+        // wait for key generation.
+        withContext(Dispatchers.IO) { ApprovalKey.status(applicationContext, fresh = true) }
+        val approvals = ApprovalService(AndroidApprover(applicationContext), onError = { e -> Log.w(TAG, "approval failed", e) })
+        return SecureMode(tls, security, approvals)
     }
 
     /** Runs until the bridge is torn down: [startJob] is cancelled, and these with it. */

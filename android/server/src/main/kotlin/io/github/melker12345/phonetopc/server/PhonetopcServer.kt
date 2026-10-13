@@ -26,11 +26,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.net.BindException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 const val DEFAULT_PORT = 8765
 const val WS_PATH = "/v1/ws"
+
+/**
+ * Whether [e], thrown by [PhonetopcServer.start], means the port is taken: a [BindException],
+ * which Ktor may hand on wrapped. Anything else is some other failure to start.
+ */
+fun isPortInUse(e: Throwable): Boolean = generateSequence(e) { it.cause }.any { it is BindException }
 
 /**
  * WebSocket endpoint `/v1/ws` (spec §1) on the Ktor CIO engine. One

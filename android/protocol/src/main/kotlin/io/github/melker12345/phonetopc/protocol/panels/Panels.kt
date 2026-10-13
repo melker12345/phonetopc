@@ -4,15 +4,15 @@ import io.github.melker12345.phonetopc.protocol.Reading
 import io.github.melker12345.phonetopc.protocol.RpcError
 import io.github.melker12345.phonetopc.protocol.RpcException
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
-import io.github.melker12345.phonetopc.protocol.panels.Rules.array
-import io.github.melker12345.phonetopc.protocol.panels.Rules.bool
+import io.github.melker12345.phonetopc.protocol.array
+import io.github.melker12345.phonetopc.protocol.bool
+import io.github.melker12345.phonetopc.protocol.integer
+import io.github.melker12345.phonetopc.protocol.obj
 import io.github.melker12345.phonetopc.protocol.panels.Rules.choice
-import io.github.melker12345.phonetopc.protocol.panels.Rules.integer
 import io.github.melker12345.phonetopc.protocol.panels.Rules.invalid
-import io.github.melker12345.phonetopc.protocol.panels.Rules.obj
-import io.github.melker12345.phonetopc.protocol.panels.Rules.present
 import io.github.melker12345.phonetopc.protocol.panels.Rules.requiredId
 import io.github.melker12345.phonetopc.protocol.panels.Rules.text
+import io.github.melker12345.phonetopc.protocol.present
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -187,7 +187,8 @@ class PanelService(
         )
     }
 
-    private fun key(pc: PcRef, id: String) = pc.key + "\u0000" + id
+    /** A panel's map key: panel ids are per PC, and an id can't contain NUL (§8), so this is unambiguous. */
+    private fun key(pcKey: String, id: String) = pcKey + "\u0000" + id
 
     // ---- methods (PANELS.md §4); params are already checked (step 7) ----
 
@@ -197,7 +198,7 @@ class PanelService(
         synchronized(lock) {
             checkAllowed(pc)
             expireLocked()
-            val old = panels[key(pc, params.panel)]
+            val old = panels[key(pc.key, params.panel)]
             if (old == null && panels.values.count { it.pc.key == pc.key } >= maxPanelsPerPc) {
                 throw RpcException(RpcError.TOO_MANY_PANELS, "This PC already has $maxPanelsPerPc panels; close one first")
             }
@@ -209,7 +210,7 @@ class PanelService(
             )
             panel.holding = true
             // Replacing keeps the place in creation order.
-            panels[key(pc, params.panel)] = panel
+            panels[key(pc.key, params.panel)] = panel
             publishLocked()
             shown = panel.snapshot()
         }
@@ -253,7 +254,7 @@ class PanelService(
     fun close(pc: PcRef, panelId: String) {
         synchronized(lock) {
             val panel = findLocked(pc, panelId)
-            panels.remove(key(pc, panel.id))
+            panels.remove(key(pc.key, panel.id))
             publishLocked()
         }
     }
@@ -293,7 +294,7 @@ class PanelService(
     private fun findLocked(pc: PcRef, panelId: String): Panel {
         checkAllowed(pc)
         expireLocked()
-        return panels[key(pc, panelId)] ?: throw RpcException(RpcError.UNKNOWN_PANEL, "No panel \"$panelId\" (never shown, closed, or expired)")
+        return panels[key(pc.key, panelId)] ?: throw RpcException(RpcError.UNKNOWN_PANEL, "No panel \"$panelId\" (never shown, closed, or expired)")
     }
 
     private fun checkAllowed(pc: PcRef) {
@@ -349,7 +350,7 @@ class PanelService(
             if (gone.isEmpty()) return
             for (p in gone) {
                 emitLocked(p, "state") { put("state", "closed"); put("reason", "revoked") }
-                panels.remove(key(p.pc, p.id))
+                panels.remove(key(p.pc.key, p.id))
             }
             publishLocked()
         }
@@ -381,7 +382,7 @@ class PanelService(
     /** The close button in the frame. */
     fun onUserClose(ref: PanelRef) = withPanel(ref) { p ->
         emitLocked(p, "state") { put("state", "closed"); put("reason", "user") }
-        panels.remove(key(p.pc, p.id))
+        panels.remove(key(p.pc.key, p.id))
         publishLocked()
     }
 
@@ -447,8 +448,6 @@ class PanelService(
         val p = panels[key(ref.pcKey, ref.id)]?.takeIf { it.instance == ref.instance } ?: return emptyList()
         p.canvases[widgetId]?.strokes?.values?.map { StrokeData(it.id, it.tool, it.points.toList(), it.ended) }.orEmpty()
     }
-
-    private fun key(pcKey: String, id: String) = pcKey + "\u0000" + id
 
     private fun appendLocked(
         p: Panel, widgetId: String, log: CanvasLog, stroke: Stroke, phase: StrokePhase, points: List<StrokePoint>, size: FloatArray?,
