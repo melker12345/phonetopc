@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -82,11 +83,12 @@ fun PanelContent(snapshot: PanelSnapshot, panels: PanelService, modifier: Modifi
     Box(modifier) { RenderWidget(ctx, snapshot.layout, Modifier.fillMaxSize(), inner = Modifier.fillMaxSize()) }
 }
 
-/** Whether a widget wants all the space it can get: canvases and grids, and containers holding one. */
+/** Whether a widget wants all the space it can get: a canvas, or a container holding one. */
 private fun fills(w: Widget): Boolean = when (w) {
-    is Widget.Canvas, is Widget.Grid -> true
+    is Widget.Canvas -> true
     is Widget.Column -> w.children.any(::fills)
     is Widget.Row -> w.children.any(::fills)
+    is Widget.Grid -> w.children.any(::fills)
     else -> false
 }
 
@@ -95,10 +97,12 @@ private fun weightOf(w: Widget): Float? = w.weight?.toFloat() ?: if (fills(w)) 1
 
 /**
  * [modifier] places the widget in its parent; [inner] sizes a leaf inside that place: filling a
- * grid cell, the width of a column, or its natural size in a row.
+ * grid cell, the width of a column, or its natural size in a row. [sized] says whether the parent
+ * gave the widget its height (the root, a grid cell, a weighted child of a column, or a child of
+ * such a row) rather than asking for its natural height.
  */
 @Composable
-private fun RenderWidget(ctx: PanelContext, w: Widget, modifier: Modifier, inner: Modifier) {
+private fun RenderWidget(ctx: PanelContext, w: Widget, modifier: Modifier, inner: Modifier, sized: Boolean = true) {
     when (w) {
         is Widget.Column -> {
             val weighted = w.children.any { weightOf(it) != null }
@@ -106,25 +110,37 @@ private fun RenderWidget(ctx: PanelContext, w: Widget, modifier: Modifier, inner
             val m = if (weighted) modifier else modifier.verticalScroll(rememberScrollState())
             Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 w.children.forEach { child ->
-                    val place = weightOf(child)?.let { Modifier.weight(it).fillMaxWidth() } ?: Modifier.fillMaxWidth()
-                    RenderWidget(ctx, child, place, Modifier.fillMaxWidth())
+                    val weight = weightOf(child)
+                    val place = weight?.let { Modifier.weight(it).fillMaxWidth() } ?: Modifier.fillMaxWidth()
+                    RenderWidget(ctx, child, place, Modifier.fillMaxWidth(), sized = weight != null)
                 }
             }
         }
         is Widget.Row -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             w.children.forEach { child ->
                 val weight = weightOf(child)
-                val place = weight?.let { Modifier.weight(it).fillMaxHeight() } ?: Modifier
-                RenderWidget(ctx, child, place, if (weight != null) Modifier.fillMaxWidth() else Modifier)
+                // Filling the height of a row that has none of its own would make the row take
+                // all the height a column offers it, leaving nothing for the column's weighted
+                // children, a canvas for example.
+                val place = weight?.let { if (sized) Modifier.weight(it).fillMaxHeight() else Modifier.weight(it) } ?: Modifier
+                RenderWidget(ctx, child, place, if (weight != null) Modifier.fillMaxWidth() else Modifier, sized = sized && weight != null)
             }
         }
         is Widget.Grid -> Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Cells are all the same size and fill the grid; widgets fill their cell.
+            // Cells are all the same width. Given a height (the root, a weight), the rows share it
+            // and widgets fill their cell; otherwise rows are as tall as their tallest widget, and
+            // widgets fill only the cell's width, so a row of buttons stays a row of buttons.
             w.children.chunked(w.cols).forEach { row ->
-                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    if (sized) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     row.forEach { child ->
-                        Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                            RenderWidget(ctx, child, Modifier.fillMaxSize(), Modifier.fillMaxSize())
+                        val cell = if (sized) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
+                        Box(cell, contentAlignment = Alignment.Center) {
+                            val fill = if (sized) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
+                            RenderWidget(ctx, child, fill, fill, sized = sized)
                         }
                     }
                     repeat(w.cols - row.size) { Spacer(Modifier.weight(1f)) }
@@ -156,11 +172,13 @@ private fun Leaf(ctx: PanelContext, w: Widget, modifier: Modifier) {
         is Widget.Button -> {
             val m = modifier.heightIn(min = 48.dp)
             val onClick = { ctx.panels.onPress(ctx.ref, w.id) }
+            // Material's 24 dp each side leaves a narrow grid cell almost no room for the label.
+            val padding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
             val label: @Composable () -> Unit = { Text(w.label, textAlign = UiTextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis) }
             if (w.tone == Tone.DEFAULT) {
-                FilledTonalButton(onClick, m, enabled = enabled, shape = MaterialTheme.shapes.large) { label() }
+                FilledTonalButton(onClick, m, enabled = enabled, shape = MaterialTheme.shapes.large, contentPadding = padding) { label() }
             } else {
-                Button(onClick, m, enabled = enabled, shape = MaterialTheme.shapes.large, colors = buttonColors(w.tone)) { label() }
+                Button(onClick, m, enabled = enabled, shape = MaterialTheme.shapes.large, colors = buttonColors(w.tone), contentPadding = padding) { label() }
             }
         }
         is Widget.Toggle -> Row(

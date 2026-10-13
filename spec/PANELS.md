@@ -237,7 +237,7 @@ other members depend on it. Unknown members are ignored. Any rule broken anywher
 | `type` | Members (besides the common ones) | Events |
 |---|---|---|
 | `column`, `row` | `children`: 1–64 widgets, top to bottom / start to end | — |
-| `grid` | `cols`: integer 1–8; `children`: 1–64 widgets, filled row by row. Cells are all the same size and the grid fills its space; widgets in it fill their cell | — |
+| `grid` | `cols`: integer 1–8; `children`: 1–64 widgets, filled row by row. Cells are all the same width. A grid given a height (the root, or a `weight`) shares it equally between its rows and widgets fill their cell; otherwise each row is as tall as its tallest widget | — |
 | `text` | `text`: display text, 0–4000 code points, newlines allowed; `size`: `"small"`, `"body"` (default), `"title"`, `"display"`; `align`: `"start"` (default), `"center"`, `"end"` | — |
 | `button` | `label`: display text, 1–100 code points, no newlines | `press` |
 | `toggle` | `label`: as `button`; `value`: boolean, default `false` | `change` |
