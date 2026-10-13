@@ -1,8 +1,8 @@
 # Conformance material
 
-Conformance material for `phonetopc/1` (draft 3) lives here.
-[`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md) and
-[`../APPROVAL.md`](../APPROVAL.md) are still the normative reference.
+Conformance material for `phonetopc/1` (draft 4) lives here.
+[`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md),
+[`../APPROVAL.md`](../APPROVAL.md) and [`../PANELS.md`](../PANELS.md) are still the normative reference.
 
 - [`server-cases.json`](server-cases.json): a language-neutral suite of single-request cases that
   every **server** implementation runs in its own tests. It pins down how a server answers
@@ -13,6 +13,9 @@ Conformance material for `phonetopc/1` (draft 3) lives here.
 - [`approval-server-cases.json`](approval-server-cases.json): `request_approval`
   ([`../APPROVAL.md`](../APPROVAL.md)) in secure mode: `hello.approval`, every params rule, and
   signatures that verify. See [Approval server cases](#approval-server-cases-approval-server-casesjson).
+- [`panel-server-cases.json`](panel-server-cases.json): notifications and panels
+  ([`../PANELS.md`](../PANELS.md)) in dev mode: every params rule, the limits, and `-32030` without
+  permission. See [Panel server cases](#panel-server-cases-panel-server-casesjson).
 - [`vectors/`](vectors/): test vectors for pins, base64url, the SAS commitment and the SAS code
   (`vectors.json`), and for approval signatures (`approval.json`), with the test certificates and
   keys they refer to.
@@ -171,6 +174,39 @@ dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_
 - `timeout_ms` must be a JSON integer: `5000.5` and `"30000"` are `-32602`. The cases don't test
   spellings like `5000.0` or `5e3`.
 - Code points, not UTF-16 units, count: 200 emoji are allowed, 201 are not.
+
+## Panel server cases (`panel-server-cases.json`)
+
+A JSON object with a `fixture` and a `cases` array. Cases have the format of `server-cases.json`
+and run over `ws://` like it, with these differences:
+
+- **A fresh server per case.** Panels and notifications belong to the PC, and in dev mode every
+  connection is the same dev-mode PC (PANELS.md §1), so state would leak from one case into the next.
+  The runner resets the server between cases (a new server, or a test hook that drops all panels
+  and notifications).
+- **`"permissions"`**: a case member. Absent: the server allows notifications and panels for the
+  dev-mode PC (`fixture.permissions`). `"off"`: the server allows neither.
+- **`expect`** may also have `"result_has": {...}` (each listed member of `result` equals the given
+  JSON value, as in the secure cases) and `"result_capabilities": [...]` (`result.capabilities`
+  contains each of these, as in the approval cases).
+
+**Server fixture**, in addition to the one of `server-cases.json`:
+
+- Dev mode, and permissions as above.
+- **No user and no screen**: panels are never visible, nobody touches them, and nothing produces
+  `panel` or `notification` events. So `visible` is always `false` and a new panel's `last_pseq`
+  is -1.
+
+**Choices the cases make.**
+
+- Lengths count code points: 100 emoji are a valid notification title.
+- Everything that can be checked from the request alone is step 7 (`-32602`) and comes before the
+  permission (`-32030`), so an invalid request without permission is still `-32602`. That includes
+  the whole layout: unique ids, depth, the widget count, `min` < `max`, `value` within `max_length`.
+- What depends on an existing panel (an unknown widget in `panel_update`, `canvas_clear` on a
+  widget that isn't a canvas, a `set` value that breaks its widget's rules) is `-32602` too, but in
+  step 8, after `-32031`.
+- A slider `value` outside `[min, max]` is accepted and clamped (`panel_show_every_widget`).
 
 ## Transcripts
 

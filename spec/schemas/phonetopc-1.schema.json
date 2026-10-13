@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/melker12345/phonetopc/spec/schemas/phonetopc-1.schema.json",
-  "title": "phonetopc/1 messages (draft 3)",
+  "title": "phonetopc/1 messages (draft 4)",
   "description": "Every WebSocket text frame is one of these. See ../PROTOCOL.md.",
   "oneOf": [
     { "$ref": "#/$defs/request" },
@@ -17,7 +17,9 @@
       "properties": {
         "jsonrpc": { "const": "2.0" },
         "id": { "$ref": "#/$defs/id" },
-        "method": { "enum": ["hello", "list_sensors", "subscribe", "unsubscribe", "get", "request_approval"] },
+        "method": { "enum": ["hello", "list_sensors", "subscribe", "unsubscribe", "get", "request_approval",
+                             "notify", "notify_cancel", "panel_show", "panel_attach", "panel_update", "panel_close",
+                             "panel_list", "canvas_clear"] },
         "params": { "type": ["object", "null"] }
       },
       "allOf": [
@@ -30,7 +32,21 @@
         { "if": { "properties": { "method": { "const": "request_approval" } } },
           "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/requestApprovalParams" } } } },
         { "if": { "properties": { "method": { "const": "get" } } },
-          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/getParams" } } } }
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/getParams" } } } },
+        { "if": { "properties": { "method": { "const": "notify" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/notifyParams" } } } },
+        { "if": { "properties": { "method": { "const": "notify_cancel" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/notifyCancelParams" } } } },
+        { "if": { "properties": { "method": { "const": "panel_show" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/panelShowParams" } } } },
+        { "if": { "properties": { "method": { "const": "panel_attach" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/panelAttachParams" } } } },
+        { "if": { "properties": { "method": { "const": "panel_update" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/panelUpdateParams" } } } },
+        { "if": { "properties": { "method": { "const": "panel_close" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/panelRef" } } } },
+        { "if": { "properties": { "method": { "const": "canvas_clear" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/canvasClearParams" } } } }
       ]
     },
 
@@ -186,7 +202,15 @@
         "subscribe": { "$ref": "#/$defs/subscribeResult" },
         "unsubscribe": { "$ref": "#/$defs/unsubscribeResult" },
         "get": { "$ref": "#/$defs/reading" },
-        "request_approval": { "$ref": "#/$defs/requestApprovalResult" }
+        "request_approval": { "$ref": "#/$defs/requestApprovalResult" },
+        "notify": { "$ref": "#/$defs/notifyResult" },
+        "notify_cancel": { "$ref": "#/$defs/emptyResult" },
+        "panel_show": { "$ref": "#/$defs/panelShowResult" },
+        "panel_attach": { "$ref": "#/$defs/panelAttachResult" },
+        "panel_update": { "$ref": "#/$defs/emptyResult" },
+        "panel_close": { "$ref": "#/$defs/emptyResult" },
+        "panel_list": { "$ref": "#/$defs/panelListResult" },
+        "canvas_clear": { "$ref": "#/$defs/emptyResult" }
       }
     },
 
@@ -229,6 +253,10 @@
           "then": { "properties": { "value": { "$ref": "#/$defs/position" } } } },
         { "if": { "properties": { "source": { "const": "ui" } } },
           "then": { "properties": { "value": { "type": "boolean" } } } },
+        { "if": { "properties": { "source": { "const": "notification" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/notificationEvent" } } } },
+        { "if": { "properties": { "source": { "const": "panel" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/panelEvent" } } } },
         { "if": { "properties": { "source": { "const": "nfc" } } },
           "then": { "properties": { "value": { "$ref": "#/$defs/tag" } } } }
       ]
@@ -286,6 +314,185 @@
               "text": { "type": "string" },
               "uri": { "type": "string" }
             }
+          }
+        }
+      }
+    },
+
+    "panelId": { "description": "PANELS.md §8", "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "line": {
+      "description": "Display text without newlines (PANELS.md §8). The pattern holds the characters themselves as JSON escapes, not regex escapes, so every regex engine reads it. JSON Schema lengths count code points, like the spec.",
+      "type": "string", "pattern": "^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]*$"
+    },
+    "text": {
+      "description": "Display text, newlines allowed (PANELS.md §8).",
+      "type": "string", "pattern": "^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]*$"
+    },
+    "emptyResult": { "type": "object", "maxProperties": 0 },
+
+    "notifyParams": {
+      "type": "object", "required": ["title"],
+      "properties": {
+        "title": { "allOf": [{ "$ref": "#/$defs/line" }, { "minLength": 1, "maxLength": 100 }] },
+        "body": { "allOf": [{ "$ref": "#/$defs/text" }, { "maxLength": 1000 }] },
+        "id": { "$ref": "#/$defs/panelId" },
+        "actions": {
+          "type": "array", "maxItems": 3,
+          "items": {
+            "type": "object", "required": ["id", "label"],
+            "properties": { "id": { "$ref": "#/$defs/panelId" }, "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "minLength": 1, "maxLength": 30 }] } }
+          }
+        },
+        "priority": { "enum": ["default", "high"] }
+      }
+    },
+    "notifyResult": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/panelId" } } },
+    "notifyCancelParams": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/panelId" } } },
+
+    "panelRef": { "type": "object", "required": ["panel"], "properties": { "panel": { "$ref": "#/$defs/panelId" } } },
+    "panelShowParams": {
+      "type": "object", "required": ["panel", "title", "layout"],
+      "properties": {
+        "panel": { "$ref": "#/$defs/panelId" },
+        "title": { "allOf": [{ "$ref": "#/$defs/line" }, { "minLength": 1, "maxLength": 60 }] },
+        "layout": { "$ref": "#/$defs/widget" },
+        "keep_awake": { "type": "boolean" },
+        "orientation": { "enum": ["any", "portrait", "landscape"] }
+      }
+    },
+    "panelShowResult": {
+      "type": "object", "required": ["panel", "visible"],
+      "properties": { "panel": { "$ref": "#/$defs/panelId" }, "visible": { "type": "boolean" } }
+    },
+    "panelAttachParams": {
+      "type": "object", "required": ["panel"],
+      "properties": { "panel": { "$ref": "#/$defs/panelId" }, "after_pseq": { "type": "integer", "minimum": -1 } }
+    },
+    "panelAttachResult": {
+      "type": "object", "required": ["panel", "title", "visible", "last_pseq", "values"],
+      "properties": {
+        "panel": { "$ref": "#/$defs/panelId" },
+        "title": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "last_pseq": { "type": "integer", "minimum": -1 },
+        "values": { "type": "object", "additionalProperties": { "type": ["boolean", "number"] } }
+      }
+    },
+    "panelUpdateParams": {
+      "type": "object", "required": ["panel", "updates"],
+      "properties": {
+        "panel": { "$ref": "#/$defs/panelId" },
+        "updates": {
+          "type": "array", "minItems": 1, "maxItems": 64,
+          "items": {
+            "type": "object", "required": ["widget", "set"],
+            "properties": {
+              "widget": { "$ref": "#/$defs/panelId" },
+              "set": { "type": "object", "not": { "anyOf": [{ "required": ["type"] }, { "required": ["id"] }, { "required": ["children"] }] } }
+            }
+          }
+        }
+      }
+    },
+    "panelListResult": {
+      "type": "object", "required": ["panels"],
+      "properties": {
+        "panels": {
+          "type": "array", "maxItems": 8,
+          "items": {
+            "type": "object", "required": ["panel", "title", "attached", "visible"],
+            "properties": {
+              "panel": { "$ref": "#/$defs/panelId" }, "title": { "type": "string" },
+              "attached": { "type": "boolean" }, "visible": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "canvasClearParams": {
+      "type": "object", "required": ["panel", "widget"],
+      "properties": { "panel": { "$ref": "#/$defs/panelId" }, "widget": { "$ref": "#/$defs/panelId" } }
+    },
+
+    "widget": {
+      "description": "PANELS.md §5. Limits on the whole tree (256 widgets, 8 levels, unique ids) are checked by the servers.",
+      "type": "object", "required": ["type"],
+      "properties": {
+        "type": { "enum": ["column", "row", "grid", "text", "button", "toggle", "slider", "progress", "text_input", "canvas"] },
+        "id": { "$ref": "#/$defs/panelId" },
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "enabled": { "type": "boolean" },
+        "tone": { "enum": ["default", "accent", "good", "warn", "bad"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "enum": ["column", "row"] } } },
+          "then": { "required": ["children"],
+            "properties": { "children": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/widget" } } } } },
+        { "if": { "properties": { "type": { "const": "grid" } } },
+          "then": { "required": ["cols", "children"],
+            "properties": { "cols": { "type": "integer", "minimum": 1, "maximum": 8 },
+              "children": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/widget" } } } } },
+        { "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "required": ["text"],
+            "properties": { "text": { "allOf": [{ "$ref": "#/$defs/text" }, { "maxLength": 4000 }] },
+              "size": { "enum": ["small", "body", "title", "display"] }, "align": { "enum": ["start", "center", "end"] } } } },
+        { "if": { "properties": { "type": { "const": "button" } } },
+          "then": { "required": ["id", "label"],
+            "properties": { "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "minLength": 1, "maxLength": 100 }] } } } },
+        { "if": { "properties": { "type": { "const": "toggle" } } },
+          "then": { "required": ["id", "label"],
+            "properties": { "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "minLength": 1, "maxLength": 100 }] }, "value": { "type": "boolean" } } } },
+        { "if": { "properties": { "type": { "const": "slider" } } },
+          "then": { "required": ["id"],
+            "properties": { "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "maxLength": 100 }] }, "min": { "type": "number" }, "max": { "type": "number" },
+              "step": { "type": "number", "exclusiveMinimum": 0 }, "value": { "type": "number" } } } },
+        { "if": { "properties": { "type": { "const": "progress" } } },
+          "then": { "properties": { "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "maxLength": 100 }] },
+              "value": { "anyOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }] } } } },
+        { "if": { "properties": { "type": { "const": "text_input" } } },
+          "then": { "required": ["id"],
+            "properties": { "label": { "allOf": [{ "$ref": "#/$defs/line" }, { "maxLength": 100 }] }, "placeholder": { "allOf": [{ "$ref": "#/$defs/line" }, { "maxLength": 100 }] },
+              "value": { "allOf": [{ "$ref": "#/$defs/text" }, { "maxLength": 4000 }] }, "multiline": { "type": "boolean" },
+              "max_length": { "type": "integer", "minimum": 1, "maximum": 4000 }, "clear_on_submit": { "type": "boolean" } } } },
+        { "if": { "properties": { "type": { "const": "canvas" } } },
+          "then": { "required": ["id"],
+            "properties": { "ink": { "type": "boolean" }, "color": { "$ref": "#/$defs/color" },
+              "width": { "type": "number", "minimum": 0.5, "maximum": 64 }, "background": { "$ref": "#/$defs/color" } } } }
+      ]
+    },
+
+    "notificationEvent": {
+      "description": "notification/* (PANELS.md §3.2)",
+      "type": "object", "required": ["notification"],
+      "properties": { "notification": { "$ref": "#/$defs/panelId" }, "action": { "$ref": "#/$defs/panelId" } }
+    },
+    "panelEvent": {
+      "description": "panel/* (PANELS.md §6, §7)",
+      "type": "object", "required": ["panel", "pseq"],
+      "properties": {
+        "panel": { "$ref": "#/$defs/panelId" },
+        "pseq": { "type": "integer", "minimum": 0 },
+        "widget": { "$ref": "#/$defs/panelId" },
+        "state": { "enum": ["visible", "hidden", "closed"] },
+        "reason": { "enum": ["user", "revoked"] },
+        "value": { "type": ["boolean", "number", "string"] },
+        "final": { "type": "boolean" },
+        "replayed": { "type": "boolean" },
+        "stroke": { "type": "integer", "minimum": 0 },
+        "phase": { "enum": ["start", "move", "end", "cancel"] },
+        "tool": { "enum": ["finger", "stylus", "eraser", "mouse", "unknown"] },
+        "size": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 2, "maxItems": 2 },
+        "points": {
+          "type": "array", "maxItems": 128,
+          "items": {
+            "type": "array", "minItems": 4, "maxItems": 4,
+            "prefixItems": [
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "integer", "minimum": 0 }
+            ]
           }
         }
       }

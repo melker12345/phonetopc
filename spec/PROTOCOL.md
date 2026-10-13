@@ -1,10 +1,15 @@
-# phonetopc protocol — version `phonetopc/1` (draft 3)
+# phonetopc protocol — version `phonetopc/1` (draft 4)
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 JSON Schemas for every message live in [`schemas/`](schemas/).
 
 This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
 tokens (milestone M2). [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
+[`PANELS.md`](PANELS.md) covers notifications and panels, PC → phone output (`notify`, `panel_show`, …).
+
+**Changes in draft 4:** notifications and panels (`notify`, `notify_cancel`, `panel_show`, `panel_attach`,
+`panel_update`, `panel_close`, `panel_list`, `canvas_clear`), capabilities `notify` and `panels`, sources
+`notification` and `panel`, errors `-32030`–`-32033`; see `PANELS.md`.
 
 **Changes in draft 3:** `request_approval`, capability `approval` and `hello.approval`; see `APPROVAL.md`.
 Sources `rotation_vector`, `magnetometer`, `compass`, `barometer`, `location` and `nfc` (§6); `proximity` clarified.
@@ -77,7 +82,7 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 
 - If `protocol` is not supported, the server returns error `-32004` (`unsupported_protocol`) with `data.supported` listing the versions it does support.
 - `device.id` is stable across restarts and reinstalls where the platform allows (a random ID generated on first run and stored).
-- `capabilities` lists optional feature groups. This draft defines `events` and `get`. Later drafts add `commands`, `biometric`, etc.
+- `capabilities` lists optional feature groups. This draft defines `events`, `get`, `approval` (`APPROVAL.md`), `notify` and `panels` (`PANELS.md`).
 
 ### 4.2 `list_sensors`
 
@@ -112,7 +117,7 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 The result has `subscription`, `source`, `types` (the types this subscription delivers), `mode` (copied from `list_sensors`), and `rate_hz` for continuous sensors.
 
 - **Ordering:** the server MUST send the `subscribe` response before the first `event` of that subscription. Clients MAY discard events for subscription ids they don't know.
-- **Initial value:** for an `on_change` source the server SHOULD send the current value as the first event (seq 0) right after the response, if one is known, so clients don't wait for a change to learn the state. Event-like sources with no state (`ui`) send nothing until something happens.
+- **Initial value:** for an `on_change` source the server SHOULD send the current value as the first event (seq 0) right after the response, if one is known, so clients don't wait for a change to learn the state. Event-like sources with no state (`ui`, `nfc`, `notification`, `panel`) send nothing until something happens.
 
 - The server MAY deliver events at a slightly different rate than requested; Android treats rates as hints.
 - A session MAY hold several subscriptions to the same source. Each gets its own `subscription` id and `seq` counter.
@@ -178,6 +183,8 @@ One-shot read of the latest value. Params: `source` (required) and `type` (optio
 | `location` | `position` | `object` | a position fix, see below | `""` | on_change |
 | `ui` | `tile_tap` | `bool` | always `true`; fired by the Quick Settings tile | `""` | on_change |
 | `nfc` | `tag` | `object` | a scanned NFC tag, see below | `""` | on_change |
+| `notification` | `action`, `tap`, `dismiss` | `object` | the user acted on a notification this PC posted; `PANELS.md` §3.2 | `""` | on_change |
+| `panel` | `state`, `press`, `change`, `submit`, `stroke` | `object` | input on a panel this session owns; `PANELS.md` §6 | `""` | on_change |
 
 Axes follow the [Android sensor coordinate system](https://developer.android.com/develop/sensors-and-location/sensors/sensors_overview#sensors-coords) (device frame, not rotated with screen orientation).
 
@@ -213,6 +220,9 @@ Phones scan while their screen is on and unlocked; `available` only says that th
 switched off in its system settings. Tag contents are not authenticated: anyone can write a tag or clone a UID, and on
 Android other apps on the phone can hand the app a made-up tag, so treat `nfc` values as untrusted input.
 
+`notification` and `panel` are available only while the user allows notifications or panels for this PC
+(`PANELS.md` §1), and their events go only to sessions of that PC.
+
 New sources and types MAY be added in any draft. Clients MUST tolerate unknown sources in `list_sensors`.
 
 ## 7. Errors
@@ -228,6 +238,10 @@ Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `
 | `-32005` | `unknown_subscription` | `unsubscribe` with an id not in this session |
 | `-32006` | `no_value` | `get` has nothing to return yet |
 | `-32010` | `unauthorized` | Secure mode: missing, unknown or revoked token (`SECURITY.md` §5) |
+| `-32030` | `not_allowed` | Notifications or panels not allowed for this PC (`PANELS.md` §9) |
+| `-32031` | `unknown_panel` | No panel with that id (`PANELS.md` §9) |
+| `-32032` | `too_many_panels` | The PC already has 8 panels (`PANELS.md` §9) |
+| `-32033` | `rate_limited` | Too many notifications (`PANELS.md` §9) |
 
 Every error has `message` (human-readable) and SHOULD have `data.name`: the application names above, or `parse_error`, `invalid_request`, `method_not_found`, `invalid_params`, `internal_error` for the standard codes.
 
@@ -238,4 +252,4 @@ This draft uses a manual address. Servers SHOULD additionally advertise `_phonet
 ## 9. Known gaps (later drafts)
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
-- `command` (vibrate, notify, …) for PC → phone actions other than approval.
+- `command` (vibrate, …) for PC → phone actions other than approval, notifications and panels.

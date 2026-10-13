@@ -1,0 +1,795 @@
+{
+  "description": "Notification and panel cases for PANELS.md (draft 4), in dev mode. Format: see README.md, section 'Panel server cases'.",
+  "fixture": {"mode": "dev", "permissions": {"notify": true, "panels": true}},
+  "cases": [
+    {
+      "name": "hello_offers_notify_and_panels",
+      "description": "PANELS.md \u00a71: capabilities notify and panels.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1", "client": {"name": "conformance"}}},
+      "expect": {"result": "any", "id": 1, "result_capabilities": ["notify", "panels"]}
+    },
+    {
+      "name": "notify_before_hello",
+      "description": "PROTOCOL.md \u00a73: -32003 before hello, as for every method.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "Hi"}},
+      "expect": {"error": -32003, "name": "hello_required", "id": 1}
+    },
+    {
+      "name": "panel_show_before_hello",
+      "description": "PROTOCOL.md \u00a73: -32003 before hello.",
+      "hello": false,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32003, "name": "hello_required", "id": 1}
+    },
+    {
+      "name": "subscribe_panel",
+      "description": "PANELS.md \u00a72: panel is an available on_change source while panels are allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "panel"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"source": "panel", "mode": "on_change"}}
+    },
+    {
+      "name": "subscribe_notification",
+      "description": "PANELS.md \u00a72: notification is an available on_change source while notifications are allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "notification", "type": "action"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"source": "notification", "types": ["action"], "mode": "on_change"}}
+    },
+    {
+      "name": "get_panel_no_value",
+      "description": "Event-like source: get has nothing to return (-32006), like ui.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "get", "params": {"source": "panel"}},
+      "expect": {"error": -32006, "name": "no_value", "id": 1}
+    },
+    {
+      "name": "notify_with_id",
+      "description": "\u00a73.1: the result echoes the PC's id.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "Claude Code is done", "body": "3 files changed.\nAll tests pass.", "id": "claude", "actions": [{"id": "open", "label": "Open"}, {"id": "ok", "label": "OK"}], "priority": "high"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"id": "claude"}}
+    },
+    {
+      "name": "notify_generated_id",
+      "description": "\u00a73.1: without id the phone picks one.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "Hi"}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "notify_replace",
+      "description": "\u00a73.1: posting the same id again replaces it.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "First", "id": "n"}}, "expect": {"result": "any", "id": 1}}],
+      "send": {"jsonrpc": "2.0", "id": 2, "method": "notify", "params": {"title": "Second", "id": "n"}},
+      "expect": {"result": "any", "id": 2, "result_has": {"id": "n"}}
+    },
+    {
+      "name": "notify_missing_title",
+      "description": "\u00a73.1: title is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"body": "x"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_empty_title",
+      "description": "\u00a73.1: title is 1-100 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": ""}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_title_100_emoji",
+      "description": "\u00a78: code points count, not UTF-16 units: 100 emoji are allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80"}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "notify_title_101",
+      "description": "\u00a73.1: 101 code points are too many.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_title_newline",
+      "description": "\u00a73.1: no newlines in title.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "a\nb"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_title_control",
+      "description": "\u00a78: no control characters.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "a\u0007b"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_title_bidi",
+      "description": "\u00a78: no bidirectional controls.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "invoice\u202egpj.exe"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_body_1001",
+      "description": "\u00a73.1: body is at most 1000 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_body_tab",
+      "description": "\u00a78: tab is a control character, only newline is allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "body": "a\tb"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_title_not_string",
+      "description": "\u00a73.1: title is a string.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": 5}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_bad_id",
+      "description": "\u00a78: ids match ^[A-Za-z0-9_.-]{1,64}$.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "id": "has space"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_id_65",
+      "description": "\u00a78: ids are at most 64 characters.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_four_actions",
+      "description": "\u00a73.1: at most 3 actions.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "actions": [{"id": "0", "label": "x"}, {"id": "1", "label": "x"}, {"id": "2", "label": "x"}, {"id": "3", "label": "x"}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_duplicate_action_ids",
+      "description": "\u00a73.1: action ids unique within the notification.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "actions": [{"id": "a", "label": "x"}, {"id": "a", "label": "y"}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_action_label_31",
+      "description": "\u00a73.1: action labels are 1-30 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "actions": [{"id": "a", "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_bad_priority",
+      "description": "\u00a73.1: priority is default or high.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "t", "priority": "urgent"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "notify_cancel_unknown",
+      "description": "\u00a73.3: cancelling an unknown id is fine.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify_cancel", "params": {"id": "nope"}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "notify_cancel_missing_id",
+      "description": "\u00a73.3: id is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify_cancel", "params": {}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_ok",
+      "description": "\u00a74.3: a valid panel.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "deck", "title": "Test", "layout": {"type": "grid", "cols": 3, "children": [{"type": "button", "id": "mute", "label": "\ud83d\udd07 Mute", "tone": "bad"}, {"type": "toggle", "id": "mic", "label": "Mic", "value": true}, {"type": "slider", "id": "vol", "label": "Volume", "min": 0, "max": 100, "step": 1, "value": 40}]}, "keep_awake": true, "orientation": "landscape"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"panel": "deck"}}
+    },
+    {
+      "name": "panel_show_every_widget",
+      "description": "\u00a75: every widget type with all its members.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "text", "id": "t", "text": "Line 1\nLine 2", "size": "title", "align": "center", "tone": "good"}, {"type": "row", "children": [{"type": "button", "id": "b1", "label": "A", "weight": 1}, {"type": "button", "id": "b2", "label": "B", "weight": 2, "enabled": false}]}, {"type": "toggle", "id": "tg", "label": "On", "value": false}, {"type": "slider", "id": "s", "min": -1, "max": 1, "value": 5}, {"type": "progress", "id": "pr", "label": "Build", "value": 0.5, "tone": "accent"}, {"type": "progress", "value": null}, {"type": "text_input", "id": "in", "label": "Message", "placeholder": "Type\u2026", "value": "draft", "multiline": true, "max_length": 10, "clear_on_submit": false}, {"type": "canvas", "id": "c", "ink": false, "color": "#FF8800", "width": 0.5, "background": "#101010"}]}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_canvas_root",
+      "description": "\u00a75: a canvas alone fills the screen.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "canvas", "id": "ink"}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_unknown_members_ignored",
+      "description": "\u00a75: unknown members are ignored.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "x", "icon": "volume_off"}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_missing_layout",
+      "description": "\u00a74.3: layout is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "T"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_missing_title",
+      "description": "\u00a74.3: title is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_title_61",
+      "description": "\u00a74.3: title is 1-60 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_bad_panel_id",
+      "description": "\u00a78: panel ids follow the id rule.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "a/b", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_layout_not_object",
+      "description": "\u00a75: the layout is a widget object.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "T", "layout": [{"type": "button", "id": "b", "label": "Go"}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_unknown_type",
+      "description": "\u00a75: unknown widget types are -32602.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "image", "id": "i"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_missing_type",
+      "description": "\u00a75: every widget has a type.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"id": "b", "label": "x"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_button_without_id",
+      "description": "\u00a75: interactive widgets need an id.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "label": "x"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_canvas_without_id",
+      "description": "\u00a75: a canvas needs an id.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "canvas"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_text_without_id",
+      "description": "\u00a75: id is optional for text.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text", "text": ""}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_duplicate_ids",
+      "description": "\u00a75: ids are unique within the panel.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "button", "id": "x", "label": "a"}, {"type": "text", "id": "x", "text": "b"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_empty_children",
+      "description": "\u00a75: containers have 1-64 children.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": []}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_65_children",
+      "description": "\u00a75: containers have 1-64 children.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_grid_cols_0",
+      "description": "\u00a75: cols is 1-8.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "grid", "cols": 0, "children": [{"type": "button", "id": "b", "label": "Go"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_grid_cols_9",
+      "description": "\u00a75: cols is 1-8.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "grid", "cols": 9, "children": [{"type": "button", "id": "b", "label": "Go"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_grid_cols_fraction",
+      "description": "\u00a78: cols is an integer.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "grid", "cols": 2.5, "children": [{"type": "button", "id": "b", "label": "Go"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_grid_cols_string",
+      "description": "\u00a78: cols is an integer, not a string.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "grid", "cols": "2", "children": [{"type": "button", "id": "b", "label": "Go"}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_weight_zero",
+      "description": "\u00a75: weight is > 0.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "row", "children": [{"type": "button", "id": "b", "label": "x", "weight": 0}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_bad_tone",
+      "description": "\u00a75: tone values.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "x", "tone": "red"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_empty_label",
+      "description": "\u00a75: button labels are 1-100 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": ""}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_label_newline",
+      "description": "\u00a75: button labels have no newlines.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "a\nb"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_text_4001",
+      "description": "\u00a75: text is at most 4000 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_text_bidi",
+      "description": "\u00a78: no bidirectional controls in text.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text", "text": "a\u2066b"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_bad_size",
+      "description": "\u00a75: text size values.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text", "text": "x", "size": "huge"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_toggle_value_string",
+      "description": "\u00a75: a toggle value is a boolean.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "toggle", "id": "t", "label": "x", "value": "true"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_slider_min_eq_max",
+      "description": "\u00a75: min < max.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "slider", "id": "s", "min": 1, "max": 1}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_slider_step_zero",
+      "description": "\u00a75: step is > 0.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "slider", "id": "s", "step": 0}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_progress_over_1",
+      "description": "\u00a75: progress value is in [0, 1] or null.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "progress", "value": 1.5}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_input_too_long",
+      "description": "\u00a75: value must not be longer than max_length.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text_input", "id": "in", "value": "abcdef", "max_length": 5}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_input_max_length_4001",
+      "description": "\u00a75: max_length is 1-4000.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "text_input", "id": "in", "max_length": 4001}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_canvas_bad_color",
+      "description": "\u00a78: colors are #rrggbb.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "canvas", "id": "c", "color": "red"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_canvas_short_color",
+      "description": "\u00a78: colors are #rrggbb, not #rgb.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "canvas", "id": "c", "background": "#fff"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_canvas_width_65",
+      "description": "\u00a75: width is 0.5-64.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "canvas", "id": "c", "width": 65}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_bad_orientation",
+      "description": "\u00a74.3: orientation values.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}, "orientation": "upside_down"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_keep_awake_string",
+      "description": "\u00a74.3: keep_awake is a boolean.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}, "keep_awake": "yes"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_depth_8",
+      "description": "\u00a75: 8 levels are allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "text", "text": "leaf"}]}]}]}]}]}]}]}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_depth_9",
+      "description": "\u00a75: at most 8 levels deep.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "column", "children": [{"type": "text", "text": "leaf"}]}]}]}]}]}]}]}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_264_widgets",
+      "description": "\u00a75: at most 256 widgets.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}]}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_256_widgets",
+      "description": "\u00a75: 256 widgets are allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "column", "children": [{"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}, {"type": "grid", "cols": 8, "children": [{"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}, {"type": "text", "text": "x"}]}]}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_ninth",
+      "description": "\u00a74.3: a PC has at most 8 panels.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "s0", "method": "panel_show", "params": {"panel": "p0", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s0"}}, {"send": {"jsonrpc": "2.0", "id": "s1", "method": "panel_show", "params": {"panel": "p1", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s1"}}, {"send": {"jsonrpc": "2.0", "id": "s2", "method": "panel_show", "params": {"panel": "p2", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s2"}}, {"send": {"jsonrpc": "2.0", "id": "s3", "method": "panel_show", "params": {"panel": "p3", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s3"}}, {"send": {"jsonrpc": "2.0", "id": "s4", "method": "panel_show", "params": {"panel": "p4", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s4"}}, {"send": {"jsonrpc": "2.0", "id": "s5", "method": "panel_show", "params": {"panel": "p5", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s5"}}, {"send": {"jsonrpc": "2.0", "id": "s6", "method": "panel_show", "params": {"panel": "p6", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s6"}}, {"send": {"jsonrpc": "2.0", "id": "s7", "method": "panel_show", "params": {"panel": "p7", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s7"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p8", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32032, "name": "too_many_panels", "id": 1}
+    },
+    {
+      "name": "panel_show_replace_at_limit",
+      "description": "\u00a74.3: replacing one of 8 panels is fine.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "s0", "method": "panel_show", "params": {"panel": "p0", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s0"}}, {"send": {"jsonrpc": "2.0", "id": "s1", "method": "panel_show", "params": {"panel": "p1", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s1"}}, {"send": {"jsonrpc": "2.0", "id": "s2", "method": "panel_show", "params": {"panel": "p2", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s2"}}, {"send": {"jsonrpc": "2.0", "id": "s3", "method": "panel_show", "params": {"panel": "p3", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s3"}}, {"send": {"jsonrpc": "2.0", "id": "s4", "method": "panel_show", "params": {"panel": "p4", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s4"}}, {"send": {"jsonrpc": "2.0", "id": "s5", "method": "panel_show", "params": {"panel": "p5", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s5"}}, {"send": {"jsonrpc": "2.0", "id": "s6", "method": "panel_show", "params": {"panel": "p6", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s6"}}, {"send": {"jsonrpc": "2.0", "id": "s7", "method": "panel_show", "params": {"panel": "p7", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s7"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p3", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_show_invalid_before_limit",
+      "description": "\u00a79: params (step 7) before the limit.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "s0", "method": "panel_show", "params": {"panel": "p0", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s0"}}, {"send": {"jsonrpc": "2.0", "id": "s1", "method": "panel_show", "params": {"panel": "p1", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s1"}}, {"send": {"jsonrpc": "2.0", "id": "s2", "method": "panel_show", "params": {"panel": "p2", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s2"}}, {"send": {"jsonrpc": "2.0", "id": "s3", "method": "panel_show", "params": {"panel": "p3", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s3"}}, {"send": {"jsonrpc": "2.0", "id": "s4", "method": "panel_show", "params": {"panel": "p4", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s4"}}, {"send": {"jsonrpc": "2.0", "id": "s5", "method": "panel_show", "params": {"panel": "p5", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s5"}}, {"send": {"jsonrpc": "2.0", "id": "s6", "method": "panel_show", "params": {"panel": "p6", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s6"}}, {"send": {"jsonrpc": "2.0", "id": "s7", "method": "panel_show", "params": {"panel": "p7", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s7"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p8", "title": "", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_ok",
+      "description": "\u00a74.5: update several widgets.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "msg", "set": {"text": "done", "tone": "good"}}, {"widget": "t", "set": {"value": true}}]}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_update_unknown_panel",
+      "description": "\u00a74.5: -32031 for a panel that doesn't exist.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "nope", "updates": [{"widget": "msg", "set": {"text": "x"}}]}},
+      "expect": {"error": -32031, "name": "unknown_panel", "id": 1}
+    },
+    {
+      "name": "panel_update_invalid_before_unknown_panel",
+      "description": "\u00a79: params (step 7) before -32031.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "nope", "updates": []}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_unknown_widget",
+      "description": "\u00a74.5: an unknown widget id is -32602.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "nope", "set": {"text": "x"}}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_set_type",
+      "description": "\u00a74.5: type can't be set.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "msg", "set": {"type": "button"}}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_set_children",
+      "description": "\u00a74.5: children can't be set.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "msg", "set": {"children": []}}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_bad_value",
+      "description": "\u00a74.5: values follow the widget type's rules.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "t", "set": {"value": "yes"}}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_65",
+      "description": "\u00a74.5: at most 64 updates.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}, {"widget": "msg", "set": {"text": "x"}}]}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_update_atomic",
+      "description": "\u00a74.5: a failing update changes nothing (the toggle is still false).",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}, {"send": {"jsonrpc": "2.0", "id": "u", "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "t", "set": {"value": true}}, {"widget": "nope", "set": {"text": "x"}}]}}, "expect": {"error": -32602, "name": "invalid_params", "id": "u"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"values": {"t": false, "s": 0.5}}}
+    },
+    {
+      "name": "panel_update_changes_values",
+      "description": "\u00a74.5, \u00a74.4: an update shows in panel_attach values.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}, {"send": {"jsonrpc": "2.0", "id": "u", "method": "panel_update", "params": {"panel": "p", "updates": [{"widget": "t", "set": {"value": true}}, {"widget": "s", "set": {"value": 0.25}}]}}, "expect": {"result": "any", "id": "u"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"values": {"t": true, "s": 0.25}}}
+    },
+    {
+      "name": "panel_attach_fresh",
+      "description": "\u00a74.4: a panel without events has last_pseq -1.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p", "after_pseq": -1}},
+      "expect": {"result": "any", "id": 1, "result_has": {"panel": "p", "title": "Values", "last_pseq": -1, "values": {"t": false, "s": 0.5}}}
+    },
+    {
+      "name": "panel_attach_unknown",
+      "description": "\u00a74.4: -32031 for a panel that doesn't exist.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "nope"}},
+      "expect": {"error": -32031, "name": "unknown_panel", "id": 1}
+    },
+    {
+      "name": "panel_attach_after_pseq_minus_2",
+      "description": "\u00a74.4: after_pseq is >= -1.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p", "after_pseq": -2}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_attach_after_pseq_fraction",
+      "description": "\u00a74.4: after_pseq is an integer.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p", "after_pseq": 1.5}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "panel_show_replaces",
+      "description": "\u00a74.1: panel_show with the same id replaces the layout and resets values.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "toggle", "id": "t", "label": "T", "value": true}}}, "expect": {"result": "any", "id": "setup"}}, {"send": {"jsonrpc": "2.0", "id": "setup2", "method": "panel_show", "params": {"panel": "p", "title": "Again", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup2"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p"}},
+      "expect": {"result": "any", "id": 1, "result_has": {"title": "Again", "values": {"t": false, "s": 0.5}}}
+    },
+    {
+      "name": "panel_close_ok",
+      "description": "\u00a74.6: closing a panel.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_close", "params": {"panel": "p"}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_close_then_attach",
+      "description": "\u00a74.6: a closed panel is gone.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}, {"send": {"jsonrpc": "2.0", "id": "c", "method": "panel_close", "params": {"panel": "p"}}, "expect": {"result": "any", "id": "c"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "p"}},
+      "expect": {"error": -32031, "name": "unknown_panel", "id": 1}
+    },
+    {
+      "name": "panel_close_unknown",
+      "description": "\u00a74.6: -32031 for a panel that doesn't exist.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_close", "params": {"panel": "nope"}},
+      "expect": {"error": -32031, "name": "unknown_panel", "id": 1}
+    },
+    {
+      "name": "panel_close_frees_slot",
+      "description": "\u00a74.6: after closing one of 8 panels a new one fits.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "s0", "method": "panel_show", "params": {"panel": "p0", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s0"}}, {"send": {"jsonrpc": "2.0", "id": "s1", "method": "panel_show", "params": {"panel": "p1", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s1"}}, {"send": {"jsonrpc": "2.0", "id": "s2", "method": "panel_show", "params": {"panel": "p2", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s2"}}, {"send": {"jsonrpc": "2.0", "id": "s3", "method": "panel_show", "params": {"panel": "p3", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s3"}}, {"send": {"jsonrpc": "2.0", "id": "s4", "method": "panel_show", "params": {"panel": "p4", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s4"}}, {"send": {"jsonrpc": "2.0", "id": "s5", "method": "panel_show", "params": {"panel": "p5", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s5"}}, {"send": {"jsonrpc": "2.0", "id": "s6", "method": "panel_show", "params": {"panel": "p6", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s6"}}, {"send": {"jsonrpc": "2.0", "id": "s7", "method": "panel_show", "params": {"panel": "p7", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s7"}}, {"send": {"jsonrpc": "2.0", "id": "c", "method": "panel_close", "params": {"panel": "p0"}}, "expect": {"result": "any", "id": "c"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p8", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "panel_list_empty",
+      "description": "\u00a74.6: no panels.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_list"},
+      "expect": {"result": "any", "id": 1, "result_has": {"panels": []}}
+    },
+    {
+      "name": "panel_list",
+      "description": "\u00a74.6: panels in creation order; this session owns them, and the fixture has no screen.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "s1", "method": "panel_show", "params": {"panel": "a", "title": "A", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s1"}}, {"send": {"jsonrpc": "2.0", "id": "s2", "method": "panel_show", "params": {"panel": "b", "title": "B", "layout": {"type": "button", "id": "b", "label": "Go"}}}, "expect": {"result": "any", "id": "s2"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_list"},
+      "expect": {"result": "any", "id": 1, "result_has": {"panels": [{"panel": "a", "title": "A", "attached": true, "visible": false}, {"panel": "b", "title": "B", "attached": true, "visible": false}]}}
+    },
+    {
+      "name": "canvas_clear_ok",
+      "description": "\u00a74.6: clearing a canvas.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "canvas_clear", "params": {"panel": "p", "widget": "c"}},
+      "expect": {"result": "any", "id": 1}
+    },
+    {
+      "name": "canvas_clear_not_canvas",
+      "description": "\u00a74.6: the widget must be a canvas.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "canvas_clear", "params": {"panel": "p", "widget": "t"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "canvas_clear_unknown_widget",
+      "description": "\u00a74.6: the widget must exist.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "canvas_clear", "params": {"panel": "p", "widget": "nope"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "canvas_clear_unknown_panel",
+      "description": "\u00a74.6: -32031 for a panel that doesn't exist.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "canvas_clear", "params": {"panel": "nope", "widget": "c"}},
+      "expect": {"error": -32031, "name": "unknown_panel", "id": 1}
+    },
+    {
+      "name": "canvas_clear_missing_widget",
+      "description": "\u00a74.6: widget is required.",
+      "hello": true,
+      "setup": [{"send": {"jsonrpc": "2.0", "id": "setup", "method": "panel_show", "params": {"panel": "p", "title": "Values", "layout": {"type": "column", "children": [{"type": "toggle", "id": "t", "label": "T"}, {"type": "slider", "id": "s", "min": 0, "max": 1, "value": 0.5}, {"type": "text", "id": "msg", "text": "hi"}, {"type": "canvas", "id": "c"}]}}}, "expect": {"result": "any", "id": "setup"}}],
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "canvas_clear", "params": {"panel": "p"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "off_notify",
+      "description": "\u00a71: notify without permission is -32030 with data.permission.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "Hi"}},
+      "expect": {"error": -32030, "name": "not_allowed", "id": 1, "data": {"permission": "notify"}}
+    },
+    {
+      "name": "off_notify_cancel",
+      "description": "\u00a71: every method of the feature.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify_cancel", "params": {"id": "x"}},
+      "expect": {"error": -32030, "name": "not_allowed", "id": 1, "data": {"permission": "notify"}}
+    },
+    {
+      "name": "off_notify_invalid_first",
+      "description": "\u00a79: params (step 7) before permission.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": ""}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "off_panel_show",
+      "description": "\u00a71: panel_show without permission.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_show", "params": {"panel": "p", "title": "Test", "layout": {"type": "button", "id": "b", "label": "Go"}}},
+      "expect": {"error": -32030, "name": "not_allowed", "id": 1, "data": {"permission": "panels"}}
+    },
+    {
+      "name": "off_panel_list",
+      "description": "\u00a71: panel_list without permission.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_list"},
+      "expect": {"error": -32030, "name": "not_allowed", "id": 1, "data": {"permission": "panels"}}
+    },
+    {
+      "name": "off_panel_attach",
+      "description": "\u00a79: permission before -32031.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "panel_attach", "params": {"panel": "nope"}},
+      "expect": {"error": -32030, "name": "not_allowed", "id": 1, "data": {"permission": "panels"}}
+    },
+    {
+      "name": "off_subscribe_panel",
+      "description": "\u00a71: the panel source is unavailable.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "panel"}},
+      "expect": {"error": -32002, "name": "source_unavailable", "id": 1}
+    },
+    {
+      "name": "off_subscribe_notification",
+      "description": "\u00a71: the notification source is unavailable.",
+      "hello": true,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "subscribe", "params": {"source": "notification"}},
+      "expect": {"error": -32002, "name": "source_unavailable", "id": 1}
+    },
+    {
+      "name": "off_hello_capabilities",
+      "description": "\u00a71: the capabilities stay: they say the methods exist.",
+      "hello": false,
+      "permissions": "off",
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "hello", "params": {"protocol": "phonetopc/1"}},
+      "expect": {"result": "any", "id": 1, "result_capabilities": ["notify", "panels"]}
+    }
+  ]
+}
