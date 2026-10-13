@@ -28,6 +28,14 @@ const (
 	CodeUnauthorized        ErrorCode = -32010 // SECURITY.md §5
 )
 
+// Notification and panel error codes (PANELS.md §9).
+const (
+	CodeNotAllowed    ErrorCode = -32030
+	CodeUnknownPanel  ErrorCode = -32031
+	CodeTooManyPanels ErrorCode = -32032
+	CodeRateLimited   ErrorCode = -32033
+)
+
 // Pairing error codes (SECURITY.md §4.5). Pairing also uses
 // CodeUnsupportedProtocol.
 const (
@@ -40,8 +48,8 @@ const (
 
 // Name returns the symbolic name used in error.data.name.
 //
-// The spec defines names for the application codes (PROTOCOL.md §7 and
-// SECURITY.md §4.5).
+// The spec defines names for the application codes (PROTOCOL.md §7,
+// SECURITY.md §4.5 and PANELS.md §9).
 // For the standard JSON-RPC codes we use the snake_case form of the names in
 // the JSON-RPC 2.0 specification so that every error can carry data.name.
 func (c ErrorCode) Name() string {
@@ -70,6 +78,14 @@ func (c ErrorCode) Name() string {
 		return "no_value"
 	case CodeUnauthorized:
 		return "unauthorized"
+	case CodeNotAllowed:
+		return "not_allowed"
+	case CodeUnknownPanel:
+		return "unknown_panel"
+	case CodeTooManyPanels:
+		return "too_many_panels"
+	case CodeRateLimited:
+		return "rate_limited"
 	case CodeBadSecret:
 		return "bad_secret"
 	case CodeRejected:
@@ -97,6 +113,9 @@ type ErrorData struct {
 	Name string `json:"name,omitempty"`
 	// Supported lists supported protocol versions (unsupported_protocol only).
 	Supported []string `json:"supported,omitempty"`
+	// Permission is the missing permission, "notify" or "panels"
+	// (not_allowed only).
+	Permission string `json:"permission,omitempty"`
 }
 
 // Error is a JSON-RPC error object. It implements the error interface so it
