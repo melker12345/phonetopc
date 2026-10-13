@@ -262,6 +262,61 @@ func TestCanvasFull(t *testing.T) {
 	}
 }
 
+func TestSimulatedUser(t *testing.T) {
+	opts := quietOptions()
+	opts.UserEvery = 20 * time.Millisecond
+	_, url := start(t, opts)
+	c := dial(t, url)
+	sub := subscribePanel(t, c)
+	notes, err := c.Subscribe(testCtx(t), protocol.SourceNotification, client.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(testCtx(t), protocol.MethodNotify, protocol.NotifyParams{Title: "Deploy?", Actions: []protocol.NotifyAction{{ID: "yes", Label: "Yes"}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	showPanel(t, c, "all", `{"type":"column","children":[{"type":"button","id":"b","label":"B"},{"type":"toggle","id":"t","label":"T"},
+		{"type":"slider","id":"s","min":0,"max":100},{"type":"text_input","id":"in"},{"type":"button","id":"off","label":"x","enabled":false},{"type":"canvas","id":"c"}]}`)
+
+	ev := nextEvent(t, notes)
+	if n, _ := ev.Notification(); ev.Type != protocol.TypeAction || n.Action != "yes" {
+		t.Errorf("notification event %s %s", ev.Type, ev.Value)
+	}
+	if ev := nextPanelEvent(t, sub, protocol.TypeState); ev.State != protocol.StateVisible {
+		t.Errorf("%+v", ev)
+	}
+	nextPanelEvent(t, sub, protocol.TypePress)
+	nextPanelEvent(t, sub, protocol.TypeChange) // toggle
+	for i := range 3 {
+		if ev := nextPanelEvent(t, sub, protocol.TypeChange); ev.Widget != "s" || ev.Final != (i == 2) {
+			t.Errorf("slider %+v", ev)
+		}
+	}
+	if ev := nextPanelEvent(t, sub, protocol.TypeSubmit); ev.Widget != "in" {
+		t.Errorf("%+v", ev)
+	}
+	// Skips the disabled button and draws a circle in chunks of 2 points,
+	// one per frame, while it goes on using the other widgets.
+	var phases []string
+	for {
+		ev := nextEvent(t, sub)
+		pe, _ := ev.Panel()
+		if pe.Widget == "off" {
+			t.Fatal("used a disabled button")
+		}
+		if ev.Type != protocol.TypeStroke || *pe.Stroke != 0 {
+			continue
+		}
+		phases = append(phases, pe.Phase)
+		if pe.Phase == protocol.PhaseEnd {
+			break
+		}
+	}
+	if len(phases) != 24 || phases[0] != protocol.PhaseStart {
+		t.Errorf("stroke phases %v", phases)
+	}
+}
+
 func TestNotificationsLimitAndRate(t *testing.T) {
 	opts := quietOptions()
 	opts.NotifyPerMinute = 20

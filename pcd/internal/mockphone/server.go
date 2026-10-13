@@ -107,6 +107,11 @@ type Options struct {
 	// has both off by default; the mock, a development tool, has them on.
 	// Server.AllowNotify and Server.AllowPanels change them later.
 	NoNotify, NoPanels bool
+	// UserEvery is the interval of the simulated user (simulate.go), who
+	// opens panels, uses their widgets and answers notifications. Default
+	// 4s; negative disables it: then no panel becomes visible unless a test
+	// drives Server.User.
+	UserEvery time.Duration
 	// PanelExpiry is how long a detached panel is kept (PANELS.md §4.1).
 	// Default 10 minutes.
 	PanelExpiry time.Duration
@@ -151,6 +156,7 @@ func (o *Options) setDefaults() {
 	def(&o.PingInterval, 15*time.Second)
 	def(&o.PingTimeout, 30*time.Second)
 	def(&o.HelloTimeout, 10*time.Second)
+	def(&o.UserEvery, 4*time.Second)
 	def(&o.PanelExpiry, protocol.DetachedPanelTimeout*time.Second)
 	if o.MaxAuthFailures == 0 {
 		o.MaxAuthFailures = 5
@@ -205,6 +211,9 @@ func New(opts Options) *Server {
 	s.world = newWorld(s)
 	s.panels = newPanelHub(s)
 	s.wg.Go(func() { s.world.run(ctx, s.newRand()) })
+	if opts.UserEvery > 0 {
+		s.wg.Go(func() { s.panels.simulate(ctx, opts.UserEvery) })
+	}
 	return s
 }
 

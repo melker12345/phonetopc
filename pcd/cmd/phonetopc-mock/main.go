@@ -53,6 +53,12 @@ In secure mode the mock offers fingerprint approval; --approval says how
 its "user" answers: auto (approve), deny, cancel, timeout (never answer),
 lockout, ask (on this terminal), tamper (approve with a corrupted
 signature, to test clients) or off (no approval capability).
+
+Notifications and panels (spec/PANELS.md) are allowed for every PC. A
+simulated user (--user-every) opens the newest panel, uses one of its
+widgets per tick (press, toggle, slide, submit text, draw a circle) and
+answers notifications with their first action, so a client sees events
+without a phone.
 `
 
 func main() {
@@ -103,6 +109,9 @@ func serve(ctx context.Context, args []string) error {
 		addr        = fs.String("addr", fmt.Sprintf("127.0.0.1:%d", protocol.DefaultPort), "listen address")
 		tapEvery    = fs.Duration("tap-every", 10*time.Second, "interval of synthetic ui/tile_tap events (0 disables)")
 		nfcEvery    = fs.Duration("nfc-every", 20*time.Second, "mean interval of synthetic nfc/tag scans (0 disables)")
+		userEvery   = fs.Duration("user-every", 4*time.Second, "interval of the simulated user, who opens panels, uses their widgets and answers notifications (0 disables)")
+		noNotify    = fs.Bool("no-notify", false, "act as if the user hasn't allowed notifications (notify fails with -32030)")
+		noPanels    = fs.Bool("no-panels", false, "act as if the user hasn't allowed panels (panel methods fail with -32030)")
 		deviceID    = fs.String("device-id", "mock-0001", "device.id (dev mode; in secure mode only when the state is created)")
 		name        = fs.String("name", "", "device name (default \"phonetopc mock\")")
 		unavailable = fs.String("unavailable", "", "comma-separated sources to report as unavailable (e.g. light,proximity)")
@@ -133,14 +142,20 @@ func serve(ctx context.Context, args []string) error {
 	isSecure := *secure || (*stateDir != "" && !*dev)
 
 	opts := mockphone.Options{
-		Device:   protocol.DeviceInfo{ID: *deviceID, Name: *name},
-		Seed:     *seed,
-		TapEvery: *tapEvery,
-		NFCEvery: *nfcEvery,
-		Logf:     log.Printf,
+		Device:    protocol.DeviceInfo{ID: *deviceID, Name: *name},
+		Seed:      *seed,
+		TapEvery:  *tapEvery,
+		NFCEvery:  *nfcEvery,
+		UserEvery: *userEvery,
+		NoNotify:  *noNotify,
+		NoPanels:  *noPanels,
+		Logf:      log.Printf,
 	}
 	if *tapEvery == 0 {
 		opts.TapEvery = -1
+	}
+	if *userEvery == 0 {
+		opts.UserEvery = -1
 	}
 	if *nfcEvery == 0 {
 		opts.NFCEvery = -1
