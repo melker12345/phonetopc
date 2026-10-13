@@ -2,8 +2,9 @@
 
 The phone side of phonetopc: a foreground service that serves the phone's sensors over
 WebSocket JSON-RPC, as specified in [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)
-(`phonetopc/1`, draft 3), [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
-tokens, milestone M2) and [`../spec/APPROVAL.md`](../spec/APPROVAL.md) (fingerprint approval).
+(`phonetopc/1`, draft 4), [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
+tokens, milestone M2), [`../spec/APPROVAL.md`](../spec/APPROVAL.md) (fingerprint approval) and
+[`../spec/PANELS.md`](../spec/PANELS.md) (notifications and panels from the PC).
 
 The server runs in one of two modes, on the same port (default 8765):
 
@@ -16,10 +17,10 @@ The server runs in one of two modes, on the same port (default 8765):
 
 | Module | What it is |
 |---|---|
-| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. Also the security core (`protocol.security`): SPKI pins, base64url, the pairing code, constant-time compare, tokens, the failed-hello rate limiter. And `request_approval` (`protocol.approval`): param rules, the signed message, one approval at a time, the timeout, all behind an `Approver` interface. No Android imports. |
+| `protocol/` | Pure Kotlin/JVM. Message models, the sensor catalog, the JSON-RPC session and the hub that drives sensors and fans out events. Also the security core (`protocol.security`): SPKI pins, base64url, the pairing code, constant-time compare, tokens, the failed-hello rate limiter. And `request_approval` (`protocol.approval`): param rules, the signed message, one approval at a time, the timeout, all behind an `Approver` interface. And notifications and panels (`protocol.panels`): every params and layout rule, per-PC ownership, detached panels, `pseq`, stroke chunks and their replay, behind `OutputPermissions`, `PcNotifier` and `PanelDisplay`. No Android imports. |
 | `server/` | Pure Kotlin/JVM. Ktor (CIO) WebSocket server on `/v1/ws`, and the TLS frontend for secure mode. |
 | `pairing/` | Pure Kotlin/JVM. The phone's side of pairing: QR payload parser, pinned `wss://` WebSocket client, the pairing state machine. |
-| `app/` | The Android app: sensors, foreground service, Keystore keys (TLS and approval), paired PCs, mDNS, QR scanner, approval notification and biometric prompt, Compose UI. |
+| `app/` | The Android app: sensors, foreground service, Keystore keys (TLS and approval), paired PCs, mDNS, QR scanner, approval notification and biometric prompt, PC notifications, the panel screen, Compose UI. |
 
 ## Requirements
 
@@ -38,7 +39,7 @@ cd android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest    # also runs the :protocol, :server and :pairing JVM tests,
                                # including spec/conformance (server cases, secure server
-                               # cases, pairing and approval vectors)
+                               # cases, panel server cases, pairing and approval vectors)
 ./gradlew lint
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -105,6 +106,35 @@ works right after a fingerprint check, and the PC verifies it itself (APPROVAL.m
   new pin, and the PC refuses approvals until you accept the new key there
   (`phonetopc approval-key --accept`). Before a signature leaves the phone it is checked
   against the key that session's `hello` announced.
+
+## Notifications and panels
+
+A paired PC can post notifications and show full-screen panels on the phone (PANELS.md;
+`notify`, `panel_show` and friends). Both are **off for every PC** until you turn them on:
+
+- **Devices → *PC* → Notifications / Screen panels.** Off by default, and off again after a
+  re-pairing. Turning one on asks for the notification permission on Android 13+. In developer
+  mode, a card for the *Unverified PC (dev mode)* (every dev-mode client) has its own two
+  switches. Turning panels off closes that PC's panels at once (`state` `closed`, `revoked`).
+- **Notifications** use the channel *PC notifications* (*PC notifications: high priority* for
+  `priority: high`), with the PC's pairing name as the source and up to three actions. Actions,
+  taps and swipes go back to that PC as `notification` events.
+- **Panels** open in their own screen. A frame the PC can't draw over shows the PC's pairing
+  name (or *Unverified PC (dev mode)* in red), the title, Connected/Disconnected, a close
+  button and a switcher when there are several panels. The layout is drawn with native Compose
+  widgets. Text fields say which PC they send to, and there is no password field.
+- **Getting it on screen.** Android doesn't let a background app open a screen, so a new panel
+  replaces what's shown only when a panel of the same PC is in front. Otherwise a
+  "*PC* wants to show *title*" notification opens it. **Devices → Show open panels** gets you back
+  to panels you left.
+- **Canvas.** Ink is drawn locally at once. Strokes go to the PC while you draw: the touch-down
+  point immediately, then one chunk per frame and finger from the `MotionEvent` history, and
+  the end the moment you lift. Ktor CIO and the TLS frontend both set `TCP_NODELAY`, so small
+  frames aren't held back.
+- **Disconnects.** Panels belong to the PC, not the connection, and live in the app process.
+  When the PC's connection drops, the panel greys out but its canvas keeps taking ink, and
+  `panel_attach` replays the strokes the PC missed. A detached panel is removed after 10
+  minutes. Panels don't survive the app being killed.
 
 ## Developer mode (plain ws://)
 
