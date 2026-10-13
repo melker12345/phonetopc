@@ -1,15 +1,16 @@
 # pcd: phonetopc on the PC (Go)
 
-The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 3, see
+The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 4, see
 [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)), pairing, TLS and tokens (milestone M2, see
-[`../spec/SECURITY.md`](../spec/SECURITY.md)), and fingerprint approval (see
-[`../spec/APPROVAL.md`](../spec/APPROVAL.md)).
+[`../spec/SECURITY.md`](../spec/SECURITY.md)), fingerprint approval (see
+[`../spec/APPROVAL.md`](../spec/APPROVAL.md)), and notifications and panels (see
+[`../spec/PANELS.md`](../spec/PANELS.md)).
 
 | Path | What |
 |---|---|
-| `cmd/phonetopc` | CLI: `pair`, `devices`, `unpair`, `pc`, and `info`, `list`, `get`, `tail`, `approve`, `approval-key` against a phone or the mock |
-| `cmd/phonetopc-mock` | Mock phone with synthetic sensor data, dev or secure mode, approvals, and a pairing client |
-| `client` | Importable Go client library, including secure mode, `DialPaired` and `RequestApproval` |
+| `cmd/phonetopc` | CLI: `pair`, `devices`, `unpair`, `pc`, and `info`, `list`, `get`, `tail`, `approve`, `approval-key`, `notify` against a phone or the mock |
+| `cmd/phonetopc-mock` | Mock phone with synthetic sensor data, dev or secure mode, approvals, panels with a simulated user, and a pairing client |
+| `client` | Importable Go client library, including secure mode, `DialPaired`, `RequestApproval`, `Notify` and `ShowPanel` |
 | `internal/protocol` | Wire types, error codes and the sensor catalog, shared by everything here |
 | `internal/security` | Pins, base64url, the SAS commitment and code, constant-time compares, keys, pinned TLS, approval signatures |
 | `internal/store` | The PC's credential store: `pc.json`, `pc-key.pem`, `devices.json` (SECURITY.md §6) |
@@ -105,6 +106,26 @@ phonetopc approval-key --accept   # accept the current key
 `phonetopc info` shows whether the phone offers approvals and whether its key is trusted.
 Re-pairing clears the stored key.
 
+## Notifications and panels
+
+A PC program can show things on the phone (PANELS.md): notifications with up to three buttons,
+and full-screen panels built from widgets (buttons, toggles, sliders, text, progress bars, a
+text field, a drawing canvas). What the user does comes back as events of the sources
+`notification` and `panel`. The phone's user allows both per PC; they are off by default, and
+until then the calls fail with `-32030`.
+
+```sh
+phonetopc notify "Claude Code is done" --body "3 files changed"
+phonetopc notify "Deploy?" --action yes:Deploy --action no:Later --wait   # prints yes, no, tap or dismiss
+phonetopc tail panel                     # input on the panels this connection owns
+phonetopc tail notification              # answers to this PC's notifications
+```
+
+Panels need a program that stays connected, since a panel's events go to the connection that
+showed it; see the client library below. When that connection drops, the panel stays on the
+phone, detached, for 10 minutes, and its canvases keep taking ink; `AttachPanel` takes it over
+again and replays the strokes drawn meanwhile.
+
 ### Where credentials live
 
 `$XDG_CONFIG_HOME/phonetopc/` (default `~/.config/phonetopc/`), directory mode 0700:
@@ -146,6 +167,8 @@ bin/phonetopc-mock --state /tmp/mock        # wss://127.0.0.1:8765/v1/ws with th
 | `--name` | Device name. Default `phonetopc mock` |
 | `--tap-every` | Interval between synthetic `ui/tile_tap` events. Default `10s`; `0` turns them off |
 | `--nfc-every` | Mean interval between synthetic `nfc/tag` scans. Default `20s`; `0` turns them off |
+| `--user-every` | Interval of the simulated user, who opens the newest panel, uses one of its widgets per tick (press, flip, slide, submit text, draw a circle) and answers notifications with their first action. Default `4s`; `0` turns it off, and then no panel ever becomes visible |
+| `--no-notify` / `--no-panels` | Act as a phone whose user hasn't allowed notifications or panels (`-32030`). The mock allows both by default; a phone doesn't |
 | `--unavailable` | Comma-separated list of sources to report as `available: false` |
 | `--device-id` | Device id. Default `mock-0001`; in secure mode it only applies when the state is created (otherwise a random id), and must be 16 to 64 lowercase hex digits (SECURITY.md §2) |
 | `--seed` | Simulation seed |
@@ -213,8 +236,14 @@ What the mock simulates:
 - An NFC tag is scanned about every 20 s, alternating between a sticker with a URL and a text
   record, and a card without NDEF.
 
-The mock implements all of draft 3, including the error codes, ping/pong keepalive,
-backpressure and approvals. It is the reference for the transcripts in [`../spec/conformance`](../spec/conformance).
+- Notifications and panels are shown in the log. The simulated user answers a notification a
+  tick after it was posted, opens a new panel on the next tick, and then works through its
+  widgets in layout order, one per tick; a circle on a canvas arrives in chunks of two points
+  every 32 ms. In tests, `Server.User` drives the same actions by hand.
+
+The mock implements all of draft 4, including the error codes, ping/pong keepalive,
+backpressure, approvals, notifications and panels (with detached panels, expiry and stroke
+replay). It is the reference for the transcripts in [`../spec/conformance`](../spec/conformance).
 
 ## Use the CLI
 
@@ -273,6 +302,35 @@ default:             // res.Why: client.WhyDenied, WhyCancelled, WhyTimeout, Why
 until accepted); a client from `Dial` needs `client.WithApprovalKey(pin)` or
 `client.WithApprovalTrust(func(pin string) error)`.
 
+A stream deck with a status line (subscribe before showing, so no event is missed):
+
+```go
+sub, _ := c.Subscribe(ctx, client.SourcePanel, client.SubscribeOptions{})
+mute := client.Button("mute", "🔇 Mute")
+mute.Tone = "bad"
+_, err := c.ShowPanel(ctx, "deck", "Stream deck", client.Column(
+	client.Text("status", "Claude: working…"),
+	client.Grid(2, mute, client.Toggle("mic", "Mic", true)),
+	client.Slider("vol", "Volume", 0, 100, 40),
+), client.PanelOptions{KeepAwake: true})
+if client.IsNotAllowed(err) { ... }        // the user hasn't allowed panels for this PC yet
+for ev := range sub.Events() {
+	p, _ := ev.Panel()
+	switch {
+	case ev.Type == client.TypePress && p.Widget == "mute":
+		c.UpdatePanel(ctx, "deck", client.Set("status", "text", "muted"))
+	case ev.Type == client.TypeChange && p.Widget == "vol":
+		v, _ := p.NumberValue()             // p.Final is set on release
+		_ = v
+	case ev.Type == client.TypeStroke:      // p.Phase, p.Points ([x, y, pressure, ms]), p.Replayed
+	}
+}
+```
+
+`ShowPanel` and `Notify` check the layout and texts before sending. `c.Notify(ctx, title,
+client.NotifyOptions{...})` returns the notification's id; its answers arrive on a
+`client.SourceNotification` subscription.
+
 ## Test
 
 ```sh
@@ -285,8 +343,10 @@ cover every error code. They also validate every frame in both directions agains
 [`../spec/schemas/phonetopc-1.schema.json`](../spec/schemas/phonetopc-1.schema.json), check
 that the committed conformance transcripts still match the mock, and run
 [`server-cases.json`](../spec/conformance/server-cases.json) (dev mode),
-[`secure-server-cases.json`](../spec/conformance/secure-server-cases.json) (secure mode) and
-[`approval-server-cases.json`](../spec/conformance/approval-server-cases.json) against it.
+[`secure-server-cases.json`](../spec/conformance/secure-server-cases.json) (secure mode),
+[`approval-server-cases.json`](../spec/conformance/approval-server-cases.json) and
+[`panel-server-cases.json`](../spec/conformance/panel-server-cases.json) (a fresh mock per case)
+against it.
 `internal/security` checks [`vectors.json`](../spec/conformance/vectors/vectors.json), and
 `internal/security` and `client` check [`approval.json`](../spec/conformance/vectors/approval.json),
 the valid vector and every tampered one.
