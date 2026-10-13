@@ -5,6 +5,7 @@
 //	phonetopc devices | unpair <device> | pc
 //	phonetopc [--device D] info | list | get <source> | tail <source> ...
 //	phonetopc [--device D] approve "reason" [--timeout 30s] | approval-key [--accept]
+//	phonetopc [--device D] notify "title" [--body B] [--action ID:LABEL] [--wait]
 //	phonetopc --insecure-dev --addr host:port info ...
 //
 // Without --insecure-dev every connection is secure (wss:// with the phone's
@@ -56,6 +57,10 @@ Commands:
                        busy, lockout, unavailable), 2 error:
                          phonetopc approve "Deploy?" && ./deploy.sh
   approval-key         show the phone's accepted and current approval key
+  notify "title"       post a notification on the phone and print its id:
+                         phonetopc notify "Claude Code is done" --body "3 files changed"
+                       (tail panel / tail notification show panel input and
+                       answers to notifications)
 
 Flags (accepted before or after the command):
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
@@ -85,6 +90,14 @@ approve flags:
 approval-key flags:
   --accept             accept a changed approval key (after fingerprints were
                        added or removed on the phone)
+
+notify flags:
+  --body TEXT          text under the title (\n starts a new line)
+  --id ID              replace the earlier notification with this id
+  --action ID:LABEL    add a button (up to 3; LABEL alone derives the id)
+  --high               ask for a heads-up notification
+  --wait               wait for the user and print what they did: the
+                       action's id, "tap" or "dismiss"
 
 tail flags:
   --type T             only events of type T
@@ -155,6 +168,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		err = c.approve(ctx, rest)
 	case "approval-key":
 		err = c.approvalKey(ctx, rest)
+	case "notify":
+		err = c.notify(ctx, rest)
 	case "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -479,7 +494,11 @@ func formatReading(r client.Reading, tag string) string {
 	if tag != "" {
 		b.WriteString("  " + tag)
 	}
-	b.WriteString("  " + formatValue(r.Value))
+	if s, ok := formatEvent(r); ok {
+		b.WriteString("  " + s)
+	} else {
+		b.WriteString("  " + formatValue(r.Value))
+	}
 	if r.Unit != "" {
 		b.WriteString(" " + r.Unit)
 	}

@@ -16,7 +16,7 @@ import (
 
 func startMock(t *testing.T) (*mockphone.Server, string) {
 	t.Helper()
-	srv := mockphone.New(mockphone.Options{TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1, LocationEvery: -1, NFCEvery: -1})
+	srv := mockphone.New(mockphone.Options{TapEvery: -1, LightEvery: -1, ProximityEvery: -1, BatteryEvery: -1, LocationEvery: -1, NFCEvery: -1, UserEvery: -1})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { srv.Close(); hs.Close() })
 	return srv, strings.TrimPrefix(hs.URL, "http://")
