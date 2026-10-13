@@ -1,9 +1,10 @@
 # phonetopc for Python
 
-The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md), [security spec](../../spec/SECURITY.md) and [approval spec](../../spec/APPROVAL.md), draft 3).
+The official Python client for [phonetopc](../../README.md): stream Android phone sensor events to your PC over the `phonetopc/1` WebSocket JSON-RPC protocol ([spec](../../spec/PROTOCOL.md), [security spec](../../spec/SECURITY.md), [approval spec](../../spec/APPROVAL.md) and [panels spec](../../spec/PANELS.md), draft 4).
 
 - **Secure by default:** TLS pinned to the phone's key, plus a per-PC token, using the pairing made by `phonetopc pair`
 - **Fingerprint approval:** ask for a fingerprint on the phone before your program does something, with the phone's signature verified on the PC
+- **Notifications and panels:** post notifications on the phone, or put buttons, toggles, sliders, text and a drawing canvas on its screen and get the user's input back
 - asyncio API with typed events, plus a small blocking wrapper
 - One dependency: [`websockets`](https://websockets.readthedocs.io/); TLS pinning uses only the standard library
 - Optional mDNS discovery with [`zeroconf`](https://pypi.org/project/zeroconf/), optional approval verification with [`cryptography`](https://pypi.org/project/cryptography/)
@@ -139,6 +140,60 @@ A "yes" counts only if it is proven. The phone signs its answer with a key in it
 | Dev mode | `ApprovalNotSupported` (nothing sent) |
 | No answer within `timeout` + 5 s | `RequestTimeout` |
 
+## Notifications and panels
+
+A PC program can also use the phone as a screen ([PANELS.md](../../spec/PANELS.md)). Both are **off by default** for every PC: the user turns on *Notifications* and *Screen panels* for this PC in the phone app. Until then the calls raise `NotAllowed`, whose message says which setting to turn on.
+
+```python
+import asyncio
+import phonetopc
+from phonetopc import ui
+
+
+async def main():
+    async with phonetopc.connect() as phone:
+        await phone.notify("Build finished", "3 files changed.\nAll tests pass.")
+
+        panel = await phone.show_panel(
+            "deck",
+            "Stream deck",
+            ui.column(
+                ui.text("Idle", id="status"),
+                ui.grid(2, ui.button("mute", "🔇 Mute"), ui.toggle("mic", "Mic", value=True)),
+                ui.slider("vol", label="Volume", min=0, max=100, step=1, value=40),
+            ),
+            keep_awake=True,
+        )
+        async for ev in panel:
+            if isinstance(ev, phonetopc.PressEvent) and ev.widget == "mute":
+                await panel.update("status", text="Muted", tone="bad")
+            elif isinstance(ev, phonetopc.ChangeEvent):  # toggle: bool, slider: number
+                print(ev.widget, ev.value, ev.final)
+
+
+asyncio.run(main())
+```
+
+**Notifications.** `await phone.notify(title, body=None, *, id=None, actions=None, priority=None)` returns the notification's id; posting the same `id` again replaces it, `await phone.notify_cancel(id)` removes it. `actions` are up to 3 buttons, `{"open": "Open", "ok": "OK"}`. What the user does comes as events of the `notification` source: `async with phone.subscribe("notification") as events:` gives events of type `action` (`value == {"notification": id, "action": "open"}`), `tap` or `dismiss`.
+
+**Layouts** are JSON widget trees; `phonetopc.ui` builds them: `column`, `row`, `grid(cols, ...)` hold widgets; `text`, `button`, `toggle`, `slider`, `progress`, `text_input` and `canvas` are the rest. Interactive widgets need an id (their first argument). `weight=` shares space in rows and columns, `tone=` (`"good"`, `"warn"`, `"bad"`, ...) colors text, buttons and progress bars. `show_panel` checks the whole layout before sending and raises `ValueError` with the reason; pass `validate=False` to send widget types this client doesn't know yet.
+
+**`Panel`** (from `show_panel` or `attach_panel`) is an async iterator of typed events, all with `panel`, `pseq`, `type`, `widget`, `replayed` and the raw `event`:
+
+| Event | When | Extra fields |
+|---|---|---|
+| `StateEvent` | The panel became visible or hidden, or was closed on the phone (iteration ends after it) | `state` (`"visible"`, `"hidden"`, `"closed"`), `reason` (`"user"`, `"revoked"`) |
+| `PressEvent` | A button was pressed | |
+| `ChangeEvent` | A toggle or slider changed | `value` (bool or number), `final` (slider released) |
+| `SubmitEvent` | Text was sent from a `text_input` | `value` |
+| `StrokeEvent` | A chunk of a canvas stroke, while it is drawn | `stroke`, `phase` (`"start"`, `"move"`, `"end"`, `"cancel"`), `tool`, `points` (`Point(x, y, pressure, t)`, x/y in 0-1), `size` (on `start`) |
+
+`await panel.update(widget, **props)` and `await panel.update_many({widget: props})` change widgets in place (checked against the layout first); `await panel.clear_canvas(widget)`; `await panel.close()` (also on leaving `async with panel:`). `panel.visible` follows the state events. `await phone.list_panels()` lists this PC's panels; a 9th panel raises `TooManyPanels`.
+
+**Reconnecting.** Panels belong to the PC, not the connection: when the connection drops, the phone keeps the panel (greyed out, for 10 minutes) and its canvas keeps taking ink. `panel.last_pseq` is the number of the last event you got; on a new connection `await phone.attach_panel("pad", after_pseq=old.last_pseq)` takes the panel over and replays the strokes drawn since (`replayed=True`). `after_pseq=-1` replays everything still on the canvases, for a program that restarted. `panel.attach_result.values` has the current toggle and slider values. A panel that is gone raises `UnknownPanel`.
+
+The client subscribes to the `panel` source once per connection, before its first `show_panel`, and hands each event to its `Panel`, so no event is missed between the response and the first event. See [`examples/`](../../examples): a stream deck, a drawing pad mirrored on the PC, and a notification when a command finishes.
+
 ## API overview
 
 ### `phonetopc.connect(addr=None, *, device=None, dev=False, client_name=..., request_timeout=10.0, open_timeout=10.0, queue_size=256, **ws_kwargs)`
@@ -155,6 +210,8 @@ Opens the WebSocket (see [which phone, at which address](#which-phone-at-which-a
 | `await get(source, type=None)` | One-shot read, returns an `Event` (with `subscription`/`seq` set to `None`) |
 | `subscribe(source, *, type=None, rate_hz=None, min_delta=None, queue_size=None, overflow="auto")` | Returns a `Subscription`; `async with` it to start |
 | `await request_approval(reason, timeout=30.0)` | Fingerprint approval, returns an `ApprovalResult` (see [above](#fingerprint-approval)) |
+| `await notify(title, body=None, *, id=None, actions=None, priority=None)`, `await notify_cancel(id)` | Post or remove a notification (see [notifications and panels](#notifications-and-panels)) |
+| `await show_panel(panel, title, layout, *, keep_awake=None, orientation=None, validate=True)`, `await attach_panel(panel, *, after_pseq=-1)`, `await list_panels()` | Show, take over or list panels; the first two return a `Panel` |
 | `approval_key`, `await accept_approval_key()` | Pin of the phone's approval key in this session (`None` if it has none); trust that key after it changed |
 | `await call(method, params=None, timeout=...)` | Raw JSON-RPC call, for methods newer than this client |
 | `closed`, `closed_reason`, `await wait_closed()`, `await close()` | Connection state |
@@ -195,11 +252,11 @@ All exceptions derive from `phonetopc.Error`.
 | Exception | When |
 |---|---|
 | `PhonetopcError(code, message, data)` | Any JSON-RPC error response. The subclass is picked by code: |
-| ↳ `UnknownSource` (-32001), `SourceUnavailable` (-32002), `HelloRequired` (-32003), `UnsupportedProtocol` (-32004, `.supported`), `UnknownSubscription` (-32005), `NoValue` (-32006), `Unauthorized` (-32010) | phonetopc errors |
+| ↳ `UnknownSource` (-32001), `SourceUnavailable` (-32002), `HelloRequired` (-32003), `UnsupportedProtocol` (-32004, `.supported`), `UnknownSubscription` (-32005), `NoValue` (-32006), `Unauthorized` (-32010), `NotAllowed` (-32030, `.permission`), `UnknownPanel` (-32031), `TooManyPanels` (-32032), `RateLimited` (-32033) | phonetopc errors |
 | ↳ `ParseError`, `InvalidRequest`, `MethodNotFound`, `InvalidParams`, `InternalError` | standard JSON-RPC errors |
 | `ConnectionClosed` (`.code`, `.reason`) | The connection is closed or was lost |
 | `RequestTimeout` (also a `TimeoutError`) | No response within `request_timeout` |
-| `SubscriptionOverflow` | An on_change subscription's queue overflowed |
+| `SubscriptionOverflow` | An on_change subscription's (or a panel's) queue overflowed |
 | `ProtocolError` | The server sent a malformed message |
 | `NotPaired`, `AmbiguousDevice` | No pairing fits, or several do (both are also `LookupError`s) |
 | `PinMismatch` (`.expected`, `.actual`, `.address`, `.attempts`) | The phone's TLS key isn't the paired one at any address tried |
@@ -216,11 +273,16 @@ For scripts that don't want asyncio, `phonetopc.sync` runs the same client on a 
 
 ```python
 import phonetopc.sync
+from phonetopc import ui
 
 with phonetopc.sync.connect() as phone:  # same arguments as phonetopc.connect
     print(phone.get("battery").value)
     if phone.request_approval("Print gyro readings?"):
         print("approved")
+    phone.notify("Hello from the PC")
+    with phone.show_panel("hi", "Hi", ui.button("ok", "OK")) as panel:  # closed on exit
+        for ev in panel:  # a SyncPanel: update(), clear_canvas(), close() block too
+            break
     with phone.subscribe("gyro", rate_hz=50) as events:
         for ev in events:
             print(ev.value)
