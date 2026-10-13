@@ -24,6 +24,28 @@ export PHONETOPC_ADDR=ws://192.168.1.20:8765   # or for every script at once
 | [`air_mouse.py`](air_mouse.py) | Moves the mouse pointer with the gyroscope; a Quick Settings tile tap sends a left click. `--scale` sets speed in pixels per radian, `--deadzone` sets the rad/s threshold below which movement is ignored | `pip install evdev`, plus write access to `/dev/uinput` (udev rule + `input` group, see the docstring) |
 | [`approve.py`](approve.py) | Fingerprint-gated commands: `python examples/approve.py "Run deploy?" -- ./deploy.sh` runs `./deploy.sh` only after you approve with your fingerprint on the phone, and the phone's signature checks out. Without a command it just sets the exit status (`approve.py "Reset the DB?" && make reset-db`) | `pip install 'phonetopc[approval]'`; a phone with a fingerprint enrolled; secure mode |
 | [`lock_on_tile.py`](lock_on_tile.py) | Locks the PC when you tap the phonetopc Quick Settings tile. Uses `loginctl lock-session`, then `xdg-screensaver lock`, or your own `--command`. Reconnects when the phone drops off | a locker that reacts to logind's `Lock` signal (hypridle, swayidle, xss-lock, GNOME, KDE), or `--command` |
+| [`stream_deck.py`](stream_deck.py) | A panel on the phone with a mute button, a mic switch and a volume slider for the PC's default audio devices; changes made on the PC show up on the phone. `--backend none` tries it without touching audio | `wpctl` (PipeWire) or `pactl` (PulseAudio); *Screen panels* allowed for this PC in the phone app |
+| [`drawpad.py`](drawpad.py) | Draw on the phone, watch it appear live in a window on the PC. *Clear* on the phone clears both. Strokes drawn while the connection is down, or before the script (re)starts, are replayed | tkinter (`pacman -S tk`); *Screen panels* allowed |
+| [`notify_when_done.py`](notify_when_done.py) | `python examples/notify_when_done.py -- make -j8` posts "✅ make finished" (or "❌ ... failed") when the command ends; `--panel` also shows a live status panel. With just `--title` it only posts a notification, e.g. from a Claude Code `Stop` hook | *Notifications* allowed (and *Screen panels* for `--panel`) |
+
+Notifications and panels are off by default for every PC: turn on *Notifications* and *Screen panels* for this PC in the phone app (in dev mode, the one pair of settings for all dev-mode clients). A minimal panel:
+
+```python
+import asyncio
+import phonetopc
+from phonetopc import ui
+
+
+async def main():
+    async with phonetopc.connect() as phone:
+        panel = await phone.show_panel("hello", "Hello", ui.button("hi", "Say hi"))
+        async for ev in panel:
+            if isinstance(ev, phonetopc.PressEvent):
+                await phone.notify("Hi from the PC")
+
+
+asyncio.run(main())
+```
 
 `approve.py` exits with the command's status when it ran, 1 when not approved (denied, cancelled, timed out, ...) and 2 on errors. If you add or remove fingerprints on the phone, its approval key changes and `approve.py` refuses until you run `phonetopc approval-key --accept`. To gate code in your own program instead of a command:
 
