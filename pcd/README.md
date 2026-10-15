@@ -1,7 +1,7 @@
 # pcd: phonetopc on the PC (Go)
 
 The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 4, see
-[`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)), pairing, TLS and tokens (milestone M2, see
+[`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)), pairing, TLS and tokens (see
 [`../spec/SECURITY.md`](../spec/SECURITY.md)), fingerprint approval (see
 [`../spec/APPROVAL.md`](../spec/APPROVAL.md)), and notifications and panels (see
 [`../spec/PANELS.md`](../spec/PANELS.md)).

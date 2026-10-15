@@ -3,7 +3,7 @@
 The phone side of phonetopc: a foreground service that serves the phone's sensors over
 WebSocket JSON-RPC, as specified in [`../spec/PROTOCOL.md`](../spec/PROTOCOL.md)
 (`phonetopc/1`, draft 4), [`../spec/SECURITY.md`](../spec/SECURITY.md) (pairing, TLS and
-tokens, milestone M2), [`../spec/APPROVAL.md`](../spec/APPROVAL.md) (fingerprint approval) and
+tokens), [`../spec/APPROVAL.md`](../spec/APPROVAL.md) (fingerprint approval) and
 [`../spec/PANELS.md`](../spec/PANELS.md) (notifications and panels from the PC).
 
 The server runs in one of two modes, on the same port (default 8765):
@@ -73,8 +73,8 @@ sensors stop) and **Stop**. Add the **PC button** Quick Settings tile to send
 
 ## Fingerprint approval
 
-A paired PC can ask you to confirm something (e.g. `examples/approve.py`, or the client
-libraries' `request_approval`). The phone answers with a signature from a key that only
+A paired PC can ask you to confirm something (e.g. `phonetopc approve`, or
+`POST /v1/approvals` on the PC's local API). The phone answers with a signature from a key that only
 works right after a fingerprint check, and the PC verifies it itself (APPROVAL.md).
 
 - **When it's offered.** Secure mode only (developer mode has no such method), and only while
