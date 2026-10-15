@@ -65,12 +65,14 @@ func (d *Daemon) Handler() http.Handler {
 	return mux
 }
 
-// RequireToken guards h for a TCP listener on the loopback address: every
-// request needs the token, as "Authorization: Bearer <token>" or, for
-// browsers' EventSource and WebSocket, which can't set headers, as
-// "?token=<token>". Requests whose Host isn't a loopback name are refused,
-// against DNS rebinding. CORS preflights are answered, so a page in a
-// browser can use the API once it has the token.
+// RequireToken guards h for a TCP listener on the loopback address. Programs
+// of this user (see ConnContext) get in without a token, unless the request
+// looks like it comes from a web page; the rest need the token, as
+// "Authorization: Bearer <token>" or, for browsers' EventSource and
+// WebSocket, which can't set headers, as "?token=<token>". Requests whose
+// Host isn't a loopback name are refused, against DNS rebinding. CORS
+// preflights are answered, so a page in a browser can use the API once it
+// has the token.
 func RequireToken(token string, h http.Handler) http.Handler {
 	want := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,13 +88,17 @@ func RequireToken(token string, h http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if sameUser(r) && !fromBrowser(r) {
+			h.ServeHTTP(w, r)
+			return
+		}
 		got := r.URL.Query().Get("token")
 		if auth := r.Header.Get("Authorization"); auth != "" {
 			got, _ = strings.CutPrefix(auth, "Bearer ")
 		}
 		if got == "" || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized",
-				"missing or wrong token: send \"Authorization: Bearer <token>\" with the token from phonetopcd's token file, or use the Unix socket")
+				"missing or wrong token: requests from web pages and from other users send \"Authorization: Bearer <token>\" with the token from phonetopcd's token file")
 			return
 		}
 		h.ServeHTTP(w, r)

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -146,8 +147,19 @@ func TestServesSocketAndTCP(t *testing.T) {
 		t.Errorf("token mode %v", fi.Mode().Perm())
 	}
 	token := strings.TrimSpace(string(tb))
-	if code, _ := status(t, http.DefaultClient, "http://"+r.tcp+"/v1/status", ""); code != 401 {
-		t.Errorf("no token: %d", code)
+	sameUser := 401
+	if runtime.GOOS == "linux" {
+		sameUser = 200
+	}
+	if code, _ := status(t, http.DefaultClient, "http://"+r.tcp+"/v1/status", ""); code != sameUser {
+		t.Errorf("this user, no token: %d, want %d", code, sameUser)
+	}
+	req, _ := http.NewRequest("GET", "http://"+r.tcp+"/v1/status", nil)
+	req.Header.Set("Origin", "https://example.com")
+	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != 401 {
+		t.Errorf("web page, no token: %v %v", res.StatusCode, err)
+	} else {
+		res.Body.Close()
 	}
 	if code, m := status(t, http.DefaultClient, "http://"+r.tcp+"/v1/status", token); code != 200 || m["connected"] != true {
 		t.Errorf("with token: %d %v", code, m)

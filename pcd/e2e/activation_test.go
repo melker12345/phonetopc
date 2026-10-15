@@ -71,8 +71,8 @@ func TestSocketActivationServesTheWaitingRequest(t *testing.T) {
 	if r := <-waiting; r.status != 200 || r.body["source"] != "battery" {
 		t.Fatalf("the request that started it: %d %s", r.status, r.raw)
 	}
-	if r := do(t, http.DefaultClient, "GET", "http://"+tcpLn.Addr().String()+"/v1/status", "", ""); r.status != 401 {
-		t.Errorf("tcp without a token: %d %s", r.status, r.raw)
+	if r := do(t, http.DefaultClient, "GET", "http://"+tcpLn.Addr().String()+"/v1/status", "", ""); r.status != sameUserStatus() {
+		t.Errorf("tcp: %d %s", r.status, r.raw)
 	}
 	p.cmd.Process.Signal(os.Interrupt)
 	if code := p.wait(t); code != 0 {

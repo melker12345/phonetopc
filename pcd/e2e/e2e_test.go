@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,6 +53,15 @@ func TestMain(m *testing.M) {
 }
 
 const timeout = 10 * time.Second
+
+// sameUserStatus is the answer to a token-less TCP request from this user:
+// only Linux can tell who is at the other end.
+func sameUserStatus() int {
+	if runtime.GOOS == "linux" {
+		return 200
+	}
+	return 401
+}
 
 type syncBuffer struct {
 	mu sync.Mutex
@@ -379,8 +389,8 @@ func TestDevModeOverSocketAndTCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := do(t, http.DefaultClient, "GET", "http://"+tcp+"/v1/status", "", ""); r.status != 401 || r.errorCode() != "unauthorized" {
-		t.Errorf("no token: %s", r.raw)
+	if r := do(t, http.DefaultClient, "GET", "http://"+tcp+"/v1/status", "", ""); r.status != sameUserStatus() {
+		t.Errorf("this user, no token: %s", r.raw)
 	}
 	if r := do(t, http.DefaultClient, "GET", "http://"+tcp+"/v1/status", strings.TrimSpace(string(tok)), ""); r.status != 200 || r.body["connected"] != true {
 		t.Errorf("with token: %s", r.raw)

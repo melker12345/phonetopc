@@ -57,7 +57,9 @@ Flags:
   --socket PATH        Unix socket (default $XDG_RUNTIME_DIR/phonetopc.sock);
                        "off" turns it off
   --listen ADDR        loopback TCP address (default 127.0.0.1:8767); "off"
-                       turns it off. Requests need the token from --token-file
+                       turns it off. Requests from web pages, from other
+                       users, and on systems other than Linux need the token
+                       from --token-file
   --token-file PATH    where the TCP token is kept (default
                        $XDG_RUNTIME_DIR/phonetopc.token)
   -v                   log every reconnect attempt, not only new errors
@@ -137,6 +139,9 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 			Handler:           h,
 			ReadHeaderTimeout: 10 * time.Second,
 			ErrorLog:          log.New(io.Discard, "", 0),
+		}
+		if ln.Addr().Network() == "tcp" {
+			srv.ConnContext = daemon.ConnContext
 		}
 		servers = append(servers, srv)
 		go srv.Serve(ln)
