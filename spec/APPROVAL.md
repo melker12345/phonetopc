@@ -1,10 +1,7 @@
-# phonetopc approval — fingerprint confirmation (draft 4)
+# phonetopc approval — fingerprint confirmation
 
 This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md) and [`SECURITY.md`](SECURITY.md).
 The key words MUST, SHOULD and MAY are used as in RFC 2119.
-
-Draft numbers are shared by the whole spec (see `PROTOCOL.md`). This document was added in draft 3 and is
-unchanged in draft 4.
 
 A PC program asks the phone for an **approval**. The user confirms with a strong biometric (fingerprint) on the
 phone, and the phone returns a **signature** from a hardware key that can only sign right after that biometric

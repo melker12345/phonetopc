@@ -9,8 +9,7 @@ phone ──wss:// + pinned key + token──► phonetopcd ──plain HTTP on 
           (PROTOCOL.md, SECURITY.md)                (this document)
 ```
 
-The phone protocol (`PROTOCOL.md`) is still public, and programs may keep talking to the phone directly; going
-through the daemon is the easy path.
+Programs may also speak the phone protocol (`PROTOCOL.md`) directly; the daemon is the easy path.
 
 ## 1. Where it listens
 
@@ -27,7 +26,8 @@ of the daemon):
 Authorization: Bearer <token>
 ```
 
-Browsers' `EventSource` and `WebSocket` can't set headers; they may pass `?token=<token>` instead. Requests whose
+Browsers' `EventSource` and `WebSocket` can't set headers; they may pass `?token=<token>` instead. If a request
+has an `Authorization` header, only the header is checked. Requests whose
 `Host` is not `localhost`, `127.0.0.1` or `[::1]` are refused with 403 (DNS rebinding). CORS preflights are
 answered, so a page that was given the token can use the API.
 
@@ -41,7 +41,8 @@ Without `$XDG_RUNTIME_DIR` the files go to `$TMPDIR/phonetopc-<uid>/`. `phonetop
 - Success is 200 with a JSON object (`{}` when there is nothing to say).
 - Errors have a status and a body
   `{"error": {"code": "<name>", "message": "<what happened and what to do>", "rpc_code": <phone's code>}}`.
-  `rpc_code` is present only when the phone refused (`PROTOCOL.md` §7).
+  `rpc_code` is present only when the phone refused (`PROTOCOL.md` §7). A phone error not listed below is 502,
+  with the phone's error name as `code` (for example `internal_error`), or `phone_error` if it has none.
 
 | Status | `code` | When |
 |---|---|---|
@@ -57,9 +58,12 @@ Without `$XDG_RUNTIME_DIR` the files go to `$TMPDIR/phonetopc-<uid>/`. `phonetop
 | 409 | `approval_key_changed` | See §5 |
 | 409 | `approval_unavailable` | The phone is in developer mode, which has no approvals |
 | 429 | `rate_limited` | Too many notifications |
+| 500 | `internal_error` | A bug in the daemon |
+| 501 | `method_not_found` | The phone app is older than the daemon and lacks the method |
 | 502 | `approval_invalid` | The phone said approved but the signature didn't verify. **Not an approval** |
 | 502 | `phone_error` | Any other failure talking to the phone |
 | 503 | `phone_unavailable` | The phone isn't connected right now; `message` says why |
+| 503 | `unauthorized` | The phone revoked this PC (`rpc_code` -32010); pair again with `phonetopc pair` |
 | 504 | `no_answer` | No answer to an approval in time |
 
 ## 3. Status and sensors
@@ -70,7 +74,7 @@ Always 200, also while the phone is away.
 
 ```json
 {"connected": true, "since": 1760000000123,
- "device": {"id": "a1b2c3d4", "name": "Galaxy S24", "manufacturer": "samsung", "model": "SM-S921B", "platform": "android", "platform_version": "34"},
+ "device": {"id": "635f3a01db1859bc", "name": "Galaxy S24", "manufacturer": "samsung", "model": "SM-S921B", "platform": "android", "platform_version": "34"},
  "capabilities": ["events", "get", "approval", "notify", "panels"],
  "streams": 2, "panels": ["deck"]}
 ```
@@ -90,7 +94,7 @@ The latest reading (`PROTOCOL.md` §4.5). `?type=` picks a type other than the s
 
 ```json
 {"source": "battery", "type": "state", "value": {"level": 82, "charging": true}, "unit": "%",
- "ts": 1760000000123, "ts_mono_ns": 81234567890123, "device": "a1b2c3d4"}
+ "ts": 1760000000123, "ts_mono_ns": 81234567890123, "device": "635f3a01db1859bc"}
 ```
 
 ## 4. Event streams: `GET /v1/events`
@@ -122,7 +126,7 @@ GET /v1/events?source=panel&source=notification
 
 ```json
 {"seq": 1042, "source": "gyro", "type": "rotation", "value": [0.01, -0.32, 0.05], "unit": "rad/s",
- "ts": 1760000000123, "ts_mono_ns": 81234567890123, "device": "a1b2c3d4"}
+ "ts": 1760000000123, "ts_mono_ns": 81234567890123, "device": "635f3a01db1859bc"}
 ```
 
 `seq` counts per source, starting at 0; a gap means events were dropped. Streams with the same source and options

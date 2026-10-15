@@ -1,4 +1,4 @@
-# phonetopc panels — the phone as a screen for the PC (draft 4)
+# phonetopc panels — the phone as a screen for the PC
 
 This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md). The key words MUST, SHOULD and MAY are used
 as in RFC 2119.
@@ -94,7 +94,7 @@ Nothing is sent when the PC replaces or cancels a notification, or when it's rem
 ```jsonc
 {"jsonrpc":"2.0","method":"event","params":{"subscription":"s-2","seq":0,
   "source":"notification","type":"action","value":{"notification":"claude","action":"open"},
-  "unit":"","ts":1760000000123,"ts_mono_ns":81234567890123,"device":"a1b2c3d4"}}
+  "unit":"","ts":1760000000123,"ts_mono_ns":81234567890123,"device":"635f3a01db1859bc"}}
 ```
 
 ### 3.3 `notify_cancel`
@@ -342,7 +342,7 @@ from the request alone, including the whole layout. Step 8 then checks, in this 
 the panel exists (`-32031`) or the limit (`-32032`), what depends on the panel's widgets (`-32602`, e.g. an
 unknown widget in `panel_update`), then `-32033`.
 
-The codes below are added in draft 4; `PROTOCOL.md` §7 lists them with every other code.
+`PROTOCOL.md` §7 lists these codes with every other code.
 
 | Code | Name | When |
 |---|---|---|
@@ -351,8 +351,8 @@ The codes below are added in draft 4; `PROTOCOL.md` §7 lists them with every ot
 | `-32032` | `too_many_panels` | `panel_show` of a new panel when the PC already has 8 |
 | `-32033` | `rate_limited` | `notify` above the phone's rate limit |
 
-## 10. Known gaps (later drafts)
+## 10. Known gaps
 
 - Images and icons in widgets; the PC drawing strokes onto a canvas; undo.
 - Showing a panel on the lock screen.
-- A way for the PC to learn which widget types a phone knows, once later drafts add some.
+- A way for the PC to learn which widget types a phone knows, once there are optional ones.

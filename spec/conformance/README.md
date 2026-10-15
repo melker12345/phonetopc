@@ -1,6 +1,6 @@
 # Conformance material
 
-Conformance material for `phonetopc/1` (draft 4) lives here.
+Conformance material for `phonetopc/1`.
 The prose of [`../PROTOCOL.md`](../PROTOCOL.md), [`../SECURITY.md`](../SECURITY.md),
 [`../APPROVAL.md`](../APPROVAL.md) and [`../PANELS.md`](../PANELS.md) is the normative reference. The cases,
 vectors and transcripts here follow it, like the JSON Schema; where one of them disagrees with the prose, the

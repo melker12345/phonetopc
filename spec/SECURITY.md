@@ -1,18 +1,9 @@
-# phonetopc security — pairing, TLS and tokens (draft 4)
+# phonetopc security — pairing, TLS and tokens
 
 This document is normative and extends [`PROTOCOL.md`](PROTOCOL.md).
 The key words MUST, SHOULD and MAY are used as in RFC 2119.
 
-Draft numbers are shared by the whole spec (see `PROTOCOL.md`). This document is unchanged in draft 4.
-
-**Changes in draft 3** (from the first three implementations and the first real pairing): default pairing port
-8766; results of `pair_qr` and `pair_sas_confirm`; long-pending pairing answers; order of checks for pairing and
-for secure `hello`; close codes; the listener survives refusals; re-pairing closes old sessions; exact QR encoding;
-trying several addresses; locking and updating `devices.json`; the stored `approval_key`; the form of phone ids;
-one connection per pairing and the 20-second start; one prompt per QR secret; prompts that need an explicit yes;
-the limit of 3 failed code comparisons; no code comparison without a person; replacing a paired phone that has a
-different key; the TLS handshake deadline and the limit on unauthenticated connections. Fingerprint approval
-itself is in [`APPROVAL.md`](APPROVAL.md).
+Fingerprint approval is in [`APPROVAL.md`](APPROVAL.md).
 
 ## 1. Goals and threat model
 
@@ -52,7 +43,7 @@ The phone server runs in exactly one mode at a time, on the same port (default 8
 | Mode | URL | Auth | When |
 |---|---|---|---|
 | **secure** (default) | `wss://<phone>:8765/v1/ws` | Pinned TLS + token in `hello` | Normal use |
-| **dev** | `ws://<phone>:8765/v1/ws` | None | Explicit, off-by-default developer setting, as in draft 1 |
+| **dev** | `ws://<phone>:8765/v1/ws` | None | Explicit, off-by-default developer setting |
 
 - TLS 1.3 SHOULD be used; TLS 1.2 with ECDHE and an AEAD cipher MUST be accepted (Android 8–9 lack 1.3).
 - A client connecting in secure mode MUST verify that the server's pin equals the stored pin and MUST NOT fall back
@@ -277,9 +268,10 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
 Secure sessions add `-32010` (`unauthorized`): a secure mode `hello` without a valid token (§5). Pairing adds the
 codes of §4.5. `PROTOCOL.md` §7 is the complete list.
 
-## 8. What this doesn't solve yet
+## 8. Who uses the store
 
-- A phone with many PCs, or a PC with many phones, works, but there's no UI for choosing a default yet beyond
-  "the only one" or `--device`.
-- Every program on the PC reads `devices.json` and connects to the phone itself. A planned PC daemon,
-  `phonetopcd`, would become the main user of this file, and programs would talk to the daemon instead.
+- `phonetopcd` reads `devices.json`, keeps the connection to the phone, and offers it to other programs on the PC
+  as plain HTTP ([`LOCAL-API.md`](LOCAL-API.md)). Programs normally use that and never touch the store.
+- A program that speaks `PROTOCOL.md` itself (for example through the Go client library, `pcd/client`) MAY read
+  the store and connect directly, following §6.
+- A phone with many PCs, or a PC with many phones, works; a PC with several phones picks one with `--device`.

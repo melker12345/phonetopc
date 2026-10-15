@@ -1,11 +1,11 @@
-# phonetopc protocol — version `phonetopc/1` (draft 4)
+# phonetopc protocol — version `phonetopc/1`
 
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 
 This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
 tokens. [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
 [`PANELS.md`](PANELS.md) covers notifications and panels, PC → phone output (`notify`, `panel_show`, …).
-The four documents share one draft number: this is draft 4 of all of them.
+These four documents are draft 4 of `phonetopc/1`; they share one draft number.
 
 This is the protocol between the phone and a client. Programs on the PC usually don't speak it: the PC daemon
 `phonetopcd` speaks it to the phone and offers programs a plain HTTP API instead, [`LOCAL-API.md`](LOCAL-API.md),
@@ -16,22 +16,6 @@ The prose of these documents is the normative reference. The JSON Schema
 request, response and `event` on `/v1/ws`), not the pairing messages (`pair_*`, `SECURITY.md` §4). It and the cases
 in [`conformance/`](conformance/) follow the prose; where they disagree with it, the prose wins and the schema or
 case is a bug.
-
-**Changes in draft 4:** notifications and panels (`notify`, `notify_cancel`, `panel_show`, `panel_attach`,
-`panel_update`, `panel_close`, `panel_list`, `canvas_clear`), capabilities `notify` and `panels`, sources
-`notification` and `panel`, errors `-32030`–`-32033`; see `PANELS.md`.
-
-**Changes in draft 3:** `request_approval`, capability `approval` and `hello.approval`; see `APPROVAL.md`.
-Sources `rotation_vector`, `magnetometer`, `compass`, `barometer`, `location` and `nfc` (§6); `proximity` clarified.
-Resource limits (§3). Pairing and secure sessions made precise; see the draft 3 notes in `SECURITY.md`.
-
-**Changes in draft 2:** secure mode (`wss://` with a pinned certificate) is the default; `hello` gains `auth`
-and its result gains `pc`; new error `-32010`; mDNS TXT gains `tls=1`. See `SECURITY.md`.
-
-**Changes in draft 1** (clarifications found while building the Go mock, the Android app and the Python client):
-`subscribe` result gains `mode`; ordering guarantee between a `subscribe` response and its events; `on_change`
-subscriptions start with the current value; `seq` and `min_delta` semantics made precise; client notifications
-are ignored; `get` documents `type`; `unsubscribe` result and per-method results added to the schema.
 
 ## 1. Transport
 
@@ -47,8 +31,8 @@ All messages follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 
 - **Requests** (client → server) have `jsonrpc`, `id`, `method`, and optional `params` (object).
 - **Responses** (server → client) have `jsonrpc`, `id`, and exactly one of `result` or `error`.
-- **Notifications** (server → client) have `jsonrpc`, `method`, `params`, and no `id`. This draft defines one: `event`.
-- A JSON object from the client **without** an `id` member is a JSON-RPC notification, even if it is otherwise malformed. This draft defines no client notifications, so servers MUST ignore them and MUST NOT reply. (A client that wants an answer sends an `id`.)
+- **Notifications** (server → client) have `jsonrpc`, `method`, `params`, and no `id`. The only one is `event`.
+- A JSON object from the client **without** an `id` member is a JSON-RPC notification, even if it is otherwise malformed. There are no client notifications, so servers MUST ignore them and MUST NOT reply. (A client that wants an answer sends an `id`.)
 - `params` MUST be an object if present. An explicit `"params": null` is treated as absent. Any other type gets `-32602`.
 - Frames that are not strict JSON (e.g. bare words, trailing garbage) get `-32700` with `"id": null`. A JSON value that isn't an object gets `-32600` with `"id": null`.
 - **Order of checks.** A server processes each frame in this order and answers with the first error that applies: (1) not strict JSON → `-32700`; (2) not a JSON object (array, scalar) → `-32600`; (3) no `id` member → ignore silently; (4) invalid `id`, `jsonrpc` ≠ `"2.0"` or `method` not a string → `-32600`; (5) no successful `hello` yet and `method` ≠ `hello` → `-32003`; (6) unknown method → `-32601`; (7) invalid `params` → `-32602`; (8) method-specific errors.
@@ -85,14 +69,14 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 {"jsonrpc":"2.0","id":1,"result":{
   "protocol":"phonetopc/1",
   "server":{"name":"phonetopc-android","version":"0.1.0"},
-  "device":{"id":"a1b2c3d4","name":"Galaxy S24","manufacturer":"samsung","model":"SM-S921B","platform":"android","platform_version":"34"},
+  "device":{"id":"635f3a01db1859bc","name":"Galaxy S24","manufacturer":"samsung","model":"SM-S921B","platform":"android","platform_version":"34"},
   "capabilities":["events","get"],
   "pc":{"id":"9d1c…","name":"arch-desktop"}}}   // secure mode only
 ```
 
 - If `protocol` is not supported, the server returns error `-32004` (`unsupported_protocol`) with `data.supported` listing the versions it does support.
 - `device.id` is stable across restarts and reinstalls where the platform allows (a random ID generated on first run and stored).
-- `capabilities` lists optional feature groups. This draft defines `events`, `get`, `approval` (`APPROVAL.md`), `notify` and `panels` (`PANELS.md`).
+- `capabilities` lists optional feature groups. Defined: `events`, `get`, `approval` (`APPROVAL.md`), `notify` and `panels` (`PANELS.md`).
 
 ### 4.2 `list_sensors`
 
@@ -149,7 +133,7 @@ One-shot read of the latest value. Params: `source` (required) and `type` (optio
 ```jsonc
 {"jsonrpc":"2.0","id":5,"method":"get","params":{"source":"battery"}}
 {"jsonrpc":"2.0","id":5,"result":{"source":"battery","type":"state",
-  "value":{"level":82,"charging":true},"unit":"%","ts":1760000000123,"ts_mono_ns":81234567890123,"device":"a1b2c3d4"}}
+  "value":{"level":82,"charging":true},"unit":"%","ts":1760000000123,"ts_mono_ns":81234567890123,"device":"635f3a01db1859bc"}}
 ```
 
 `result` is a reading: an event object without `subscription` and `seq`, with the timestamps of when that value was measured. For a sensor with no value yet the server MAY briefly start the sensor to get one, or return error `-32006` (`no_value`).
@@ -160,7 +144,7 @@ One-shot read of the latest value. Params: `source` (required) and `type` (optio
 {"jsonrpc":"2.0","method":"event","params":{
   "subscription":"s-7f3a","seq":1042,
   "source":"gyro","type":"rotation","value":[0.01,-0.32,0.05],"unit":"rad/s",
-  "ts":1760000000123,"ts_mono_ns":81234567890123,"device":"a1b2c3d4"}}
+  "ts":1760000000123,"ts_mono_ns":81234567890123,"device":"635f3a01db1859bc"}}
 ```
 
 | Field | Type | Meaning |
@@ -233,7 +217,7 @@ Android other apps on the phone can hand the app a made-up tag, so treat `nfc` v
 `notification` and `panel` are available only while the user allows notifications or panels for this PC
 (`PANELS.md` §1), and their events go only to sessions of that PC.
 
-New sources and types MAY be added in any draft. Clients MUST tolerate unknown sources in `list_sensors`.
+New sources and types MAY be added later. Clients MUST tolerate unknown sources in `list_sensors`.
 
 ## 7. Errors
 
@@ -271,9 +255,9 @@ Every error has `message` (human-readable) and SHOULD have `data.name`: the appl
 
 ## 8. Discovery
 
-This draft uses a manual address. Servers SHOULD additionally advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, and `tls=1` (secure mode) or `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available.
+Servers SHOULD advertise `_phonetopc._tcp` via mDNS with TXT records `id=<device.id>`, `proto=1`, and `tls=1` (secure mode) or `dev=1` (dev mode). Clients MUST NOT rely on mDNS being available: a client looks for the phone with mDNS (TXT `id` equal to the stored device id), then tries the addresses it has stored or was given (`SECURITY.md` §6).
 
-## 9. Known gaps (later drafts)
+## 9. Known gaps
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
 - `command` (vibrate, …) for PC → phone actions other than approval, notifications and panels.
