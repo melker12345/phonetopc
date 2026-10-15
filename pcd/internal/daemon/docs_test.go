@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/melker12345/phonetopc/pcd/internal/daemon"
 )
 
 type documented struct{ method, path string }
@@ -88,4 +90,16 @@ func getStatus(t *testing.T, url string) int {
 	}
 	res.Body.Close()
 	return res.StatusCode
+}
+
+func TestEveryRouteIsDocumented(t *testing.T) {
+	b, err := os.ReadFile("../../../spec/LOCAL-API.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range daemon.Routes() {
+		if !regexp.MustCompile(regexp.QuoteMeta(r) + `(?:[^/\w]|$)`).Match(b) {
+			t.Errorf("%s is not in LOCAL-API.md", r)
+		}
+	}
 }

@@ -20,13 +20,13 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 )
 
-// Handler returns the local API (spec/LOCAL-API.md). It does no
-// authentication; wrap it in RequireToken where others could reach it.
-func (d *Daemon) Handler() http.Handler {
-	routes := []struct {
-		method, path string
-		h            http.HandlerFunc
-	}{
+type route struct {
+	method, path string
+	h            http.HandlerFunc
+}
+
+func (d *Daemon) routes() []route {
+	return []route{
 		{"GET", "/v1/status", d.handleStatus},
 		{"GET", "/v1/sensors", d.handleSensors},
 		{"GET", "/v1/sensors/{source}", d.handleGet},
@@ -40,10 +40,15 @@ func (d *Daemon) Handler() http.Handler {
 		{"DELETE", "/v1/panels/{id}", d.handlePanelClose},
 		{"POST", "/v1/panels/{id}/canvases/{widget}/clear", d.handleCanvasClear},
 	}
+}
+
+// Handler returns the local API (spec/LOCAL-API.md). It does no
+// authentication; wrap it in RequireToken where others could reach it.
+func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	allowed := map[string][]string{}
 	var paths []string
-	for _, rt := range routes {
+	for _, rt := range d.routes() {
 		mux.HandleFunc(rt.method+" "+rt.path, rt.h)
 		if allowed[rt.path] == nil {
 			paths = append(paths, rt.path)
