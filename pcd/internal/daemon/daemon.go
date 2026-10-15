@@ -38,6 +38,9 @@ type Options struct {
 	// Verbose logs every failed connection attempt; otherwise only those
 	// that fail differently from the one before.
 	Verbose bool
+	// FirstConnectWait bounds how long a request waits for the first
+	// connection attempt. Default 20s, longer than a dial.
+	FirstConnectWait time.Duration
 }
 
 type Daemon struct {
@@ -61,6 +64,9 @@ func New(opts Options) *Daemon {
 	}
 	if opts.MaxBackoff < opts.MinBackoff {
 		opts.MaxBackoff = max(10*time.Second, opts.MinBackoff)
+	}
+	if opts.FirstConnectWait <= 0 {
+		opts.FirstConnectWait = 20 * time.Second
 	}
 	if opts.StreamBuffer <= 0 {
 		opts.StreamBuffer = 1024
@@ -198,13 +204,29 @@ func (d *Daemon) connected(ctx context.Context, cl *client.Client) {
 	}
 }
 
-func (d *Daemon) phone() (*client.Client, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.cl != nil {
-		return d.cl, nil
+// phone waits for the first connection attempt to finish, so that a daemon
+// started by the request (socket activation) answers it instead of saying it
+// is still connecting.
+func (d *Daemon) phone(ctx context.Context) (*client.Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.opts.FirstConnectWait)
+	defer cancel()
+	for {
+		d.mu.Lock()
+		cl, lastErr, ch := d.cl, d.lastErr, d.changed
+		if cl != nil {
+			d.mu.Unlock()
+			return cl, nil
+		}
+		if lastErr != nil || ctx.Err() != nil {
+			defer d.mu.Unlock()
+			return nil, &unavailableError{reason: d.unavailableReason(), err: lastErr}
+		}
+		d.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+		}
 	}
-	return nil, &unavailableError{reason: d.unavailableReason(), err: d.lastErr}
 }
 
 // d.mu must be held.

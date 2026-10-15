@@ -1,0 +1,14 @@
+# Starts phonetopcd when a program first connects, the way ssh.socket starts
+# sshd. `phonetopc daemon install` installs and enables it; a package would
+# put both units in /usr/lib/systemd/user/.
+[Unit]
+Description=phonetopc local API
+Documentation=https://github.com/melker12345/phonetopc/blob/main/spec/LOCAL-API.md
+
+[Socket]
+ListenStream=%t/phonetopc.sock
+SocketMode=0600
+ListenStream=127.0.0.1:8767
+
+[Install]
+WantedBy=sockets.target

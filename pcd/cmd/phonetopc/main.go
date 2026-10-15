@@ -61,6 +61,9 @@ Commands:
                          phonetopc notify "Claude Code is done" --body "3 files changed"
                        (tail panel / tail notification show panel input and
                        answers to notifications)
+  daemon install       start phonetopcd whenever a program connects to it
+                       (installs and enables systemd user units)
+  daemon uninstall     undo daemon install
 
 Flags (accepted before or after the command):
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
@@ -169,6 +172,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		err = c.approvalKey(ctx, rest)
 	case "notify":
 		err = c.notify(ctx, rest)
+	case "daemon":
+		err = c.daemon(ctx, rest)
 	case "help":
 		fmt.Fprint(stdout, usage)
 		return 0

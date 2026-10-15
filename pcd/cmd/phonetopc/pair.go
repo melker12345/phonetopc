@@ -174,6 +174,12 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		how = "code comparison"
 	}
 	fmt.Fprintf(c.stdout, "\nPaired with %q (id %s) by %s.\nTry: phonetopc info\n", res.Phone.Name, res.Phone.ID, how)
+	if !*yes && isTerminal(c.stdin) && !c.daemonInstalled() {
+		fmt.Fprintln(c.stdout)
+		if ok, _ := prompt.ask(ctx, "Start phonetopcd automatically when a program uses it? [Y/n]", true); ok {
+			return c.installDaemon(ctx)
+		}
+	}
 	return nil
 }
 

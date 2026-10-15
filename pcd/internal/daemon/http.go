@@ -229,8 +229,8 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-func (d *Daemon) call(w http.ResponseWriter, f func(cl *client.Client) (any, error)) {
-	cl, err := d.phone()
+func (d *Daemon) call(w http.ResponseWriter, r *http.Request, f func(cl *client.Client) (any, error)) {
+	cl, err := d.phone(r.Context())
 	if err != nil {
 		d.fail(w, err)
 		return
@@ -248,14 +248,14 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleSensors(w http.ResponseWriter, r *http.Request) {
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		s, err := cl.ListSensors(r.Context())
 		return protocol.ListSensorsResult{Sensors: s}, err
 	})
 }
 
 func (d *Daemon) handleGet(w http.ResponseWriter, r *http.Request) {
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		var res protocol.Reading
 		p := protocol.GetParams{Source: r.PathValue("source"), Type: r.URL.Query().Get("type")}
 		err := cl.Call(r.Context(), protocol.MethodGet, p, &res)
@@ -273,7 +273,7 @@ func (d *Daemon) handleNotify(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequest{err.Error()})
 		return
 	}
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		var res protocol.NotifyResult
 		err := cl.Call(r.Context(), protocol.MethodNotify, p, &res)
 		return res, err
@@ -281,7 +281,7 @@ func (d *Daemon) handleNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleNotifyCancel(w http.ResponseWriter, r *http.Request) {
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		return struct{}{}, cl.CancelNotification(r.Context(), r.PathValue("id"))
 	})
 }
@@ -313,7 +313,7 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds()))
 		return
 	}
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		res, err := cl.RequestApproval(r.Context(), req.Reason, timeout)
 		if err != nil {
 			return nil, err
@@ -326,7 +326,7 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handlePanelList(w http.ResponseWriter, r *http.Request) {
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		panels, err := cl.ListPanels(r.Context())
 		if panels == nil {
 			panels = []protocol.PanelInfo{}
@@ -363,7 +363,7 @@ func (d *Daemon) handlePanelShow(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequest{err.Error()})
 		return
 	}
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		res, err := cl.ShowPanel(r.Context(), id, req.Title, layout, client.PanelOptions{KeepAwake: req.KeepAwake, Orientation: req.Orientation})
 		if err == nil {
 			d.notePanel(id)
@@ -383,14 +383,14 @@ func (d *Daemon) handlePanelUpdate(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, err)
 		return
 	}
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		return struct{}{}, cl.UpdatePanel(r.Context(), r.PathValue("id"), req.Updates...)
 	})
 }
 
 func (d *Daemon) handlePanelClose(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		err := cl.ClosePanel(r.Context(), id)
 		if err == nil {
 			d.forgetPanel(id)
@@ -400,7 +400,7 @@ func (d *Daemon) handlePanelClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleCanvasClear(w http.ResponseWriter, r *http.Request) {
-	d.call(w, func(cl *client.Client) (any, error) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
 		return struct{}{}, cl.ClearCanvas(r.Context(), r.PathValue("id"), r.PathValue("widget"))
 	})
 }

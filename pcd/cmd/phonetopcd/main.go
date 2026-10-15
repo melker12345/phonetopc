@@ -42,6 +42,9 @@ const usage = `Usage: phonetopcd [flags]
 Keeps a connection to the paired phone and serves the local API
 (spec/LOCAL-API.md) on a Unix socket and on 127.0.0.1.
 
+Started by systemd socket activation (phonetopc daemon install), it serves
+the sockets systemd passes in, and --socket and --listen are ignored.
+
 Flags:
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
                        needed only when several are paired
@@ -138,7 +141,36 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 		servers = append(servers, srv)
 		go srv.Serve(ln)
 	}
-	if !off(c.socket) {
+	serveTCP := func(ln net.Listener) bool {
+		token, err := loadToken(c.tokenFile)
+		if err != nil {
+			logger.Print(err)
+			return false
+		}
+		serve(ln, daemon.RequireToken(token, d.Handler()))
+		tcpAt = ln.Addr().String()
+		return true
+	}
+	inherited, err := activated(getenv)
+	if err != nil {
+		logger.Print(err)
+		return 1
+	}
+	for _, ln := range inherited {
+		switch ln.Addr().Network() {
+		case "unix":
+			serve(ln, d.Handler())
+			socketAt = ln.Addr().String()
+		case "tcp":
+			if !serveTCP(ln) {
+				return 1
+			}
+		default:
+			logger.Printf("ignoring a %s socket passed in by systemd", ln.Addr().Network())
+			ln.Close()
+		}
+	}
+	if len(inherited) == 0 && !off(c.socket) {
 		ln, err := listenUnix(c.socket)
 		if err != nil {
 			logger.Print(err)
@@ -148,13 +180,8 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 		serve(ln, d.Handler())
 		socketAt = c.socket
 	}
-	if !off(c.listen) {
+	if len(inherited) == 0 && !off(c.listen) {
 		if err := checkLoopback(c.listen); err != nil {
-			logger.Print(err)
-			return 1
-		}
-		token, err := loadToken(c.tokenFile)
-		if err != nil {
 			logger.Print(err)
 			return 1
 		}
@@ -163,8 +190,9 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 			logger.Printf("%v (is phonetopcd already running? --listen picks another address)", err)
 			return 1
 		}
-		serve(ln, daemon.RequireToken(token, d.Handler()))
-		tcpAt = ln.Addr().String()
+		if !serveTCP(ln) {
+			return 1
+		}
 	}
 	if socketAt != "" {
 		logger.Printf("serving on unix:%s", socketAt)
