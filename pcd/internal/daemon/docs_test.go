@@ -13,7 +13,7 @@ type documented struct{ method, path string }
 
 var (
 	requestLineRE = regexp.MustCompile("(GET|POST|PUT|PATCH|DELETE) (/v1/[^\\s`|]*)")
-	exampleURLRE  = regexp.MustCompile(`(?:https?|wss?)://(?:phonetopc|127\.0\.0\.1:8767)(/v1/[^\s'"` + "`" + `]*)`)
+	exampleURLRE  = regexp.MustCompile(`(?:(?:https?|wss?)://)?(?:phonetopc|127\.0\.0\.1:8767|localhost:8767)(/v1/[^\s'"` + "`" + `]*)`)
 	placeholderRE = regexp.MustCompile(`\{(\w+)\}`)
 )
 

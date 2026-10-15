@@ -51,16 +51,19 @@ Pairings are stored in `~/.config/phonetopc/` (`$XDG_CONFIG_HOME`), as described
 ## Run the daemon
 
 ```sh
-bin/phonetopcd
-
-S=$XDG_RUNTIME_DIR/phonetopc.sock
-curl -s --unix-socket $S http://phonetopc/v1/status
-curl -sN --unix-socket $S 'http://phonetopc/v1/events?source=gyro&rate=20'
-curl -s -H "Authorization: Bearer $(cat $XDG_RUNTIME_DIR/phonetopc.token)" http://127.0.0.1:8767/v1/status
+bin/phonetopc daemon install     # start phonetopcd whenever a program connects to it
+curl localhost:8767/v1/status
+curl -N 'localhost:8767/v1/events?source=gyro&rate=20'
 ```
 
-It serves on a Unix socket only this user can open, and on `127.0.0.1:8767` with a token. It reconnects by itself
-when the phone comes back. The API is in [`LOCAL-API.md`](../spec/LOCAL-API.md).
+`daemon install` writes systemd user units (from `systemd/`) that hold the daemon's sockets and start it on the
+first connection, the way `ssh.socket` starts sshd; `phonetopc pair` offers it at the end. `phonetopc daemon
+uninstall` removes them. Without systemd, run `bin/phonetopcd` yourself, e.g. from your desktop's autostart. Logs:
+`journalctl --user -u phonetopcd`.
+
+It serves on `localhost:8767` and on a Unix socket, `$XDG_RUNTIME_DIR/phonetopc.sock`. On Linux your own programs
+need no token; web pages and other users need the one in `$XDG_RUNTIME_DIR/phonetopc.token`
+([`LOCAL-API.md`](../spec/LOCAL-API.md) §1). It reconnects by itself when the phone comes back.
 
 | Flag | Meaning |
 |---|---|
@@ -74,16 +77,7 @@ when the phone comes back. The API is in [`LOCAL-API.md`](../spec/LOCAL-API.md).
 | `-v` | Log every reconnect attempt, not only new errors |
 | `--version` | Print the version |
 
-To start it at login, use the systemd user unit in `systemd/`:
-
-```sh
-go install ./cmd/phonetopcd          # the unit expects ~/go/bin/phonetopcd
-cp systemd/phonetopcd.service ~/.config/systemd/user/
-systemctl --user enable --now phonetopcd
-journalctl --user -u phonetopcd -f
-```
-
-Without systemd, start `phonetopcd` from your desktop's autostart.
+Started by systemd, it serves the sockets systemd holds, and `--socket` and `--listen` are ignored.
 
 ## Use the CLI
 
@@ -114,6 +108,8 @@ bin/phonetopc pc                            # this PC's id, name and pin
 | `approve "reason"` | Ask for approval with a fingerprint on the phone |
 | `approval-key` | Show the phone's accepted and current approval key |
 | `notify "title"` | Post a notification on the phone and print its id |
+| `daemon install` | Start `phonetopcd` whenever a program connects to it (systemd user units) |
+| `daemon uninstall` | Undo `daemon install` |
 
 | Flag | Meaning |
 |---|---|

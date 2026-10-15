@@ -8,7 +8,7 @@ fingerprint, post notifications on the phone, or show buttons and sliders there.
 HTTP requests to a daemon on the PC, so any language works and no phone-specific code is needed.
 
 ```sh
-curl -N --unix-socket $XDG_RUNTIME_DIR/phonetopc.sock 'http://phonetopc/v1/events?source=gyro'
+curl -N 'localhost:8767/v1/events?source=gyro'
 {"seq":0,"source":"gyro","type":"rotation","value":[0.01,-0.32,0.05],"unit":"rad/s",...}
 {"seq":1,"source":"gyro","type":"rotation","value":[0.02,-0.30,0.04],"unit":"rad/s",...}
 ```
@@ -45,16 +45,18 @@ cd pcd && go build -o bin/ ./cmd/...   # builds phonetopcd, phonetopc and phonet
 
 ```sh
 bin/phonetopc pair            # shows a QR code; scan it in the app
-bin/phonetopcd &              # start the daemon
-bin/phonetopc tail gyro       # check that it works
+curl localhost:8767/v1/status # check that it works
 ```
+
+At the end, `pair` offers to start `phonetopcd` whenever a program connects to it, the way `ssh.socket` starts
+sshd (`bin/phonetopc daemon install`, systemd). Without that, run `bin/phonetopcd` yourself.
 
 **Without a phone**, the fake phone stands in for it:
 
 ```sh
 bin/phonetopc-mock &
 bin/phonetopcd --insecure-dev &
-curl -N --unix-socket $XDG_RUNTIME_DIR/phonetopc.sock 'http://phonetopc/v1/events?source=gyro'
+curl -N 'localhost:8767/v1/events?source=gyro'
 ```
 
 Then write your program against [`spec/LOCAL-API.md`](spec/LOCAL-API.md).
@@ -62,4 +64,4 @@ Then write your program against [`spec/LOCAL-API.md`](spec/LOCAL-API.md).
 ## Status
 
 Works: pairing, the sensors, fingerprint approval, notifications and panels, the daemon. Not yet: released
-builds of the app and the PC tools, and `phonetopc pair` setting up the daemon to start by itself.
+builds of the app and the PC tools.

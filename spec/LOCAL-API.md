@@ -13,26 +13,41 @@ Programs may also speak the phone protocol (`PROTOCOL.md`) directly; the daemon 
 
 ## 1. Where it listens
 
-| Listener | Default | Who can use it |
+| Listener | Default | Who can use it without a token |
 |---|---|---|
-| Unix socket | `$XDG_RUNTIME_DIR/phonetopc.sock` (mode 0600) | This user, no token |
-| TCP | `127.0.0.1:8767` (loopback only) | Requests with the token, see below |
+| TCP | `localhost:8767` (`127.0.0.1`, loopback only) | Programs of this user, on Linux |
+| Unix socket | `$XDG_RUNTIME_DIR/phonetopc.sock` (mode 0600) | This user |
 
-**Token.** Other users and programs on the PC can reach `127.0.0.1`, and this API can ask for fingerprint
-approvals, so TCP requests need the token in `$XDG_RUNTIME_DIR/phonetopc.token` (mode 0600, kept across restarts
-of the daemon):
+```sh
+curl localhost:8767/v1/status
+curl -N 'localhost:8767/v1/events?source=gyro'    # -N: print each event as it arrives
+```
+
+**Token.** This API can read the phone's location and ask for fingerprint approvals, so some TCP requests need the
+token in `$XDG_RUNTIME_DIR/phonetopc.token` (mode 0600, kept across restarts of the daemon):
+
+- requests from other users;
+- requests that may come from a web page: any with an `Origin` header, or a `Sec-Fetch-Site` other than `none` or
+  `same-origin` (browsers run as this user too);
+- every TCP request on systems other than Linux, where the daemon can't tell who is at the other end. (On Linux
+  it looks the connection up in `/proc/net/tcp`.)
 
 ```
 Authorization: Bearer <token>
 ```
 
 Browsers' `EventSource` and `WebSocket` can't set headers; they may pass `?token=<token>` instead. If a request
-has an `Authorization` header, only the header is checked. Requests whose
-`Host` is not `localhost`, `127.0.0.1` or `[::1]` are refused with 403 (DNS rebinding). CORS preflights are
-answered, so a page that was given the token can use the API.
+has an `Authorization` header, only the header is checked. Requests whose `Host` is not `localhost`, `127.0.0.1`
+or `[::1]` are refused with 403 (DNS rebinding). CORS preflights are answered, so a page that was given the token
+can use the API.
 
 Without `$XDG_RUNTIME_DIR` the files go to `$TMPDIR/phonetopc-<uid>/`. `phonetopcd --socket`, `--listen` and
 `--token-file` change them; `off` turns a listener off.
+
+**Starting on demand.** `phonetopc daemon install` installs systemd user units that hold both listeners and start
+`phonetopcd` on the first connection, like `ssh.socket` starts sshd. That first request waits until the daemon
+has tried to reach the phone, then gets the real answer. The units are in `pcd/systemd/`; without systemd, start
+`phonetopcd` at login.
 
 ## 2. Conventions
 
@@ -48,7 +63,7 @@ Without `$XDG_RUNTIME_DIR` the files go to `$TMPDIR/phonetopc-<uid>/`. `phonetop
 |---|---|---|
 | 400 | `invalid_request` | Bad JSON, unknown member, invalid value (checked before asking the phone) |
 | 400 | `invalid_params` | The phone found a parameter invalid |
-| 401 | `unauthorized` | TCP without the right token |
+| 401 | `unauthorized` | TCP without the right token, where one is needed (§1) |
 | 403 | `forbidden` | TCP with a `Host` that isn't loopback |
 | 403 | `not_allowed` | The phone's user hasn't allowed notifications or panels for this PC |
 | 404 | `not_found` | No such endpoint |
@@ -218,29 +233,27 @@ removed with `DELETE`, is forgotten.
 
 ## 8. Examples
 
-Shell, over the socket:
+These run on Linux as the user who runs `phonetopcd`; elsewhere, add the token (§1).
+
+Shell:
 
 ```sh
-S=$XDG_RUNTIME_DIR/phonetopc.sock
-curl -s --unix-socket $S http://phonetopc/v1/sensors/battery
-curl -sN --unix-socket $S 'http://phonetopc/v1/events?source=gyro&rate=20'
-curl -s --unix-socket $S http://phonetopc/v1/notifications -d '{"title":"Build done"}'
-curl -s --unix-socket $S http://phonetopc/v1/approvals -d '{"reason":"Deploy?"}' | grep -q '"approved":true' && ./deploy.sh
+curl -s localhost:8767/v1/sensors/battery
+curl -sN 'localhost:8767/v1/events?source=gyro&rate=20'
+curl -s localhost:8767/v1/notifications -d '{"title":"Build done"}'
+curl -s localhost:8767/v1/approvals -d '{"reason":"Deploy?"}' | grep -q '"approved":true' && ./deploy.sh
 
 # lock the PC when the Quick Settings tile is tapped
-curl -sN --unix-socket $S 'http://phonetopc/v1/events?source=ui' |
+curl -sN 'localhost:8767/v1/events?source=ui' |
   while read -r ev; do case $ev in *tile_tap*) loginctl lock-session;; esac; done
 ```
 
 Python, standard library only:
 
 ```python
-import json, os, urllib.request
+import json, urllib.request
 
-TOKEN = open(os.environ["XDG_RUNTIME_DIR"] + "/phonetopc.token").read().strip()
-req = urllib.request.Request("http://127.0.0.1:8767/v1/events?source=gyro&rate=20",
-                             headers={"Authorization": "Bearer " + TOKEN})
-for line in urllib.request.urlopen(req):
+for line in urllib.request.urlopen("http://localhost:8767/v1/events?source=gyro&rate=20"):
     ev = json.loads(line)
     print(ev["source"], ev["value"])
 ```
@@ -248,24 +261,20 @@ for line in urllib.request.urlopen(req):
 JavaScript (Node 22+, Deno, Bun):
 
 ```js
-import fs from "node:fs";
-const token = (await fs.promises.readFile(`${process.env.XDG_RUNTIME_DIR}/phonetopc.token`, "utf8")).trim();
-const headers = { Authorization: `Bearer ${token}` };
-await fetch("http://127.0.0.1:8767/v1/notifications", {
-  method: "POST", headers, body: JSON.stringify({ title: "Build done" }),
+await fetch("http://localhost:8767/v1/notifications", {
+  method: "POST", body: JSON.stringify({ title: "Build done" }),
 });
-const ws = new WebSocket(`ws://127.0.0.1:8767/v1/events?source=ui&token=${token}`);
+const ws = new WebSocket("ws://localhost:8767/v1/events?source=ui");
 ws.onmessage = (m) => console.log(JSON.parse(m.data));
 ```
 
 Go, standard library only:
 
 ```go
-tok, _ := os.ReadFile(os.Getenv("XDG_RUNTIME_DIR") + "/phonetopc.token")
-req, _ := http.NewRequest("GET", "http://127.0.0.1:8767/v1/events?source=gyro&rate=20", nil)
-req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
-res, err := http.DefaultClient.Do(req)
-if err != nil { log.Fatal(err) }
+res, err := http.Get("http://localhost:8767/v1/events?source=gyro&rate=20")
+if err != nil {
+	log.Fatal(err)
+}
 sc := bufio.NewScanner(res.Body)
 for sc.Scan() {
 	fmt.Println(sc.Text()) // one JSON event per line
