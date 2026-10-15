@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// ErrorCode is a JSON-RPC error code.
 type ErrorCode int
 
 // Standard JSON-RPC 2.0 error codes.
@@ -107,19 +106,14 @@ func (c ErrorCode) String() string {
 	return fmt.Sprintf("%d", int(c))
 }
 
-// ErrorData is the "data" member of an error object.
 type ErrorData struct {
-	// Name is the symbolic error name, e.g. "unknown_source".
 	Name string `json:"name,omitempty"`
-	// Supported lists supported protocol versions (unsupported_protocol only).
+	// Only for unsupported_protocol.
 	Supported []string `json:"supported,omitempty"`
-	// Permission is the missing permission, "notify" or "panels"
-	// (not_allowed only).
+	// "notify" or "panels"; only for not_allowed.
 	Permission string `json:"permission,omitempty"`
 }
 
-// Error is a JSON-RPC error object. It implements the error interface so it
-// can be returned directly from client calls.
 type Error struct {
 	Code    ErrorCode  `json:"code"`
 	Message string     `json:"message"`
@@ -155,7 +149,6 @@ func (e *Error) Is(target error) bool {
 	return false
 }
 
-// ErrorCodeOf returns the code of err if it is (or wraps) an *Error.
 func ErrorCodeOf(err error) (ErrorCode, bool) {
 	var e *Error
 	if errors.As(err, &e) {

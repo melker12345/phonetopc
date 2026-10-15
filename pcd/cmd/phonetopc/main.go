@@ -108,7 +108,6 @@ tail flags:
 Sequence gaps (dropped events) are reported on stderr.
 `
 
-// cli holds the shared state of one invocation.
 type cli struct {
 	stdin          io.Reader
 	stdout, stderr io.Writer
@@ -185,7 +184,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 0
 	case errors.As(err, &ee):
 		if ee.err != nil {
-			fmt.Fprintln(stderr, "phonetopc:", explain(ee.err))
+			fmt.Fprintln(stderr, "phonetopc:", hints.Explain(ee.err))
 		}
 		return ee.code
 	case ctx.Err() != nil && errors.Is(err, context.Canceled):
@@ -193,7 +192,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case errors.As(err, &ue):
 		return c.usageError(err)
 	default:
-		fmt.Fprintln(stderr, "phonetopc:", explain(err))
+		fmt.Fprintln(stderr, "phonetopc:", hints.Explain(err))
 		return 1
 	}
 }
@@ -202,9 +201,6 @@ func envBool(s string) bool {
 	b, err := strconv.ParseBool(s)
 	return err == nil && b
 }
-
-// explain turns an error into a message that says what to do.
-func explain(err error) string { return hints.Explain(err) }
 
 type usageErr struct{ error }
 
@@ -216,7 +212,7 @@ func (c *cli) usageError(err error) int {
 	return 2
 }
 
-// flagSet returns a FlagSet with the flags every command accepts.
+// The flags here are accepted by every command.
 func (c *cli) flagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we print our own usage

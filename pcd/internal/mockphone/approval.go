@@ -29,23 +29,8 @@ type ApprovalRequest struct {
 // return value is then ignored.
 type Approver func(ctx context.Context, req ApprovalRequest) protocol.Why
 
-// ApproveAll approves every request at once.
 func ApproveAll(context.Context, ApprovalRequest) protocol.Why { return "" }
 
-// ApproveAfter approves every request after d (or times out if d is
-// longer than the request's timeout).
-func ApproveAfter(d time.Duration) Approver {
-	return func(ctx context.Context, _ ApprovalRequest) protocol.Why {
-		select {
-		case <-time.After(d):
-			return ""
-		case <-ctx.Done():
-			return protocol.WhyTimeout
-		}
-	}
-}
-
-// Answer answers every request with why at once.
 func Answer(why protocol.Why) Approver {
 	return func(context.Context, ApprovalRequest) protocol.Why { return why }
 }
@@ -56,8 +41,8 @@ func NeverAnswer(ctx context.Context, _ ApprovalRequest) protocol.Why {
 	return protocol.WhyTimeout
 }
 
-// beginApproval marks an approval as pending; false if one already is
-// (one at a time per phone, §4).
+// beginApproval reports false if an approval is already pending: one at a
+// time per phone (§4).
 func (s *Server) beginApproval() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -74,8 +59,8 @@ func (s *Server) endApproval() {
 	s.mu.Unlock()
 }
 
-// approvalKey returns the current approval key, or nil if the phone can't
-// do approvals (dev mode, or none configured).
+// approvalKey is nil if the phone can't do approvals (dev mode, or none
+// configured).
 func (s *Server) approvalKey() *ecdsa.PrivateKey {
 	if !s.Secure() || s.opts.ApprovalKey == nil {
 		return nil
@@ -83,7 +68,6 @@ func (s *Server) approvalKey() *ecdsa.PrivateKey {
 	return s.opts.ApprovalKey()
 }
 
-// approvalInfo returns hello's approval member for key.
 func approvalInfo(key *ecdsa.PrivateKey) *protocol.ApprovalInfo {
 	if key == nil {
 		return nil

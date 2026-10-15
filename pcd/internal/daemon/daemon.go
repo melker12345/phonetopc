@@ -19,14 +19,12 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 )
 
-// Dialer opens a connection to the phone.
 type Dialer func(ctx context.Context) (*client.Client, error)
 
-// Options configure a Daemon.
 type Options struct {
-	// Dial connects to the phone. Required.
+	// Required.
 	Dial Dialer
-	// Logf, if set, receives log messages.
+	// Optional.
 	Logf func(format string, args ...any)
 	// MinBackoff and MaxBackoff bound the wait between reconnect attempts.
 	// Defaults 1s and 10s.
@@ -42,7 +40,6 @@ type Options struct {
 	Verbose bool
 }
 
-// Daemon holds the phone connection and the local streams on it.
 type Daemon struct {
 	opts Options
 
@@ -57,7 +54,7 @@ type Daemon struct {
 	panels  map[string]int64 // panels shown through the daemon, by id: the last pseq seen
 }
 
-// New returns a Daemon. Run connects it.
+// It does not connect until Run.
 func New(opts Options) *Daemon {
 	if opts.MinBackoff <= 0 {
 		opts.MinBackoff = time.Second
@@ -201,8 +198,6 @@ func (d *Daemon) connected(ctx context.Context, cl *client.Client) {
 	}
 }
 
-// phone returns the current connection, or an error saying why there is
-// none.
 func (d *Daemon) phone() (*client.Client, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -212,7 +207,7 @@ func (d *Daemon) phone() (*client.Client, error) {
 	return nil, &unavailableError{reason: d.unavailableReason()}
 }
 
-// unavailableReason says why there is no connection. d.mu must be held.
+// d.mu must be held.
 func (d *Daemon) unavailableReason() string {
 	if d.lastErr == nil {
 		return "connecting to the phone"
@@ -220,12 +215,10 @@ func (d *Daemon) unavailableReason() string {
 	return d.opts.Explain(d.lastErr)
 }
 
-// unavailableError is returned while the phone isn't connected.
 type unavailableError struct{ reason string }
 
 func (e *unavailableError) Error() string { return "phone not connected: " + e.reason }
 
-// WaitConnected waits until the phone is connected or ctx is done.
 func (d *Daemon) WaitConnected(ctx context.Context) error {
 	for {
 		d.mu.Lock()
@@ -253,7 +246,6 @@ type Status struct {
 	Panels       []string             `json:"panels"`
 }
 
-// Status reports the connection state.
 func (d *Daemon) Status() Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()

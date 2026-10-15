@@ -149,7 +149,9 @@ func (c *Client) UpdatePanel(ctx context.Context, id string, updates ...WidgetUp
 	return c.Call(ctx, protocol.MethodPanelUpdate, protocol.PanelUpdateParams{Panel: id, Updates: updates}, nil)
 }
 
-// Set builds a WidgetUpdate from property name, value pairs.
+// Set builds a WidgetUpdate for UpdatePanel from property name, value
+// pairs. Names are formatted with fmt.Sprint; an odd trailing name is
+// ignored. Values are checked by the phone, not here.
 func Set(widget string, kv ...any) WidgetUpdate {
 	u := WidgetUpdate{Widget: widget, Set: map[string]any{}}
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -158,19 +160,24 @@ func Set(widget string, kv ...any) WidgetUpdate {
 	return u
 }
 
-// ClosePanel removes a panel.
+// ClosePanel removes a panel and its canvas content (PANELS.md §4.6). Any
+// connection of this PC may close it; an unknown id is a CodeUnknownPanel
+// error.
 func (c *Client) ClosePanel(ctx context.Context, id string) error {
 	return c.Call(ctx, protocol.MethodPanelClose, protocol.PanelRef{Panel: id}, nil)
 }
 
-// ListPanels lists this PC's panels.
+// ListPanels lists this PC's panels in creation order, including those
+// owned by other connections or detached (PANELS.md §4.6).
 func (c *Client) ListPanels(ctx context.Context) ([]PanelInfo, error) {
 	var res protocol.PanelListResult
 	err := c.Call(ctx, protocol.MethodPanelList, nil, &res)
 	return res.Panels, err
 }
 
-// ClearCanvas erases a canvas and the strokes the phone keeps for it.
+// ClearCanvas erases a canvas and the strokes the phone keeps for it
+// (PANELS.md §4.6). Strokes drawn just before may still arrive after it
+// returns.
 func (c *Client) ClearCanvas(ctx context.Context, panel, canvas string) error {
 	return c.Call(ctx, protocol.MethodCanvasClear, protocol.CanvasClearParams{Panel: panel, Widget: canvas}, nil)
 }

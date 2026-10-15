@@ -126,8 +126,8 @@ func TestApprovalVectors(t *testing.T) {
 	}
 }
 
-// TestApprovalUsesOwnValues: the client signs over its own reason and ids,
-// sends a fresh 32-byte nonce, the requested timeout, and trims the reason.
+// TestApprovalRequestAndOwnValues: the client signs over its own reason and ids,
+// and sends a fresh 32-byte nonce and the requested timeout.
 func TestApprovalRequestAndOwnValues(t *testing.T) {
 	key, err := security.GenerateKey()
 	if err != nil {

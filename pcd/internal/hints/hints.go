@@ -10,7 +10,6 @@ import (
 	"github.com/melker12345/phonetopc/pcd/client"
 )
 
-// Explain turns an error into a message that says what to do.
 func Explain(err error) string {
 	var pm *client.PinMismatchError
 	var amb *client.AmbiguousError

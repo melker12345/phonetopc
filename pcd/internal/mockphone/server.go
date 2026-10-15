@@ -23,7 +23,6 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
 
-// ServerName is the mock's server name reported in hello.
 const ServerName = "phonetopc-mock"
 
 // Direction says which way a frame went, for Options.Tap.
@@ -232,10 +231,8 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// DeviceID returns the device id reported in hello.
 func (s *Server) DeviceID() string { return s.opts.Device.ID }
 
-// Secure reports whether the server is in secure mode.
 func (s *Server) Secure() bool { return s.opts.Authenticate != nil }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +372,6 @@ func (s *Server) reading(source string, value any, now time.Time) (protocol.Read
 	return r, r.SetValue(value)
 }
 
-// sampleContinuous samples a continuous source at now.
 func (s *Server) sampleContinuous(source string, now time.Time, rng *rand.Rand) (protocol.Reading, error) {
 	t := now.Sub(s.start).Seconds()
 	var v any

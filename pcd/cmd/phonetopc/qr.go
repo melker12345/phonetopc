@@ -50,7 +50,6 @@ func writeQR(w io.Writer, content string, color bool) error {
 	return err
 }
 
-// writePNG writes content as a QR code PNG.
 func writePNG(path, content string) error {
 	png, err := qrcode.Encode(content, qrcode.Medium, 512)
 	if err != nil {

@@ -46,7 +46,6 @@ const (
 	// SourceNotification and SourcePanel (PANELS.md §2) are in panels.go.
 )
 
-// Event types in the sensor catalog.
 const (
 	TypeMotion        = "motion"
 	TypeRotation      = "rotation"
@@ -62,7 +61,6 @@ const (
 	TypeTag           = "tag"
 )
 
-// Units in the sensor catalog.
 const (
 	UnitMetersPerSecond2 = "m/s^2"
 	UnitRadiansPerSecond = "rad/s"
@@ -126,7 +124,6 @@ func Catalog() []SensorInfo {
 	}
 }
 
-// LookupSensor returns the catalog entry for source.
 func LookupSensor(source string) (SensorInfo, bool) {
 	for _, s := range Catalog() {
 		if s.Source == source {
@@ -136,8 +133,6 @@ func LookupSensor(source string) (SensorInfo, bool) {
 	return SensorInfo{}, false
 }
 
-// ErrNoDistance is returned by ValueDistance for shapes min_delta doesn't
-// apply to.
 var ErrNoDistance = errors.New("min_delta does not apply to this shape")
 
 // ValueDistance returns the distance between two values of the given shape,

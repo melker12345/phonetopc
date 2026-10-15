@@ -33,9 +33,7 @@ func (a *actionFlags) Set(s string) error {
 	return nil
 }
 
-// notify posts a notification on the phone (PANELS.md §3). With --wait it
-// waits for the user and prints what they did: the action id, "tap" or
-// "dismiss".
+// PANELS.md §3.
 func (c *cli) notify(ctx context.Context, args []string) error {
 	fs := c.flagSet("notify")
 	var opts client.NotifyOptions

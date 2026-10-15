@@ -138,10 +138,12 @@ type options struct {
 	addrOverride     string
 }
 
-// Option configures Dial.
+// Option configures Dial, DialPaired and PairedDevices; each ignores the
+// options that don't concern it.
 type Option func(*options)
 
-// WithClientInfo sets the client name and version sent in hello.
+// WithClientInfo names the program in hello, where the phone may show it.
+// The default is "phonetopc-go" with this module's version.
 func WithClientInfo(name, version string) Option {
 	return func(o *options) { o.clientInfo = protocol.ClientInfo{Name: name, Version: version} }
 }
@@ -165,7 +167,8 @@ func WithEventBuffer(n int) Option { return func(o *options) { o.eventBuffer = m
 // retain the slice.
 func WithTap(f func(dir Direction, frame []byte)) Option { return func(o *options) { o.tap = f } }
 
-// WithDialOptions sets the options passed to websocket.Dial.
+// WithDialOptions passes extra options to websocket.Dial, e.g. headers.
+// For wss:// URLs their HTTPClient is replaced by one that verifies the pin.
 func WithDialOptions(d *websocket.DialOptions) Option { return func(o *options) { o.dialOptions = d } }
 
 // WithPin makes Dial verify that the server's certificate has this pin
@@ -173,7 +176,9 @@ func WithDialOptions(d *websocket.DialOptions) Option { return func(o *options) 
 // with ErrPinMismatch before anything is sent if the pin differs.
 func WithPin(pin string) Option { return func(o *options) { o.pin = pin } }
 
-// WithToken sends token in hello's auth member (secure mode).
+// WithToken sends the token from pairing in hello's auth member (secure
+// mode). Without a valid one a secure phone refuses hello with an error
+// that IsUnauthorized recognizes.
 func WithToken(token string) Option { return func(o *options) { o.token = token } }
 
 // SecureURL turns "host:port" into the phone's secure WebSocket URL
@@ -195,7 +200,9 @@ func URL(addr string) string {
 	return "ws://" + addr + protocol.WSPath
 }
 
-// Client is a connection to a phonetopc server.
+// Client is one connection to a phone (or the mock phone). Its methods are
+// safe for concurrent use. Once the connection is gone, Done is closed and
+// every call fails with Err; dial again to reconnect.
 type Client struct {
 	conn *websocket.Conn
 	opts options
@@ -332,14 +339,16 @@ func (c *Client) Hello(ctx context.Context) (HelloResult, error) {
 	return res, nil
 }
 
-// Server returns the result of the last successful hello.
+// Server returns the result of the last successful hello: the phone's
+// identity, capabilities and mode. It is the zero value before hello.
 func (c *Client) Server() HelloResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.hello
 }
 
-// ListSensors returns the server's sensor list.
+// ListSensors returns the sources this phone offers, with their modes and
+// rates; the names are what Subscribe and Get take.
 func (c *Client) ListSensors(ctx context.Context) ([]SensorInfo, error) {
 	var res protocol.ListSensorsResult
 	if err := c.Call(ctx, protocol.MethodListSensors, nil, &res); err != nil {
@@ -348,7 +357,8 @@ func (c *Client) ListSensors(ctx context.Context) ([]SensorInfo, error) {
 	return res.Sensors, nil
 }
 
-// Get returns the latest reading of source.
+// Get returns the latest reading of source without subscribing. A sensor
+// with no value yet may be started briefly, or fail with -32006 (no_value).
 func (c *Client) Get(ctx context.Context, source string) (Reading, error) {
 	var res Reading
 	err := c.Call(ctx, protocol.MethodGet, protocol.GetParams{Source: source}, &res)

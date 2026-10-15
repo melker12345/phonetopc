@@ -19,7 +19,7 @@ import (
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
-// CheckID checks an id: panels, widgets, notifications and actions.
+// CheckID applies to panel, widget, notification and action ids.
 func CheckID(id string) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("%q is not a valid id (1-64 of A-Z a-z 0-9 _ . -)", id)
@@ -57,7 +57,6 @@ func CheckText(s string, minLen, maxLen int, newlines bool) error {
 
 var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
-// CheckColor checks a #rrggbb color.
 func CheckColor(s string) error {
 	if !colorPattern.MatchString(s) {
 		return fmt.Errorf("%q is not a #rrggbb color", s)
@@ -65,7 +64,7 @@ func CheckColor(s string) error {
 	return nil
 }
 
-// CheckNotify checks notify params (§3.1).
+// §3.1.
 func CheckNotify(p NotifyParams) error {
 	if err := CheckText(p.Title, 1, 100, false); err != nil {
 		return fmt.Errorf("title %w", err)
@@ -111,12 +110,10 @@ type Node struct {
 	Children []*Node
 }
 
-// Layout is a checked layout.
 type Layout struct {
 	Root *Node
-	// ByID holds every widget with an id.
-	ByID map[string]*Node
-	// Count is the number of widgets.
+	// Only widgets with an id.
+	ByID  map[string]*Node
 	Count int
 }
 
@@ -216,7 +213,7 @@ func isContainer(typ string) bool {
 	return typ == WidgetColumn || typ == WidgetRow || typ == WidgetGrid
 }
 
-// interactive widgets produce events and need an id.
+// Interactive widgets produce events and need an id.
 func interactive(typ string) bool {
 	switch typ {
 	case WidgetButton, WidgetToggle, WidgetSlider, WidgetTextInput, WidgetCanvas:

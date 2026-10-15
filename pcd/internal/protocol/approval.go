@@ -9,7 +9,7 @@ import (
 
 // Fingerprint approval (spec/APPROVAL.md).
 
-// MethodRequestApproval asks the phone's user for an approval (§4).
+// §4.
 const MethodRequestApproval = "request_approval"
 
 // CapabilityApproval is listed in hello when the phone can do approvals (§1).
@@ -22,7 +22,7 @@ type ApprovalInfo struct {
 	Pin string `json:"pin"`
 }
 
-// RequestApprovalParams are the params of request_approval (§4).
+// §4.
 type RequestApprovalParams struct {
 	Reason string `json:"reason"`
 	Nonce  string `json:"nonce"`
@@ -31,7 +31,7 @@ type RequestApprovalParams struct {
 	TimeoutMS *int64 `json:"timeout_ms,omitempty"`
 }
 
-// RequestApprovalResult is the result of request_approval (§4.1).
+// §4.1.
 type RequestApprovalResult struct {
 	Approved  bool   `json:"approved"`
 	Signature string `json:"signature,omitempty"`
@@ -50,10 +50,9 @@ const (
 	WhyUnavailable Why = "unavailable" // no strong biometric enrolled, or no approval key
 )
 
-// Whys lists every defined Why, in the order of §4.1.
+// In the order of §4.1.
 var Whys = []Why{WhyDenied, WhyCancelled, WhyTimeout, WhyBusy, WhyLockout, WhyUnavailable}
 
-// Valid reports whether w is one of the defined values.
 func (w Why) Valid() bool {
 	for _, x := range Whys {
 		if w == x {
@@ -63,7 +62,6 @@ func (w Why) Valid() bool {
 	return false
 }
 
-// Describe explains w for people.
 func (w Why) Describe() string {
 	switch w {
 	case WhyDenied:

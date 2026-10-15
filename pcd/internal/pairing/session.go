@@ -29,7 +29,6 @@ const (
 	stDone
 )
 
-// session is one phone connection to the listener.
 type session struct {
 	l      *Listener
 	conn   *websocket.Conn

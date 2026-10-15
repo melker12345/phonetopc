@@ -34,7 +34,6 @@ type State struct {
 	mu  sync.Mutex
 }
 
-// PairedPC is a PC the mock phone has paired with.
 type PairedPC struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -48,7 +47,6 @@ type pcsDoc struct {
 	PCs     []PairedPC `json:"pcs"`
 }
 
-// Identity is the mock phone's long-term identity.
 type Identity struct {
 	ID   string
 	Name string
@@ -184,7 +182,6 @@ func (st *State) newApprovalKey() (*ecdsa.PrivateKey, error) {
 	return k, nil
 }
 
-// PCs returns the paired PCs.
 func (st *State) PCs() ([]PairedPC, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()

@@ -17,7 +17,7 @@ func TestCheckReason(t *testing.T) {
 	for _, bad := range []string{
 		"", " ", "   ", " padded", "padded ", "nbsp ", "　ideographic", "x ",
 		strings.Repeat("x", 201), "line\nbreak", "tab\there", "bell\a", "del\u007f", "c1\u0085x", "\xff",
-		"rlo‮txt.exe", "lrm‎", "alm؜", "isolate⁦x⁩", "x‪y",
+		"rlo\u202Etxt.exe", "lrm\u200E", "alm\u061C", "isolate\u2066x\u2069", "x\u202Ay",
 	} {
 		if err := CheckReason(bad); err == nil {
 			t.Errorf("%q accepted", bad)

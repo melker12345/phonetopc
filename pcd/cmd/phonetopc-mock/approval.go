@@ -17,11 +17,9 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
-// approvalModes are the values of --approval.
 const approvalModes = "auto, deny, cancel, timeout, lockout, ask, tamper or off"
 
-// approvalOptions configures the mock's approvals from --approval and
-// --approval-delay. st holds the approval key; in may be read for "ask".
+// st holds the approval key; in is read only for "ask".
 func approvalOptions(opts *mockphone.Options, mode string, delay time.Duration, st *mockphone.State, in io.Reader, out io.Writer) error {
 	if mode == "off" {
 		return nil

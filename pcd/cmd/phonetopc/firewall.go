@@ -15,7 +15,6 @@ import (
 // cheap and needs no privileges: `ufw status` needs root, so ufw is
 // detected by its configuration file, and firewalld by its systemd unit.
 
-// firewall names a detected host firewall.
 type firewall string
 
 const (
@@ -25,8 +24,7 @@ const (
 
 // firewallProbe is what detection looks at; tests replace it.
 type firewallProbe struct {
-	readFile func(name string) ([]byte, error)
-	// unitActive reports whether a systemd unit is active.
+	readFile   func(name string) ([]byte, error)
 	unitActive func(unit string) bool
 }
 

@@ -19,7 +19,6 @@ import (
 	"strings"
 )
 
-// PinPrefix starts every pin.
 const PinPrefix = "sha256/"
 
 // SASLabel is the domain-separation prefix of the SAS code hash (§4.3).
@@ -35,16 +34,13 @@ func DecodeB64(s string) ([]byte, error) {
 	return base64.RawURLEncoding.Strict().DecodeString(s)
 }
 
-// PinSPKI returns the pin of a DER-encoded SubjectPublicKeyInfo.
 func PinSPKI(spki []byte) string {
 	sum := sha256.Sum256(spki)
 	return PinPrefix + B64(sum[:])
 }
 
-// Pin returns the pin of a certificate: the pin of its SubjectPublicKeyInfo.
 func Pin(cert *x509.Certificate) string { return PinSPKI(cert.RawSubjectPublicKeyInfo) }
 
-// PinDER returns the pin of a DER-encoded certificate.
 func PinDER(der []byte) (string, error) {
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
@@ -111,7 +107,6 @@ func Equal(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// RandomBytes returns n bytes from the operating system's CSPRNG.
 func RandomBytes(n int) []byte {
 	b := make([]byte, n)
 	// crypto/rand.Read never returns an error (it crashes the program
@@ -128,10 +123,8 @@ const (
 	IDSize     = 8  // §2, at least 64 bits
 )
 
-// NewToken returns a fresh pairing token, base64url-encoded.
 func NewToken() string { return B64(RandomBytes(TokenSize)) }
 
-// NewSecret returns a fresh QR pairing secret, base64url-encoded.
 func NewSecret() string { return B64(RandomBytes(SecretSize)) }
 
 // NewID returns a fresh device or PC id: 64 random bits as 16 hex digits.
@@ -157,5 +150,4 @@ func (e *PinMismatchError) Error() string {
 	return fmt.Sprintf("certificate pin mismatch: expected %s, server presented %s", e.Want, e.Got)
 }
 
-// Is makes errors.Is(err, ErrPinMismatch) true.
 func (e *PinMismatchError) Is(target error) bool { return target == ErrPinMismatch }

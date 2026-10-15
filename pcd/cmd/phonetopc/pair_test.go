@@ -258,7 +258,6 @@ func TestPairSASRefusedOnPC(t *testing.T) {
 	}
 }
 
-// waitFor waits until s is in out.
 func waitFor(t *testing.T, out *syncBuffer, s string) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {

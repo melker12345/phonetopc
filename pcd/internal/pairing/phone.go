@@ -21,7 +21,6 @@ import (
 // This file is the phone's side of pairing, used by the mock phone and by
 // tests. A real phone implements the same steps.
 
-// PairedPC is what the phone stores after a successful pairing.
 type PairedPC struct {
 	ID    string
 	Name  string
@@ -33,19 +32,16 @@ type PairedPC struct {
 // pairing was attacked or the PC is broken (§4.3 step 4).
 var ErrCommitment = errors.New("pairing: the PC's nonce does not match its commitment")
 
-// ErrCodesDiffer means a user said the SAS codes differ.
 var ErrCodesDiffer = errors.New("pairing: the codes differ")
 
-// conn is a pairing connection from the phone to a PC.
 type conn struct {
 	ws     *websocket.Conn
 	nextID atomic.Int64
 	pin    string // the pin the PC presented
 }
 
-// dial connects to wss://hostport/v1/pair. If pin is not empty the PC's
-// certificate must match it; otherwise any certificate is accepted and its
-// pin recorded (SAS).
+// If pin is not empty the PC's certificate must match it; otherwise any
+// certificate is accepted and its pin recorded (SAS).
 func dial(ctx context.Context, hostport, pin string) (*conn, error) {
 	c := &conn{}
 	var cfg *tls.Config
@@ -67,8 +63,7 @@ func dial(ctx context.Context, hostport, pin string) (*conn, error) {
 
 func (c *conn) close() { c.ws.Close(websocket.StatusNormalClosure, "") }
 
-// call sends one request and waits for its response. The listener sends no
-// notifications, so the next frame is the answer.
+// The listener sends no notifications, so the next frame is the answer.
 func (c *conn) call(ctx context.Context, method string, params, result any) error {
 	id := c.nextID.Add(1)
 	b, err := json.Marshal(protocol.NewRequest(protocol.IntID(id), method, params))
@@ -100,9 +95,8 @@ func (c *conn) call(ctx context.Context, method string, params, result any) erro
 	}
 }
 
-// PairQR pairs by QR code (§4.2): it connects to the hosts of u in order,
-// verifying the PC's pin, proves knowledge of the secret, and issues token.
-// The PC's user must confirm, so ctx should allow for that.
+// PairQR pairs by QR code (§4.2), trying the hosts of u in order. The PC's
+// user must confirm, so ctx should allow for that.
 func PairQR(ctx context.Context, u URI, phone PhoneInfo, token string) (PairedPC, error) {
 	var (
 		c       *conn
@@ -144,13 +138,10 @@ func (c *conn) finish(ctx context.Context, pc protocol.PCInfo, token string) (Pa
 	return PairedPC{ID: res.PC.ID, Name: res.PC.Name, Pin: c.pin, Token: token}, nil
 }
 
-// SASConfirmer shows the code to the phone's user and returns whether they
-// say it matches the PC's.
 type SASConfirmer func(ctx context.Context, pc protocol.PCInfo, code string) (bool, error)
 
-// PairSAS pairs by numeric comparison (§4.3) with the listener at hostport
-// ("host:port", e.g. from mDNS). confirm is asked while the PC's user is
-// asked too.
+// PairSAS pairs by numeric comparison (§4.3). confirm is asked while the
+// PC's user is asked too.
 func PairSAS(ctx context.Context, hostport string, phone PhoneInfo, token string, confirm SASConfirmer) (PairedPC, error) {
 	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	c, err := dial(dctx, hostport, "")

@@ -12,7 +12,6 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 )
 
-// subscription is one active subscription of a session.
 type subscription struct {
 	sess     *session
 	id       string
@@ -29,7 +28,6 @@ type subscription struct {
 	stopFn  func()
 }
 
-// start begins producing events.
 func (sub *subscription) start() {
 	sub.mu.Lock()
 	sub.started = true

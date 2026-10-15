@@ -7,7 +7,6 @@ import (
 // Notifications and panels (spec/PANELS.md): the PC shows things on the
 // phone and gets the user's input back as events.
 
-// Methods of PANELS.md.
 const (
 	MethodNotify       = "notify"        // §3.1
 	MethodNotifyCancel = "notify_cancel" // §3.3
@@ -64,19 +63,18 @@ const (
 	DetachedPanelTimeout = 10 * 60 // seconds a detached panel is kept, §4.1
 )
 
-// Priorities of a notification (§3.1).
+// §3.1.
 const (
 	PriorityDefault = "default"
 	PriorityHigh    = "high"
 )
 
-// NotifyAction is one action button of a notification.
 type NotifyAction struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
 
-// NotifyParams are the params of notify (§3.1).
+// §3.1.
 type NotifyParams struct {
 	Title    string         `json:"title"`
 	Body     string         `json:"body,omitempty"`
@@ -85,24 +83,23 @@ type NotifyParams struct {
 	Priority string         `json:"priority,omitempty"`
 }
 
-// NotifyResult is the result of notify.
 type NotifyResult struct {
 	ID string `json:"id"`
 }
 
-// NotifyCancelParams are the params of notify_cancel (§3.3).
+// §3.3.
 type NotifyCancelParams struct {
 	ID string `json:"id"`
 }
 
-// Orientations of a panel (§4.3).
+// §4.3.
 const (
 	OrientationAny       = "any"
 	OrientationPortrait  = "portrait"
 	OrientationLandscape = "landscape"
 )
 
-// PanelShowParams are the params of panel_show (§4.3).
+// §4.3.
 type PanelShowParams struct {
 	Panel       string  `json:"panel"`
 	Title       string  `json:"title"`
@@ -111,26 +108,24 @@ type PanelShowParams struct {
 	Orientation string  `json:"orientation,omitempty"`
 }
 
-// PanelShowResult is the result of panel_show.
 type PanelShowResult struct {
 	Panel   string `json:"panel"`
 	Visible bool   `json:"visible"`
 }
 
-// PanelRef names a panel: the params of panel_close.
+// The params of panel_close.
 type PanelRef struct {
 	Panel string `json:"panel"`
 }
 
-// PanelAttachParams are the params of panel_attach (§4.4). AfterPseq nil
-// means -1: replay every kept stroke.
+// §4.4. AfterPseq nil means -1: replay every kept stroke.
 type PanelAttachParams struct {
 	Panel     string `json:"panel"`
 	AfterPseq *int64 `json:"after_pseq,omitempty"`
 }
 
-// PanelAttachResult is the result of panel_attach. Values holds the
-// current value of every toggle (bool) and slider (number) by widget id.
+// Values holds the current value of every toggle (bool) and slider
+// (number) by widget id.
 type PanelAttachResult struct {
 	Panel    string         `json:"panel"`
 	Title    string         `json:"title"`
@@ -139,19 +134,17 @@ type PanelAttachResult struct {
 	Values   map[string]any `json:"values"`
 }
 
-// WidgetUpdate is one item of panel_update: properties to set on a widget.
 type WidgetUpdate struct {
 	Widget string         `json:"widget"`
 	Set    map[string]any `json:"set"`
 }
 
-// PanelUpdateParams are the params of panel_update (§4.5).
+// §4.5.
 type PanelUpdateParams struct {
 	Panel   string         `json:"panel"`
 	Updates []WidgetUpdate `json:"updates"`
 }
 
-// PanelInfo is one entry of panel_list.
 type PanelInfo struct {
 	Panel    string `json:"panel"`
 	Title    string `json:"title"`
@@ -159,12 +152,10 @@ type PanelInfo struct {
 	Visible  bool   `json:"visible"`
 }
 
-// PanelListResult is the result of panel_list.
 type PanelListResult struct {
 	Panels []PanelInfo `json:"panels"`
 }
 
-// CanvasClearParams are the params of canvas_clear.
 type CanvasClearParams struct {
 	Panel  string `json:"panel"`
 	Widget string `json:"widget"`
@@ -174,7 +165,7 @@ type CanvasClearParams struct {
 // and canvas_clear.
 type EmptyResult struct{}
 
-// Widget types (§5).
+// §5.
 const (
 	WidgetColumn    = "column"
 	WidgetRow       = "row"
@@ -188,7 +179,7 @@ const (
 	WidgetCanvas    = "canvas"
 )
 
-// Tones (§5).
+// §5.
 const (
 	ToneDefault = "default"
 	ToneAccent  = "accent"
@@ -197,8 +188,8 @@ const (
 	ToneBad     = "bad"
 )
 
-// Widget is one node of a panel layout (§5), for building layouts in Go.
-// Which members apply depends on Type; unset members are omitted, so the
+// Widget is one node of a panel layout (§5). Which members apply depends
+// on Type; unset members are omitted, so the
 // phone's defaults apply. Value is a bool (toggle), a number (slider,
 // progress) or a string (text_input).
 type Widget struct {
@@ -251,7 +242,7 @@ const (
 	ReasonRevoked = "revoked"
 )
 
-// Stroke phases and tools (§7.1).
+// §7.1.
 const (
 	PhaseStart  = "start"
 	PhaseMove   = "move"
@@ -265,8 +256,7 @@ const (
 	ToolUnknown = "unknown"
 )
 
-// NotificationEvent is the value of a notification event (§3.2). Action is
-// set for type "action".
+// §3.2. Action is set for type "action".
 type NotificationEvent struct {
 	Notification string `json:"notification"`
 	Action       string `json:"action,omitempty"`
@@ -276,7 +266,6 @@ type NotificationEvent struct {
 // pressure in [0, 1], and t, milliseconds since the stroke's first point.
 type Point [4]float64
 
-// X, Y, Pressure and T name the components.
 func (p Point) X() float64        { return p[0] }
 func (p Point) Y() float64        { return p[1] }
 func (p Point) Pressure() float64 { return p[2] }
@@ -312,31 +301,26 @@ type PanelEvent struct {
 	Points   []Point         `json:"points,omitempty"`
 }
 
-// BoolValue decodes Value of a toggle change.
 func (e PanelEvent) BoolValue() (bool, error) {
 	var b bool
 	return b, json.Unmarshal(e.Value, &b)
 }
 
-// NumberValue decodes Value of a slider change.
 func (e PanelEvent) NumberValue() (float64, error) {
 	var f float64
 	return f, json.Unmarshal(e.Value, &f)
 }
 
-// TextValue decodes Value of a submit.
 func (e PanelEvent) TextValue() (string, error) {
 	var s string
 	return s, json.Unmarshal(e.Value, &s)
 }
 
-// Notification decodes a notification event's value.
 func (r Reading) Notification() (NotificationEvent, error) {
 	var n NotificationEvent
 	return n, r.decode(&n)
 }
 
-// Panel decodes a panel event's value.
 func (r Reading) Panel() (PanelEvent, error) {
 	var p PanelEvent
 	return p, r.decode(&p)

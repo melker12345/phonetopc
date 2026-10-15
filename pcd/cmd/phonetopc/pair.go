@@ -21,8 +21,7 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/store"
 )
 
-// defaultPairPort is the pairing listener's default port (SECURITY.md
-// §4.1); defaultPairListen is replaced in tests.
+// defaultPairListen is replaced in tests.
 const defaultPairPort = pairing.DefaultPort
 
 var defaultPairListen = fmt.Sprintf(":%d", defaultPairPort)
@@ -90,7 +89,6 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 		hosts = []string{"127.0.0.1"}
 	}
 
-	// showQR prints the QR code and the URI for secret, and writes the PNG.
 	showQR := func(secret string) error {
 		uri := pairing.URI{ID: pc.ID, Name: pc.Name, Hosts: hosts, Port: port, Pin: pc.Pin, Secret: secret}.String()
 		if err := writeQR(c.stdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
@@ -311,9 +309,7 @@ type termPrompter struct {
 	// fresh drops lines typed while no question is waiting (stdin is a
 	// terminal): a stray Enter pressed while waiting for the phone must not
 	// answer a later question. Piped answers are kept for the next one.
-	fresh bool
-	// replaces, if set, returns the paired device a pairing would replace
-	// with a different key.
+	fresh    bool
 	replaces func(pairing.PhoneInfo) (store.Device, bool)
 
 	once sync.Once
@@ -329,7 +325,6 @@ func newTermPrompter(in io.Reader, out io.Writer, yes, fresh bool) *termPrompter
 	return p
 }
 
-// isTerminal reports whether r is a terminal.
 func isTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
@@ -363,8 +358,7 @@ func (p *termPrompter) lines() <-chan string {
 	return p.ch
 }
 
-// ask prints question and returns the answer; def is the answer for an
-// empty line. At EOF the answer is no.
+// def is the answer for an empty line. At EOF the answer is no.
 func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -391,8 +385,6 @@ func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool
 	}
 }
 
-// replacing warns if phone would replace a paired device with a different
-// key, and reports whether it does.
 func (p *termPrompter) replacing(phone pairing.PhoneInfo) bool {
 	if p.replaces == nil {
 		return false

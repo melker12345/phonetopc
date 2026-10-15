@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Limiter counts failures per host within a sliding window. The zero value
-// is not usable; create one with New. It is safe for concurrent use.
+// The zero Limiter is not usable; create one with New. It is safe for
+// concurrent use.
 type Limiter struct {
 	max    int
 	window time.Duration
@@ -46,7 +46,6 @@ func (l *Limiter) Blocked(host string) bool {
 	return len(f) >= l.max
 }
 
-// Fail records a failure by host now.
 func (l *Limiter) Fail(host string) {
 	if l.max < 0 {
 		return

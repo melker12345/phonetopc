@@ -33,10 +33,9 @@ func (s *Server) User(pcID string) *User {
 // CanvasSize is the size in dp the mock reports for every canvas (§7.1).
 var CanvasSize = []float64{360, 480}
 
-// pcState returns the PC's state, or nil. h.mu must be held.
+// pcState is nil if the PC has no state yet. h.mu must be held.
 func (u *User) pcState() *pcState { return u.srv.panels.pcs[u.key] }
 
-// Panels lists the PC's panels.
 func (u *User) Panels() []protocol.PanelInfo {
 	h := u.srv.panels
 	h.mu.Lock()
@@ -50,7 +49,7 @@ func (u *User) Panels() []protocol.PanelInfo {
 	return out
 }
 
-// Notifications lists the PC's notifications, oldest first, with their ids.
+// Notifications are oldest first, with their ids.
 func (u *User) Notifications() []protocol.NotifyParams {
 	h := u.srv.panels
 	h.mu.Lock()
@@ -66,7 +65,7 @@ func (u *User) Notifications() []protocol.NotifyParams {
 	return out
 }
 
-// panel finds a panel. h.mu must be held.
+// h.mu must be held.
 func (u *User) panel(id string) (*panel, error) {
 	if pc := u.pcState(); pc != nil {
 		if _, p := pc.find(id); p != nil {
@@ -135,7 +134,6 @@ func (u *User) widget(panel, widget, typ string) (*panel, *protocol.Node, error)
 	return p, n, nil
 }
 
-// Press presses a button.
 func (u *User) Press(panel, button string) error {
 	h := u.srv.panels
 	h.mu.Lock()
@@ -148,7 +146,6 @@ func (u *User) Press(panel, button string) error {
 	return nil
 }
 
-// Toggle flips a toggle and returns its new value.
 func (u *User) Toggle(panel, toggle string) (bool, error) {
 	h := u.srv.panels
 	h.mu.Lock()
@@ -183,7 +180,6 @@ func (u *User) Slide(panel, slider string, value float64, final bool) (float64, 
 	return value, nil
 }
 
-// Submit types text into a text field and sends it.
 func (u *User) Submit(panel, field, text string) error {
 	h := u.srv.panels
 	h.mu.Lock()
@@ -207,7 +203,7 @@ func (u *User) Submit(panel, field, text string) error {
 
 // Stroke is a stroke for User.Draw.
 type Stroke struct {
-	// Tool is the stroke's tool; default finger.
+	// Tool defaults to finger.
 	Tool string
 	// Points are [x, y, pressure, t]; x and y are clamped to [0, 1].
 	Points []protocol.Point

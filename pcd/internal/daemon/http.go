@@ -152,7 +152,6 @@ func (e badRequest) Error() string { return e.msg }
 
 func badRequestf(format string, args ...any) error { return badRequest{fmt.Sprintf(format, args...)} }
 
-// statusOf maps the phone's error codes to HTTP statuses.
 var statusOf = map[protocol.ErrorCode]int{
 	protocol.CodeInvalidParams:     http.StatusBadRequest,
 	protocol.CodeMethodNotFound:    http.StatusNotImplemented, // a phone app older than this daemon
@@ -172,7 +171,6 @@ var hintOf = map[protocol.ErrorCode]string{
 	protocol.CodeUnknownSource: "; GET /v1/sensors lists the sources",
 }
 
-// fail writes the response for err.
 func (d *Daemon) fail(w http.ResponseWriter, err error) {
 	var (
 		br  badRequest
@@ -209,8 +207,7 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 	}
 }
 
-// decode reads a JSON request body into v, refusing unknown members so a
-// typo doesn't go unnoticed.
+// Unknown members are refused so a typo doesn't go unnoticed.
 func decode(r *http.Request, v any) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
 	if err != nil {
@@ -230,7 +227,6 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-// call runs f with the connected phone.
 func (d *Daemon) call(w http.ResponseWriter, f func(cl *client.Client) (any, error)) {
 	cl, err := d.phone()
 	if err != nil {
@@ -407,7 +403,6 @@ func (d *Daemon) handleCanvasClear(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// streamQuery parses the query of GET /v1/events.
 func streamQuery(r *http.Request) ([]string, StreamOptions, error) {
 	q := r.URL.Query()
 	var sources []string

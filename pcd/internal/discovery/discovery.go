@@ -30,7 +30,6 @@ const (
 	domain       = "local."
 )
 
-// Entry is one resolved service instance.
 type Entry struct {
 	Instance string
 	Host     string // the advertiser's host name
@@ -39,7 +38,6 @@ type Entry struct {
 	TXT      map[string]string
 }
 
-// HostPorts returns "host:port" for every address of e.
 func (e Entry) HostPorts() []string {
 	out := make([]string, len(e.Addrs))
 	for i, a := range e.Addrs {
@@ -48,7 +46,6 @@ func (e Entry) HostPorts() []string {
 	return out
 }
 
-// Advertiser is a running mDNS advertisement.
 type Advertiser struct{ srv *zeroconf.Server }
 
 // Advertise announces a service instance on all multicast interfaces until
@@ -70,7 +67,6 @@ func Advertise(instance, service string, port int, txt map[string]string) (*Adve
 	return &Advertiser{srv: srv}, nil
 }
 
-// Stop withdraws the advertisement.
 func (a *Advertiser) Stop() {
 	if a != nil && a.srv != nil {
 		a.srv.Shutdown()

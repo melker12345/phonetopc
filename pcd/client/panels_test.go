@@ -127,7 +127,7 @@ func TestNotify(t *testing.T) {
 	if err := c.CancelNotification(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Notify(ctx, "bad‮", client.NotifyOptions{}); err == nil {
+	if _, err := c.Notify(ctx, "bad\u202E", client.NotifyOptions{}); err == nil {
 		t.Error("bidi control accepted")
 	}
 

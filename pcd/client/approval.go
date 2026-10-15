@@ -37,7 +37,8 @@ const (
 	MaxApprovalTimeout     = protocol.MaxApprovalTimeout
 )
 
-// ApprovalResult is the outcome of RequestApproval.
+// ApprovalResult is the outcome of RequestApproval. A refusal is a result,
+// not an error; check Approved, not the fields.
 type ApprovalResult struct {
 	approved bool
 	// Why says why the approval was not given; empty when approved.

@@ -36,7 +36,6 @@ type panelHub struct {
 	recent      []*panel // panels by the time they were last shown, newest last
 }
 
-// pcState is one PC's panels and notifications.
 type pcState struct {
 	key, name string
 	panels    []*panel // creation order
@@ -51,7 +50,7 @@ type notif struct {
 	posted time.Time
 }
 
-// panel is one panel. Its fields are guarded by panelHub.mu.
+// panel's fields are guarded by panelHub.mu.
 type panel struct {
 	pc        *pcState
 	id, title string
@@ -83,7 +82,7 @@ func newPanelHub(srv *Server) *panelHub {
 	}
 }
 
-// pcKey returns the key and name of the PC a session belongs to.
+// pcKey falls back to the dev-mode PC for unauthenticated sessions.
 func (s *session) pcKey() (key, name string) {
 	pc, _, ok := s.auth()
 	if !ok {
@@ -92,7 +91,7 @@ func (s *session) pcKey() (key, name string) {
 	return "pc:" + pc.ID, pc.Name
 }
 
-// pc returns the state of the PC key, creating it. h.mu must be held.
+// pc creates the PC's state on first use. h.mu must be held.
 func (h *panelHub) pc(key, name string) *pcState {
 	pc := h.pcs[key]
 	if pc == nil {
@@ -134,7 +133,6 @@ func invalid(format string, args ...any) *protocol.Error {
 
 // -- events
 
-// eventReading builds a reading of an event source with type typ.
 func (s *Server) eventReading(source, typ string, value any) protocol.Reading {
 	r, err := s.reading(source, value, time.Now())
 	if err != nil {
@@ -144,7 +142,6 @@ func (s *Server) eventReading(source, typ string, value any) protocol.Reading {
 	return r
 }
 
-// deliver queues r on every subscription of the session to r's source.
 func (s *session) deliver(r protocol.Reading) {
 	s.mu.Lock()
 	subs := slices.Collect(maps.Values(s.subs))
@@ -194,7 +191,7 @@ func (h *panelHub) live(p *panel) bool {
 	return q == p
 }
 
-// remove drops p. h.mu must be held.
+// h.mu must be held.
 func (h *panelHub) remove(p *panel) {
 	if i, q := p.pc.find(p.id); q == p {
 		p.pc.panels = slices.Delete(p.pc.panels, i, i+1)

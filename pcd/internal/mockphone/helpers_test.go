@@ -119,7 +119,6 @@ func (r *rawConn) response() *protocol.Message {
 	}
 }
 
-// call sends a request with params and returns the response.
 func (r *rawConn) call(method string, params any) *protocol.Message {
 	r.t.Helper()
 	r.nextID++

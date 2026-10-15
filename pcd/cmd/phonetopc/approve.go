@@ -82,8 +82,7 @@ func (c *cli) approve(ctx context.Context, args []string) error {
 	return nil
 }
 
-// approvalKey shows the accepted and the current approval key of the
-// phone, and with --accept accepts a changed one (APPROVAL.md §3).
+// APPROVAL.md §3.
 func (c *cli) approvalKey(ctx context.Context, args []string) error {
 	fs := c.flagSet("approval-key")
 	accept := fs.Bool("accept", false, "")
@@ -149,7 +148,6 @@ func (c *cli) approvalKey(ctx context.Context, args []string) error {
 	return nil
 }
 
-// approvalRow describes the approval capability for info.
 func approvalRow(cl *client.Client) string {
 	h := cl.Server()
 	if h.PC == nil {

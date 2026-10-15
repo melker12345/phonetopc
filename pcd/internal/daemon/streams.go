@@ -88,7 +88,6 @@ type localEvent struct {
 	protocol.Reading
 }
 
-// daemonEvent is an event of SourceDaemon.
 type daemonEvent struct {
 	Source string `json:"source"`
 	Type   string `json:"type"`
@@ -189,7 +188,6 @@ func unsubscribe(sub *client.Subscription) {
 	_ = sub.Unsubscribe(ctx)
 }
 
-// startFeed subscribes f on cl and starts delivering its events.
 func (d *Daemon) startFeed(ctx context.Context, cl *client.Client, f *feed) error {
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -212,7 +210,6 @@ func (d *Daemon) startFeed(ctx context.Context, cl *client.Client, f *feed) erro
 	return nil
 }
 
-// pump delivers sub's events to f's streams until sub ends.
 func (d *Daemon) pump(f *feed, sub *client.Subscription) {
 	for ev := range sub.Events() {
 		if ev.Source == protocol.SourcePanel {
@@ -255,7 +252,6 @@ func (d *Daemon) failFeed(f *feed, err error) {
 	}
 }
 
-// broadcastStatus tells every stream whether the phone is connected.
 func (d *Daemon) broadcastStatus() {
 	d.mu.Lock()
 	defer d.mu.Unlock()

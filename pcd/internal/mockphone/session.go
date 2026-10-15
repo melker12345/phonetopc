@@ -73,7 +73,7 @@ func newSession(srv *Server, conn *websocket.Conn, remote string) *session {
 	}
 }
 
-// auth returns the PC this session authenticated as.
+// auth reports false until a secure hello succeeded (always, in dev mode).
 func (s *session) auth() (protocol.PCInfo, string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -462,7 +462,6 @@ func (s *session) lookup(source, typ string) (protocol.SensorInfo, *protocol.Err
 	return info, nil
 }
 
-// requireSource checks that the required source param is present.
 func requireSource(source string) *protocol.Error {
 	if source == "" {
 		return protocol.NewError(protocol.CodeInvalidParams, "params.source is required")

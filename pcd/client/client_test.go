@@ -82,7 +82,6 @@ func helloResult() protocol.HelloResult {
 	}
 }
 
-// answerHello reads the hello request and answers it.
 func (f *fakeConn) answerHello(ctx context.Context) bool {
 	m, err := f.read(ctx)
 	if err != nil {

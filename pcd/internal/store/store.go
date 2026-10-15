@@ -56,8 +56,7 @@ func DefaultDir(getenv func(string) string) (string, error) {
 	return filepath.Join(home, ".config", "phonetopc"), nil
 }
 
-// Store is a credential store directory. Its methods are safe for concurrent
-// use.
+// Its methods are safe for concurrent use.
 type Store struct {
 	dir string
 	mu  sync.Mutex // serialises updates within this process
@@ -67,10 +66,8 @@ type Store struct {
 // written.
 func Open(dir string) *Store { return &Store{dir: dir} }
 
-// Dir returns the store's directory.
 func (s *Store) Dir() string { return s.dir }
 
-// Path returns the path of a file in the store.
 func (s *Store) Path(name string) string { return filepath.Join(s.dir, name) }
 
 // ensureDir creates the directory with mode 0700, and tightens the mode of an
@@ -139,7 +136,6 @@ func (d Device) MarshalJSON() ([]byte, error) {
 	return appendMembers(b, d.Extra)
 }
 
-// unknownMembers returns the members of the JSON object b not in known.
 func unknownMembers(b []byte, known []string) (map[string]json.RawMessage, error) {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(b, &all); err != nil {
@@ -154,7 +150,7 @@ func unknownMembers(b []byte, known []string) (map[string]json.RawMessage, error
 	return all, nil
 }
 
-// appendMembers adds extra members (sorted by name) to the JSON object b.
+// extra is appended sorted by name.
 func appendMembers(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
 	if len(extra) == 0 {
 		return b, nil
@@ -206,7 +202,7 @@ func (d devicesDoc) MarshalJSON() ([]byte, error) {
 // whole seconds.
 func Now(t time.Time) string { return t.UTC().Truncate(time.Second).Format(time.RFC3339) }
 
-// Devices returns the paired devices. A missing file means none.
+// A missing file means none.
 func (s *Store) Devices() ([]Device, error) {
 	doc, err := s.readDevices()
 	return doc.Devices, err
@@ -436,7 +432,6 @@ func find(devs []Device, sel string) (Device, error) {
 	return Device{}, &AmbiguousError{Selector: sel, Devices: byName}
 }
 
-// PC is the PC's own identity.
 type PC struct {
 	ID   string
 	Name string

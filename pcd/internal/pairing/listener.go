@@ -28,7 +28,6 @@ type Prompter interface {
 	ConfirmSAS(ctx context.Context, phone PhoneInfo, code string) (bool, error)
 }
 
-// Way is how a pairing was made.
 type Way string
 
 const (
@@ -36,7 +35,6 @@ const (
 	WaySAS Way = "sas"
 )
 
-// Paired is the outcome of a successful pairing, as the PC stores it.
 type Paired struct {
 	Phone PhoneInfo
 	Token string
@@ -46,7 +44,6 @@ type Paired struct {
 	RemoteHost string
 }
 
-// Options configures a Listener.
 type Options struct {
 	PC     protocol.PCInfo
 	Cert   tls.Certificate // the PC's long-term certificate
@@ -91,18 +88,17 @@ type Options struct {
 	// to answer). Only requests that advance the pairing restart it.
 	IdleTimeout time.Duration
 
-	// Logf, if set, receives progress messages for the user.
+	// Logf, if set, receives progress messages meant for the user.
 	Logf func(format string, args ...any)
 }
 
-// Errors returned by Serve.
 var (
 	ErrExpired  = errors.New("pairing expired: no phone paired within the time limit")
 	ErrSASLimit = errors.New("pairing stopped: too many code comparisons failed")
 )
 
-// Listener is a PC pairing listener. It serves one pairing at a time and
-// stops after the first successful one.
+// Listener serves one pairing at a time and stops after the first
+// successful one.
 type Listener struct {
 	opts Options
 	pin  string
@@ -115,7 +111,7 @@ type Listener struct {
 	failures *hostlimit.Limiter
 
 	mu       sync.Mutex
-	secret   string // current QR secret
+	secret   string
 	busy     bool
 	sasRuns  int           // failed SAS runs that revealed Npc
 	sasLimit chan struct{} // closed when sasRuns reaches MaxSASRuns
@@ -123,7 +119,6 @@ type Listener struct {
 	wg       sync.WaitGroup
 }
 
-// New creates a listener. Call Serve to run it.
 func New(opts Options) (*Listener, error) {
 	if opts.Prompt == nil || opts.Save == nil {
 		return nil, errors.New("pairing: Prompt and Save are required")
@@ -159,14 +154,12 @@ func New(opts Options) (*Listener, error) {
 	}, nil
 }
 
-// Secret returns the current QR secret.
 func (l *Listener) Secret() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.secret
 }
 
-// rotateSecret replaces the QR secret, unless the listener is stopping.
 func (l *Listener) rotateSecret() {
 	if l.ctx.Err() != nil {
 		return
@@ -186,7 +179,6 @@ func (l *Listener) rotateSecret() {
 	}
 }
 
-// Pin returns the PC's pin.
 func (l *Listener) Pin() string { return l.pin }
 
 func (l *Listener) logf(format string, args ...any) {
@@ -195,9 +187,9 @@ func (l *Listener) logf(format string, args ...any) {
 	}
 }
 
-// Serve runs the pairing listener on ln (wrapping it in TLS) until a phone
-// has paired, the listener expires (ErrExpired), or ctx is done (ctx.Err()).
-// It closes ln.
+// Serve wraps ln in TLS and runs until a phone has paired, the listener
+// expires (ErrExpired), too many SAS runs fail (ErrSASLimit), or ctx is
+// done. It closes ln.
 func (l *Listener) Serve(ctx context.Context, ln net.Listener) (Paired, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -248,8 +240,8 @@ func (l *Listener) Serve(ctx context.Context, ln net.Listener) (Paired, error) {
 	return res, err
 }
 
-// sasFailed counts a SAS run that revealed Npc without pairing, and stops
-// the listener after MaxSASRuns of them (§4.3).
+// sasFailed is called for a SAS run that revealed Npc without pairing; it
+// stops the listener after MaxSASRuns of them (§4.3).
 func (l *Listener) sasFailed() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -259,7 +251,6 @@ func (l *Listener) sasFailed() {
 	}
 }
 
-// sasExhausted reports whether no further Npc may be revealed.
 func (l *Listener) sasExhausted() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

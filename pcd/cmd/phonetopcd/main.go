@@ -35,7 +35,6 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
 
-// DefaultListen is the loopback address of the local API.
 const DefaultListen = "127.0.0.1:8767"
 
 const usage = `Usage: phonetopcd [flags]
@@ -205,8 +204,7 @@ func runtimeDir(getenv func(string) string) string {
 	return dir
 }
 
-// dialer returns how to connect to the phone, after checking that there is
-// one to connect to.
+// dialer fails early if there is no paired phone to connect to.
 func (c config) dialer(getenv func(string) string) (daemon.Dialer, error) {
 	info := client.WithClientInfo("phonetopcd", version.Version)
 	if c.dev {
@@ -260,9 +258,7 @@ func listenUnix(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	old := syscall.Umask(0o177)
-	ln, err := net.Listen("unix", path)
-	syscall.Umask(old)
+	ln, err := listenUnixPrivate(path)
 	if err != nil {
 		return nil, err
 	}

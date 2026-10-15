@@ -17,19 +17,16 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
-// Protocol is the pairing protocol name.
 const Protocol = "phonetopc-pair/1"
 
-// SupportedProtocols lists the pairing protocols this implementation speaks.
 var SupportedProtocols = []string{Protocol}
 
-// DefaultPort is the default port of the pairing listener (§4.1).
+// §4.1.
 const DefaultPort = 8766
 
-// Path is the HTTP path of the pairing listener.
 const Path = "/v1/pair"
 
-// Method names (§4.2-§4.4).
+// §4.2-§4.4.
 const (
 	MethodQR         = "pair_qr"
 	MethodSASBegin   = "pair_sas_begin"
@@ -59,11 +56,10 @@ const (
 // sneak into the store, the terminal or `--device`.
 var idRE = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
 
-// ValidID reports whether id is a well-formed phone id.
 func ValidID(id string) bool { return idRE.MatchString(id) }
 
-// validate checks a phone's self-description and fills defaults. The error
-// becomes the message of an invalid_params error.
+// validate also fills defaults. The error becomes the message of an
+// invalid_params error.
 func (p *PhoneInfo) validate() error {
 	switch {
 	case !ValidID(p.ID):
@@ -94,46 +90,41 @@ func (p *PhoneInfo) validate() error {
 	return nil
 }
 
-// QRParams are the params of pair_qr.
 type QRParams struct {
 	Protocol string    `json:"protocol"`
 	Secret   string    `json:"secret"`
 	Phone    PhoneInfo `json:"phone"`
 }
 
-// PCResult is the result of pair_qr and pair_finish: the PC's identity.
+// The result of pair_qr and pair_finish.
 type PCResult struct {
 	PC protocol.PCInfo `json:"pc"`
 }
 
-// SASBeginParams are the params of pair_sas_begin.
 type SASBeginParams struct {
 	Protocol string    `json:"protocol"`
 	Phone    PhoneInfo `json:"phone"`
 }
 
-// SASBeginResult is the result of pair_sas_begin.
 type SASBeginResult struct {
 	PC         protocol.PCInfo `json:"pc"`
 	Commitment string          `json:"commitment"`
 }
 
-// NonceMessage is the params and the result of pair_sas_nonce.
+// Both the params and the result of pair_sas_nonce.
 type NonceMessage struct {
 	Nonce string `json:"nonce"`
 }
 
-// SASConfirmParams are the params of pair_sas_confirm.
 type SASConfirmParams struct {
 	Match *bool `json:"match"`
 }
 
-// FinishParams are the params of pair_finish.
 type FinishParams struct {
 	Token string `json:"token"`
 }
 
-// URI is the content of the pairing QR code (§4.2).
+// The content of the pairing QR code (§4.2).
 type URI struct {
 	ID     string   // PC id
 	Name   string   // PC name
@@ -163,7 +154,6 @@ func (u URI) String() string {
 	return b.String()
 }
 
-// ParseURI parses and checks a pairing URI.
 func ParseURI(s string) (URI, error) {
 	pu, err := url.Parse(strings.TrimSpace(s))
 	if err != nil {

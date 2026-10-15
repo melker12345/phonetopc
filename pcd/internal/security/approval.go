@@ -66,8 +66,6 @@ func EncodeApprovalKey(pub *ecdsa.PublicKey) (key, pin string, err error) {
 	return B64(der), PinSPKI(der), nil
 }
 
-// VerifyApproval checks that signature (base64url DER ECDSA) is key's
-// SHA256withECDSA signature over msg.
 func VerifyApproval(key *ecdsa.PublicKey, signature string, msg []byte) error {
 	sig, err := DecodeB64(signature)
 	if err != nil {

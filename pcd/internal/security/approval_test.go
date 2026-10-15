@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// ApprovalVector is one entry of vectors/approval.json.
+// approvalVector is one entry of vectors/approval.json.
 type approvalVector struct {
 	Name      string `json:"name"`
 	PhoneID   string `json:"phone_id"`

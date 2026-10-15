@@ -58,7 +58,6 @@ func newWorld(srv *Server) *world {
 	return w
 }
 
-// run drives the on_change sources until ctx is done.
 func (w *world) run(ctx context.Context, rng *rand.Rand) {
 	o := &w.srv.opts
 	jitter := func(d time.Duration) time.Duration {
@@ -228,7 +227,6 @@ func (w *world) publish(source string, value any, now time.Time) {
 	}
 }
 
-// get returns the latest reading of source.
 func (w *world) get(source string) (protocol.Reading, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

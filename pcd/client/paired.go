@@ -67,7 +67,9 @@ func openStore(o options) (*store.Store, error) {
 	return store.Open(dir), nil
 }
 
-// PairedDevices lists the paired phones of the credential store.
+// PairedDevices lists the phones in the credential store without contacting
+// them; WithConfigDir selects the store. Nothing paired yet is an empty
+// list, not an error.
 func PairedDevices(opts ...Option) ([]Device, error) {
 	st, err := openStore(pairedOptions(opts))
 	if err != nil {

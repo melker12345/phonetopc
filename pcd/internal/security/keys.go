@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// GenerateKey returns a fresh ECDSA P-256 key (§2).
 func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 }
@@ -95,7 +94,6 @@ func SelfSigned(key *ecdsa.PrivateKey, commonName string) (tls.Certificate, erro
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
 }
 
-// PublicKeyPin returns the pin of a public key.
 func PublicKeyPin(pub crypto.PublicKey) (string, error) {
 	spki, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
@@ -104,7 +102,6 @@ func PublicKeyPin(pub crypto.PublicKey) (string, error) {
 	return PinSPKI(spki), nil
 }
 
-// CertPin returns the pin of a tls.Certificate's leaf.
 func CertPin(c tls.Certificate) (string, error) {
 	if c.Leaf != nil {
 		return Pin(c.Leaf), nil
