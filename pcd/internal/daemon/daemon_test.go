@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -51,14 +53,25 @@ type phone struct {
 	hs  *httptest.Server
 }
 
+// freeAddr returns a free loopback address below the ephemeral port range,
+// so that no outgoing connection or ":0" listener takes it before the
+// phone listens on it (again).
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	for range 100 {
+		addr := "127.0.0.1:" + strconv.Itoa(20000+rand.IntN(12000))
+		if ln, err := net.Listen("tcp", addr); err == nil {
+			ln.Close()
+			return addr
+		}
+	}
+	t.Fatal("no free port")
+	return ""
+}
+
 func newPhone(t *testing.T, opts mockphone.Options) *phone {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := &phone{t: t, addr: ln.Addr().String(), opts: opts}
-	ln.Close()
+	p := &phone{t: t, addr: freeAddr(t), opts: opts}
 	t.Cleanup(p.stop)
 	return p
 }
@@ -674,8 +687,15 @@ func TestSlowStreamOnChangeEnds(t *testing.T) {
 	})
 }
 
-// Approvals need a secure phone and a pairing.
-func TestApprovals(t *testing.T) {
+// securePhone is a secure mock with this PC paired to it.
+type securePhone struct {
+	st   *mockphone.State
+	srv  *mockphone.Server
+	dial daemon.Dialer
+}
+
+func newSecurePhone(t *testing.T, tweak func(*mockphone.Options)) *securePhone {
+	t.Helper()
 	st, err := mockphone.OpenState(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -684,18 +704,12 @@ func TestApprovals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var (
-		mu  sync.Mutex
-		why protocol.Why // "": approve
-	)
 	opts := quietOptions()
 	opts.Device = protocol.DeviceInfo{ID: id.ID, Name: id.Name}
 	opts.Authenticate = st.Authenticate
 	opts.ApprovalKey = func() *ecdsa.PrivateKey { k, _ := st.ApprovalKey(); return k }
-	opts.Approve = func(ctx context.Context, req mockphone.ApprovalRequest) protocol.Why {
-		mu.Lock()
-		defer mu.Unlock()
-		return why
+	if tweak != nil {
+		tweak(&opts)
 	}
 	srv := mockphone.New(opts)
 	hs := httptest.NewUnstartedServer(srv.Handler())
@@ -711,9 +725,25 @@ func TestApprovals(t *testing.T) {
 	if err := store.Open(cfg).PutDevice(store.Device{ID: id.ID, Name: "phone", Pin: id.Pin, Token: tok, PairedAt: store.Now(time.Now())}); err != nil {
 		t.Fatal(err)
 	}
-	dr := &droppable{dial: func(ctx context.Context) (*client.Client, error) {
+	return &securePhone{st: st, srv: srv, dial: func(ctx context.Context) (*client.Client, error) {
 		return client.DialPaired(ctx, "", client.WithConfigDir(cfg), client.WithAddress(addr))
 	}}
+}
+
+func TestApprovals(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		why protocol.Why // "": approve
+	)
+	sp := newSecurePhone(t, func(o *mockphone.Options) {
+		o.Approve = func(ctx context.Context, req mockphone.ApprovalRequest) protocol.Why {
+			mu.Lock()
+			defer mu.Unlock()
+			return why
+		}
+	})
+	st := sp.st
+	dr := &droppable{dial: sp.dial}
 	d, url := startDaemon(t, dr.Dial)
 	if err := d.WaitConnected(testCtx(t)); err != nil {
 		t.Fatal(err)
