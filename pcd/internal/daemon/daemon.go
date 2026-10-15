@@ -204,7 +204,7 @@ func (d *Daemon) phone() (*client.Client, error) {
 	if d.cl != nil {
 		return d.cl, nil
 	}
-	return nil, &unavailableError{reason: d.unavailableReason()}
+	return nil, &unavailableError{reason: d.unavailableReason(), err: d.lastErr}
 }
 
 // d.mu must be held.
@@ -215,7 +215,10 @@ func (d *Daemon) unavailableReason() string {
 	return d.opts.Explain(d.lastErr)
 }
 
-type unavailableError struct{ reason string }
+type unavailableError struct {
+	reason string
+	err    error // why the last connection attempt failed, if it did
+}
 
 func (e *unavailableError) Error() string { return "phone not connected: " + e.reason }
 

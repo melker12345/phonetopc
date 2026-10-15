@@ -181,6 +181,8 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &br):
 		writeError(w, http.StatusBadRequest, "invalid_request", br.msg)
+	case errors.As(err, &ue) && client.IsUnauthorized(ue.err):
+		writeRPCError(w, http.StatusServiceUnavailable, "unauthorized", ue.Error(), protocol.CodeUnauthorized)
 	case errors.As(err, &ue):
 		writeError(w, http.StatusServiceUnavailable, "phone_unavailable", ue.Error())
 	case errors.As(err, &pe):
