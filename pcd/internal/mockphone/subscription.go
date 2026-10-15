@@ -21,17 +21,17 @@ type subscription struct {
 	minDelta float64
 
 	mu      sync.Mutex
-	started bool // set by start: events before the subscribe response are not sent
+	started bool               // set by start, once the subscribe response is queued
+	pending []protocol.Reading // emitted before start, queued by start
 	closed  bool
 	seq     uint64
 	last    json.RawMessage // value of the last event actually queued
 	stopFn  func()
 }
 
-func (sub *subscription) start() {
-	sub.mu.Lock()
-	sub.started = true
-	sub.mu.Unlock()
+// begin starts producing events. Until start, emit keeps them back, so the
+// subscribe response precedes them and none is lost in between.
+func (sub *subscription) begin() {
 	switch sub.info.Source {
 	case protocol.SourcePanel, protocol.SourceNotification:
 		return // delivered by the panel hub (session.deliver), not the world
@@ -43,6 +43,18 @@ func (sub *subscription) start() {
 		return
 	}
 	sub.setStop(sub.sess.srv.world.listen(sub.info.Source, sub.emit))
+}
+
+func (sub *subscription) start() {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	sub.started = true
+	for _, r := range sub.pending {
+		if !sub.closed {
+			sub.queue(r)
+		}
+	}
+	sub.pending = nil
 }
 
 func (sub *subscription) setStop(f func()) {
@@ -85,9 +97,17 @@ func (sub *subscription) emit(r protocol.Reading) {
 	}
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	if sub.closed || !sub.started {
-		return
+	switch {
+	case sub.closed:
+	case !sub.started:
+		sub.pending = append(sub.pending, r)
+	default:
+		sub.queue(r)
 	}
+}
+
+// queue numbers and queues r. sub.mu must be held.
+func (sub *subscription) queue(r protocol.Reading) {
 	if sub.minDelta > 0 && sub.last != nil {
 		d, err := protocol.ValueDistance(sub.info.Shape, sub.last, r.Value)
 		if err == nil && d < sub.minDelta {

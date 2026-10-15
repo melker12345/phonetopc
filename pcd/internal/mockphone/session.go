@@ -510,8 +510,9 @@ func (s *session) subscribe(params json.RawMessage) (any, func(), *protocol.Erro
 	s.mu.Unlock()
 
 	res := protocol.SubscribeResult{Subscription: sub.id, Source: info.Source, Types: types, Mode: info.Mode, RateHz: sub.rate}
-	// Start producing only after the response is queued, so it precedes the
+	// Send events only after the response is queued, so it precedes the
 	// subscription's first event.
+	sub.begin()
 	return res, sub.start, nil
 }
 
