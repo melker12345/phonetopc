@@ -32,10 +32,8 @@ import javax.net.ssl.X509ExtendedKeyManager
  * TLS stack (Conscrypt) signs with it through Keystore, so the key never leaves it.
  */
 class TlsIdentity(val privateKey: PrivateKey, val certificate: X509Certificate) {
-    /** `sha256/…` over the certificate's SubjectPublicKeyInfo. */
     val pin: String = Pins.of(certificate)
 
-    /** A server-side TLS context with exactly this key. */
     fun serverContext(): SSLContext = SSLContext.getInstance("TLS").apply {
         init(arrayOf(SingleKeyManager(privateKey, certificate)), null, SecureRandom())
     }
@@ -139,7 +137,6 @@ class TlsFrontend(
 
     val boundPort: Int get() = requireNotNull(server) { "not started" }.localPort
 
-    /** The real client behind a loopback connection from this frontend, by its loopback source port. */
     override fun peerFor(loopbackPort: Int): Peer? = peers[loopbackPort]
 
     override fun authenticated(loopbackPort: Int) {

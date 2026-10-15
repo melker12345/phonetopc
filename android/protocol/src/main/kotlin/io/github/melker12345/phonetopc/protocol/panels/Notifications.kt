@@ -97,7 +97,7 @@ class NotificationService(
         this.deliver = deliver
     }
 
-    /** Posts a notification; returns its id. Throws -32030 or -32033. */
+    /** Throws -32030 or -32033. */
     fun notify(pc: PcRef, params: NotifyParams): String {
         if (!permissions.allowed(pc, Feature.NOTIFY)) notAllowed(Feature.NOTIFY)
         val removed = ArrayList<String>()

@@ -19,7 +19,6 @@ data class SubscriptionSnapshot(
     val rateHz: Double?,
 )
 
-/** What the UI shows about one connected client. */
 data class ClientSnapshot(
     val sessionId: Long,
     val remote: String,
@@ -91,7 +90,6 @@ class BridgeHub(
 
     private val _demand = MutableStateFlow<Map<String, Demand>>(emptyMap())
 
-    /** Sources currently running and at which rate. */
     val demand: StateFlow<Map<String, Demand>> = _demand.asStateFlow()
 
     private val _paused = MutableStateFlow(false)

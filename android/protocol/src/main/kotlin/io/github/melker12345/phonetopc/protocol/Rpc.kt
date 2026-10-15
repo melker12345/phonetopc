@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** Builders for outgoing JSON-RPC 2.0 frames. */
 object Rpc {
     fun result(id: JsonElement, result: JsonElement): String = buildJsonObject {
         put("jsonrpc", "2.0")

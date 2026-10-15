@@ -38,18 +38,14 @@ object ApprovalKey {
     /** How long [status] is reused; the check itself starts a Keystore operation. */
     private const val CACHE_MILLIS = 10_000L
 
-    /** Why approvals can't be offered right now. */
     enum class Problem {
         /** No strong (Class 3) biometric sensor. */
         NO_HARDWARE,
 
-        /** The sensor exists but no fingerprint is enrolled. */
         NONE_ENROLLED,
 
-        /** The sensor is busy or temporarily unavailable. */
         HW_UNAVAILABLE,
 
-        /** A security vulnerability was found in the sensor; Android needs an update. */
         SECURITY_UPDATE_REQUIRED,
 
         /** Anything else, including a key that couldn't be created. */
@@ -61,7 +57,6 @@ object ApprovalKey {
         data class Unavailable(val problem: Problem) : Status
     }
 
-    /** The key was invalidated (enrollment changed) and has been replaced by a new one. */
     class KeyReplacedException : Exception("the approval key was invalidated and replaced")
 
     @Volatile private var cached: Pair<Long, Status>? = null

@@ -45,7 +45,6 @@ sealed interface ApprovalOutcome {
 
     data class Refused(val why: ApprovalWhy) : ApprovalOutcome
 
-    /** The `request_approval` result. */
     fun toJson(): JsonObject = buildJsonObject {
         when (this@ApprovalOutcome) {
             is Approved -> {
@@ -106,10 +105,7 @@ object ApprovalMessage {
             .joinToString("\n")
             .toByteArray(Charsets.UTF_8)
 
-    /**
-     * ECDSA P-256 / SHA-256 over [message] with [key] (base64url DER SPKI); [signature] is
-     * base64url DER. Anything malformed is simply `false`.
-     */
+    /** [key] (SPKI) and [signature] are base64url DER; anything malformed is `false`. */
     fun verify(key: String, message: ByteArray, signature: String): Boolean {
         val sig = Base64Url.decode(signature) ?: return false
         return verify(Base64Url.decode(key) ?: return false, message, sig)

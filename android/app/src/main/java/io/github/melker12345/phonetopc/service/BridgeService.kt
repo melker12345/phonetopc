@@ -63,7 +63,6 @@ class BridgeService : Service() {
     private var wakeLockJob: Job? = null
     private var inForeground = false
 
-    /** The foreground service types we're running with. */
     private var foregroundTypes = 0
     private var lastAddress: String? = null
 
@@ -245,7 +244,6 @@ class BridgeService : Service() {
     /** Runs until the bridge is torn down: [startJob] is cancelled, and these with it. */
     private suspend fun observe(hub: BridgeHub, network: NetworkMonitor, devMode: Boolean) = coroutineScope {
         val graph = appGraph
-        // Status for the UI and the notification.
         launch {
             combine(hub.clients, hub.demand, hub.paused, network.addresses) { clients, demand, paused, addrs ->
                 controller.update {
@@ -258,7 +256,6 @@ class BridgeService : Service() {
                 addrs.firstOrNull()
             }.collect { address -> updateNotification(address) }
         }
-        // Re-announce mDNS when the network changes.
         launch {
             network.addresses.drop(1).collect { mdns?.refresh() }
         }
@@ -298,7 +295,7 @@ class BridgeService : Service() {
         }
     }
 
-    /** Stop serving and start again with the current settings, staying in the foreground. */
+    /** Stays in the foreground throughout. */
     private fun restart() {
         teardown()
         startBridge(auto = false)

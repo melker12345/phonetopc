@@ -32,7 +32,7 @@ object PhoneKey {
 
     @Volatile private var cached: TlsIdentity? = null
 
-    /** Loads or creates the key. Blocking (Keystore IPC, key generation); call off the main thread. */
+    /** Blocking (Keystore IPC, key generation); call off the main thread. */
     @Synchronized
     fun identity(): TlsIdentity {
         cached?.let { return it }
@@ -69,7 +69,6 @@ object PhoneKey {
         Log.i(TAG, "generated the TLS key")
     }
 
-    /** Whether the key lives in secure hardware (TEE or StrongBox), for the About screen. */
     fun isHardwareBacked(key: PrivateKey): Boolean = runCatching {
         val info = KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

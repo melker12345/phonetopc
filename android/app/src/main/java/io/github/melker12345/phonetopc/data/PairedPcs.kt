@@ -63,7 +63,6 @@ object PairedPcList {
     fun touch(list: List<PairedPc>, id: String, now: Long) =
         list.map { if (it.id == id) it.copy(lastConnected = now) else it }
 
-    /** Turns notifications or panels (PANELS.md §1) on or off for one PC. */
     fun setAllowed(list: List<PairedPc>, id: String, feature: Feature, allowed: Boolean) = list.map {
         if (it.id != id) it else when (feature) {
             Feature.NOTIFY -> it.copy(allowNotify = allowed)
@@ -139,7 +138,6 @@ class PairedPcRepository(context: Context, scope: CoroutineScope) {
         scope.launch { pcs.collect { _loaded.value = it } }
     }
 
-    /** The current list, waiting for the first load. */
     suspend fun current(): List<PairedPc> = _loaded.filterNotNull().first()
 
     /** For `hello`: never blocks; empty until loaded, which [current] lets callers wait for. */

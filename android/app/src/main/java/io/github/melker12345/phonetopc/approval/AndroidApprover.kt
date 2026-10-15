@@ -102,7 +102,7 @@ object ApprovalPrompts {
         pending.outcome.complete(outcome)
     }
 
-    /** Opens [ApprovalActivity] for [id]. Only allowed while the app is visible. */
+    /** Only allowed while the app is visible. */
     private fun openPrompt(context: Context, id: Long): Boolean = try {
         context.startActivity(ApprovalActivity.intent(context, id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         true

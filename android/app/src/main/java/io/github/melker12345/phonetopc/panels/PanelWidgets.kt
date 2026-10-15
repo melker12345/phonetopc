@@ -69,7 +69,6 @@ import io.github.melker12345.phonetopc.protocol.panels.Widget
 import io.github.melker12345.phonetopc.ui.formatNumber
 import kotlin.math.roundToInt
 
-/** What every widget needs besides itself. */
 private class PanelContext(val snapshot: PanelSnapshot, val panels: PanelService, val pcName: String) {
     val ref: PanelRef = snapshot.ref
 
@@ -77,7 +76,6 @@ private class PanelContext(val snapshot: PanelSnapshot, val panels: PanelService
     val attached: Boolean get() = snapshot.attached
 }
 
-/** The panel's layout, filling [modifier] (PANELS.md §5). */
 @Composable
 fun PanelContent(snapshot: PanelSnapshot, panels: PanelService, modifier: Modifier) {
     val ctx = PanelContext(snapshot, panels, snapshot.pc.displayName(LocalContext.current))
@@ -85,7 +83,6 @@ fun PanelContent(snapshot: PanelSnapshot, panels: PanelService, modifier: Modifi
     Box(modifier) { RenderWidget(ctx, plan, Modifier) }
 }
 
-/** Modifiers for a fill decision of [PanelLayout]. */
 private fun fill(width: Boolean, height: Boolean): Modifier = when {
     width && height -> Modifier.fillMaxSize()
     width -> Modifier.fillMaxWidth()
@@ -267,7 +264,6 @@ private fun textStyle(size: TextSize): TextStyle = when (size) {
     TextSize.DISPLAY -> MaterialTheme.typography.displayMedium
 }
 
-/** The theme's color for a tone; `null` for the default. */
 @Composable
 private fun toneColor(tone: Tone): Color? {
     val dark = isSystemInDarkTheme()

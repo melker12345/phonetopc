@@ -81,16 +81,13 @@ sealed interface PairingFailure {
     /** -32004: the PC speaks another pairing protocol version. */
     data object UnsupportedProtocol : PairingFailure
 
-    /** The PC's certificate isn't the one in the QR code. */
     data object PinMismatch : PairingFailure
 
     /** None of the PC's addresses could be reached. */
     data class Unreachable(val detail: String?) : PairingFailure
 
-    /** The connection dropped mid-way. */
     data class ConnectionLost(val detail: String?) : PairingFailure
 
-    /** The PC didn't answer in time. */
     data object TimedOut : PairingFailure
 
     /** Any other error code, or a malformed answer. */

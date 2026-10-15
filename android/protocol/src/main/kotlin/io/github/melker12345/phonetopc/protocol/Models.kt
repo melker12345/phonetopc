@@ -10,7 +10,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** JSON configuration shared by the protocol code: omit nulls, ignore unknown fields. */
 val ProtocolJson: Json = Json {
     ignoreUnknownKeys = true
     explicitNulls = false

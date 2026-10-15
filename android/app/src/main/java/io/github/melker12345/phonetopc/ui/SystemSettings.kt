@@ -22,7 +22,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
 
-/** Small wrappers around system settings the UI needs. */
 object SystemSettings {
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
         val pm = ContextCompat.getSystemService(context, PowerManager::class.java) ?: return true

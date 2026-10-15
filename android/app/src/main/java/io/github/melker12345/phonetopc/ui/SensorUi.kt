@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
 
-/** How a protocol source is presented in the UI. */
 data class SensorUi(
     val source: String,
     @param:StringRes val label: Int,

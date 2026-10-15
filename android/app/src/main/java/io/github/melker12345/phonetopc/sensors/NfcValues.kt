@@ -17,7 +17,6 @@ import java.nio.charset.StandardCharsets
  * everything is bounded.
  */
 object NfcValues {
-    /** One NDEF record as read from the tag. */
     class Record(val tnf: Int, val type: ByteArray, val payload: ByteArray)
 
     const val MAX_RECORDS = 8

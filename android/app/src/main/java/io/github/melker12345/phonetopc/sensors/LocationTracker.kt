@@ -24,7 +24,6 @@ class LocationTracker(context: Context) {
     private val appContext = context.applicationContext
     private val manager = ContextCompat.getSystemService(appContext, LocationManager::class.java)
 
-    /** The phone has some way to locate itself at all. */
     val present: Boolean = manager != null && manager.allProviders.any { it != LocationManager.PASSIVE_PROVIDER }
 
     fun fineGranted(): Boolean = granted(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -34,7 +33,6 @@ class LocationTracker(context: Context) {
 
     fun enabled(): Boolean = manager != null && LocationManagerCompat.isLocationEnabled(manager)
 
-    /** Whether `location` can be served now: present, permitted and switched on. */
     fun usable(): Boolean = present && permitted() && enabled()
 
     private fun granted(permission: String) =
@@ -81,7 +79,6 @@ class LocationTracker(context: Context) {
         manager?.let { LocationManagerCompat.removeUpdates(it, listener) }
     }
 
-    /** The newest last-known fix of any provider no older than [maxAgeMs], or `null`. */
     @SuppressLint("MissingPermission")
     fun lastKnown(maxAgeMs: Long): Location? {
         val lm = manager ?: return null

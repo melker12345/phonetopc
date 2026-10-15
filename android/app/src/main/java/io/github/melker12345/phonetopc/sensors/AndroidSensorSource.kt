@@ -134,16 +134,13 @@ class AndroidSensorSource(context: Context) : SensorSource {
         ContextCompat.registerReceiver(appContext, receiver, filter, null, handler, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
-    /** Hardware presence per source, for the settings screen. */
     fun hardwarePresent(source: String): Boolean = baseInfo[source]?.available == true
 
     /** Location permission (fine or approximate) is granted. */
     fun locationPermitted(): Boolean = location.permitted()
 
-    /** Location is switched on in system settings. */
     fun locationEnabled(): Boolean = location.enabled()
 
-    /** NFC is switched on in system settings. */
     fun nfcEnabled(): Boolean = runCatching { nfcAdapter?.isEnabled == true }.getOrDefault(false)
 
     /**

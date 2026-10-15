@@ -22,7 +22,6 @@ data class PairingQr(
     companion object {
         const val PREFIX = "phonetopc://pair?"
 
-        /** Why a scanned code isn't a usable pairing code. */
         enum class Problem { NOT_PHONETOPC, UNSUPPORTED_VERSION, MALFORMED }
 
         class Invalid(val problem: Problem, message: String) : Exception(message)

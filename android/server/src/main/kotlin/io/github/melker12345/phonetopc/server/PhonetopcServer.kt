@@ -63,7 +63,7 @@ class PhonetopcServer(
 
     val secure: Boolean get() = tls != null
 
-    /** Binds and starts serving. Blocking; call off the main thread. Throws if the port is taken. */
+    /** Blocking; call off the main thread. Throws if the port is taken. */
     fun start() {
         check(server == null) { "already started" }
         if (tls == null) {
@@ -105,7 +105,7 @@ class PhonetopcServer(
         return requireNotNull(server) { "not started" }.engine.resolvedConnectors().first().port
     }
 
-    /** Stops the server, closing every connection. Blocking. */
+    /** Closes every connection. Blocking. */
     fun stop() {
         frontend?.stop()
         frontend = null

@@ -119,7 +119,6 @@ fun HomeScreen(vm: MainViewModel, onPair: () -> Unit) {
     )
 }
 
-/** A panel a PC has open on this phone, as Home lists it. */
 private data class OpenPanel(val key: PanelKey, val title: String, val pcName: String, val attached: Boolean)
 
 private enum class HomeState { STOPPED, STARTING, RUNNING, PAUSED }
@@ -456,7 +455,6 @@ private fun AddressCard(addresses: List<String>, port: Int, secure: Boolean, dim
 }
 
 @OptIn(ExperimentalLayoutApi::class)
-/** An open panel of a PC: tapping it opens the panel screen on it. */
 @Composable
 private fun PanelCard(panel: OpenPanel, onOpen: () -> Unit) {
     Card(

@@ -34,7 +34,6 @@ class PinMismatchException(val expected: String, val seen: String) :
  */
 class PinnedWebSocket private constructor(
     private val socket: Socket,
-    /** The pin of the certificate the server presented. */
     val pinSeen: String,
 ) : Closeable {
     private val input: InputStream = BufferedInputStream(socket.getInputStream())
@@ -46,7 +45,6 @@ class PinnedWebSocket private constructor(
     @Volatile var closeCode: Int? = null
         private set
 
-    /** Sends one text message. */
     fun send(text: String) = writeFrame(OP_TEXT, text.toByteArray(Charsets.UTF_8))
 
     /**
@@ -168,8 +166,6 @@ class PinnedWebSocket private constructor(
         val PROTOCOLS = listOf("TLSv1.3", "TLSv1.2")
 
         /**
-         * Connects to `wss://host:port/path`.
-         *
          * @param expectedPin if set, the handshake fails with [PinMismatchException] unless the
          *   server's certificate has this pin. If `null`, any certificate is accepted and its pin
          *   is reported in [pinSeen] (pairing way B, SECURITY.md §4.3).

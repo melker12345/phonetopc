@@ -145,7 +145,6 @@ class Session internal constructor(
         }
     }
 
-    /** Handle one inbound text frame; the response (if any) is queued for sending. */
     suspend fun handleText(text: String) {
         if (ending) return
         if (!helloDone && ++framesBeforeHello > hub.framesBeforeHello) {

@@ -16,11 +16,9 @@ enum class RunState { STOPPED, STARTING, RUNNING, PAUSED }
 
 data class BridgeStatus(
     val state: RunState = RunState.STOPPED,
-    /** Port the server is bound to while running. */
     val port: Int? = null,
     /** While running: `wss://` with pairing (true) or dev mode's plain `ws://` (false). */
     val secure: Boolean? = null,
-    /** Why the last start attempt failed, if it did. */
     val error: String? = null,
     val clients: List<ClientSnapshot> = emptyList(),
     /** Sources currently running and their hardware rate. */
@@ -29,7 +27,6 @@ data class BridgeStatus(
     val active: Boolean get() = state != RunState.STOPPED
 }
 
-/** UI-facing handle on [BridgeService]: observe [status], send commands. */
 class BridgeController(private val context: Context) {
     private val _status = MutableStateFlow(BridgeStatus())
     val status: StateFlow<BridgeStatus> = _status.asStateFlow()

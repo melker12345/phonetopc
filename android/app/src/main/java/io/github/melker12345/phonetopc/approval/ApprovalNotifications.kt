@@ -34,7 +34,7 @@ object ApprovalNotifications {
         return channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
     }
 
-    /** Posts the notification; `false` if the user blocked it, so nobody would see it. */
+    /** `false` if the user blocked it, so nobody would see it. */
     fun show(context: Context, request: ApprovalRequest): Boolean {
         ensureChannel(context)
         if (!canShow(context)) return false

@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Which part of the Pair tab is showing. */
 enum class PairStep { CHOOSE, SCAN, BROWSE, RUN }
 
 class PairViewModel(app: Application) : AndroidViewModel(app) {

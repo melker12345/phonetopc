@@ -22,7 +22,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration
 
-/** The PC answered a pairing request with a JSON-RPC error. */
 class PairingRpcException(val code: Int, message: String) : Exception(message)
 
 /** One open connection to a PC's pairing listener (`/v1/pair`). */
@@ -50,7 +49,6 @@ fun interface PairingConnector {
 
 const val PAIR_PATH = "/v1/pair"
 
-/** Pairing over a real pinned `wss://` connection. */
 class WebSocketPairingConnector(private val connectTimeoutMillis: Int = 5_000) : PairingConnector {
     override suspend fun connect(host: String, port: Int, expectedPin: String?): PairingChannel {
         val ws = withContext(Dispatchers.IO) {

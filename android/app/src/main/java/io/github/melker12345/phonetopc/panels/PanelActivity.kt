@@ -171,7 +171,7 @@ class PanelActivity : ComponentActivity() {
         private const val EXTRA_PC = "pc_key"
         private const val EXTRA_PANEL = "panel"
 
-        /** Opens the panel screen on [key], or on the first panel when `null`. */
+        /** On the first panel when [key] is `null`. */
         fun intent(context: Context, key: PanelKey?): Intent = Intent(context, PanelActivity::class.java).apply {
             if (key != null) putExtra(EXTRA_PC, key.pcKey).putExtra(EXTRA_PANEL, key.panel)
         }

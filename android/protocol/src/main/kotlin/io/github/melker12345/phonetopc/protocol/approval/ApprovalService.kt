@@ -35,7 +35,6 @@ class ApprovalService(
         null
     }
 
-    /** What [start] did. */
     sealed interface Start {
         /** Answered at once (`unavailable`, `busy`); `respond` is not called. */
         data class Answered(val outcome: ApprovalOutcome) : Start
@@ -45,8 +44,6 @@ class ApprovalService(
     }
 
     /**
-     * Starts an approval.
-     *
      * @param announced the key this session's `hello` reported. The PC verifies with that one,
      *   so if there was none, or the key has been replaced since, the outcome is `unavailable`.
      * @param respond gets the outcome of a [Start.Pending] approval, from the service's scope.
