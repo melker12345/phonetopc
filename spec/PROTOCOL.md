@@ -7,6 +7,10 @@ tokens. [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_appro
 [`PANELS.md`](PANELS.md) covers notifications and panels, PC → phone output (`notify`, `panel_show`, …).
 The four documents share one draft number: this is draft 4 of all of them.
 
+This is the protocol between the phone and a client. Programs on the PC usually don't speak it: the PC daemon
+`phonetopcd` speaks it to the phone and offers programs a plain HTTP API instead, [`LOCAL-API.md`](LOCAL-API.md),
+which has its own versioning.
+
 The prose of these documents is the normative reference. The JSON Schema
 [`schemas/phonetopc-1.schema.json`](schemas/phonetopc-1.schema.json) describes the session messages (every
 request, response and `event` on `/v1/ws`), not the pairing messages (`pair_*`, `SECURITY.md` §4). It and the cases
@@ -273,5 +277,3 @@ This draft uses a manual address. Servers SHOULD additionally advertise `_phonet
 
 - A server can't yet tell a client that a subscribed source became unavailable (e.g. the user disabled it in the app). Today the subscription just stops producing events.
 - `command` (vibrate, …) for PC → phone actions other than approval, notifications and panels.
-- A PC daemon, `phonetopcd`, that keeps one connection to the phone and offers this same protocol to local
-  programs (Unix socket or localhost WebSocket). Until then, every program connects to the phone itself.

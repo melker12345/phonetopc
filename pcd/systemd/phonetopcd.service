@@ -1,0 +1,17 @@
+# systemd user unit for phonetopcd. Install with:
+#   cp pcd/systemd/phonetopcd.service ~/.config/systemd/user/
+#   systemctl --user enable --now phonetopcd
+# ExecStart assumes `go install` put the binary in ~/go/bin; change it if
+# phonetopcd lives elsewhere (e.g. /usr/bin/phonetopcd from a package).
+[Unit]
+Description=phonetopc daemon: shares the paired phone with programs on this PC
+Documentation=https://github.com/melker12345/phonetopc/blob/main/spec/LOCAL-API.md
+After=network-online.target
+
+[Service]
+ExecStart=%h/go/bin/phonetopcd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

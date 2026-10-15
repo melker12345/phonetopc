@@ -32,10 +32,10 @@ In the README, every PC script talks to the phone directly. That puts mDNS, pair
 
 Instead, `phonetopcd` handles all of the hard parts once and exposes:
 
-- `$XDG_RUNTIME_DIR/phonetopc.sock`: a Unix socket speaking the **same protocol**. Unix file permissions make it user-only, and it carries no TLS and no tokens.
-- `ws://127.0.0.1:<port>`: optional, for languages or tools that can't use Unix sockets (browsers, some scripting environments). It requires the token stored in `$XDG_RUNTIME_DIR/phonetopc.token`.
+- `$XDG_RUNTIME_DIR/phonetopc.sock`: a Unix socket serving a **plain HTTP API** (`spec/LOCAL-API.md`). Unix file permissions make it user-only, and it carries no TLS and no tokens.
+- `http://127.0.0.1:8767`: the same API for languages or tools that can't use Unix sockets (browsers, some scripting environments). It requires the token stored in `$XDG_RUNTIME_DIR/phonetopc.token`.
 
-With this design, a client in any language only needs a WebSocket or socket library and a JSON parser. `websocat` plus `jq` in bash counts as a client. Several scripts can share one phone connection, which saves phone battery. Clients can still connect straight to the phone if they want, because the protocol is public. Going through the daemon is just the easy path.
+*Decided while building it:* plain HTTP rather than the phone protocol (JSON-RPC over WebSocket) on the local side. Every language's standard library can do an HTTP request, so a program needs no SDK at all: `GET /v1/events?source=gyro` streams one JSON event per line (or Server-Sent Events, or a WebSocket, as the request asks), and actions are ordinary POSTs. `curl` in bash counts as a client. Several scripts share one phone connection, and identical streams share one phone subscription, which saves phone battery. Clients can still connect straight to the phone if they want, because the protocol is public. Going through the daemon is just the easy path.
 
 ```
  ┌──────────── Phone ────────────┐          ┌──────────────────── PC ─────────────────────┐

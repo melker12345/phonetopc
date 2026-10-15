@@ -8,6 +8,7 @@ The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 4, see
 
 | Path | What |
 |---|---|
+| `cmd/phonetopcd` | The daemon: one connection to the paired phone, offered to local programs as plain HTTP ([`../spec/LOCAL-API.md`](../spec/LOCAL-API.md)) |
 | `cmd/phonetopc` | CLI: `pair`, `devices`, `unpair`, `pc`, and `info`, `list`, `get`, `tail`, `approve`, `approval-key`, `notify` against a phone or the mock |
 | `cmd/phonetopc-mock` | Mock phone with synthetic sensor data, dev or secure mode, approvals, panels with a simulated user, and a pairing client |
 | `client` | Importable Go client library, including secure mode, `DialPaired`, `RequestApproval`, `Notify` and `ShowPanel` |
@@ -17,8 +18,11 @@ The Go side of phonetopc. It implements protocol `phonetopc/1` (draft 4, see
 | `internal/pairing` | Pairing (SECURITY.md §4): the PC's listener and the phone's client side |
 | `internal/discovery` | mDNS for `_phonetopc._tcp` and `_phonetopc-pair._tcp`, and the PC's LAN addresses |
 | `internal/mockphone` | The mock server implementation and its state directory, also used in-process by tests |
+| `internal/daemon` | The daemon's core: reconnecting, sharing subscriptions between local streams, reattaching panels, and the HTTP handlers |
+| `internal/hints` | Error messages that say what to do, shared by the CLI and the daemon |
 
-The `phonetopcd` daemon (milestone M3) will go in `cmd/phonetopcd`, with its internals under `internal/`.
+Programs should use `phonetopcd` (below); the client library is for Go programs that want to talk to the phone
+themselves, and is what the CLI and the daemon are built on.
 
 ## Build
 
@@ -71,6 +75,40 @@ bin/phonetopc pc                          # this PC's id, name and pin
 
 Errors say what to do: a phone presenting a different key ("phone identity changed — re-pair")
 is never connected to, and a `-32010` answer means the phone revoked this PC.
+
+## Run the daemon
+
+`phonetopcd` connects to the paired phone, keeps the connection up (reconnecting within 10 s when the phone comes
+back), and serves the local API ([`../spec/LOCAL-API.md`](../spec/LOCAL-API.md)) to programs on this PC:
+
+```sh
+bin/phonetopcd                       # the only paired phone; --device D picks one of several
+bin/phonetopcd --insecure-dev        # a phone in developer mode, or the mock without --state
+
+S=$XDG_RUNTIME_DIR/phonetopc.sock
+curl -s --unix-socket $S http://phonetopc/v1/status
+curl -sN --unix-socket $S 'http://phonetopc/v1/events?source=gyro&rate=20'
+curl -s --unix-socket $S http://phonetopc/v1/approvals -d '{"reason":"Deploy?"}'
+curl -s -H "Authorization: Bearer $(cat $XDG_RUNTIME_DIR/phonetopc.token)" http://127.0.0.1:8767/v1/status
+```
+
+It serves on a Unix socket only this user can open, `$XDG_RUNTIME_DIR/phonetopc.sock`, and on `127.0.0.1:8767`,
+where requests need the token in `$XDG_RUNTIME_DIR/phonetopc.token`. `--device`, `--addr`, `--insecure-dev` and
+`--no-mdns` work as for the CLI; `--socket PATH`, `--listen ADDR` and `--token-file PATH` move the listeners
+(`off` turns one off; `--listen` takes only loopback addresses). A second daemon on the same socket refuses to
+start.
+
+To start it with your session, use the systemd user unit:
+
+```sh
+go install ./cmd/phonetopcd          # or copy bin/phonetopcd to ~/go/bin
+cp systemd/phonetopcd.service ~/.config/systemd/user/
+systemctl --user enable --now phonetopcd
+journalctl --user -u phonetopcd -f   # it logs connects, disconnects and new errors
+```
+
+Without systemd, start `phonetopcd` from your session's autostart (for example `exec-once = phonetopcd` in
+Hyprland).
 
 ## Fingerprint approval
 

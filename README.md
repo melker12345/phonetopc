@@ -28,17 +28,18 @@ Protocol `phonetopc/1`, draft 4 ([`spec/`](spec/)). What works:
 - **Sensors:** accelerometer, gyroscope, orientation, magnetic field, compass, light, proximity, battery, barometer, location, NFC tags and a Quick Settings tile.
 - **Fingerprint approval:** a PC program asks for a fingerprint on the phone and verifies the phone's signature itself.
 - **Notifications and panels:** a PC program posts notifications on the phone or shows a panel there (buttons, toggles, sliders, text, a drawing canvas) and gets the input back as events.
+- **The local API:** the `phonetopcd` daemon keeps one connection to the paired phone and offers it to programs on the PC as plain HTTP ([`spec/LOCAL-API.md`](spec/LOCAL-API.md)). Any language's HTTP client is enough: `GET /v1/events?source=gyro` streams events, `POST /v1/notifications` posts one. No pairing, TLS pinning or JSON-RPC in your program.
 - **On the PC:** the `phonetopc` CLI, the `phonetopc-mock` fake phone and a Go client library, plus a Python client library.
 
-Not there yet (see [plan.md](plan.md)): the `phonetopcd` background daemon that shares one phone connection between programs, so today each program connects to the phone itself; unlocking the PC with a fingerprint (the PAM module); packages (AUR, `.deb`, `.rpm`, APK releases).
+Not there yet (see [plan.md](plan.md)): `phonetopc pair` setting up and starting `phonetopcd` by itself (today: the systemd unit in [`pcd/systemd/`](pcd/systemd/)); unlocking the PC with a fingerprint (the PAM module); packages (AUR, `.deb`, `.rpm`, APK releases).
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| [`spec/`](spec/) | The protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), [`SECURITY.md`](spec/SECURITY.md) (pairing, TLS and tokens), [`APPROVAL.md`](spec/APPROVAL.md) (fingerprint approval), [`PANELS.md`](spec/PANELS.md) (notifications and panels), JSON Schema, conformance transcripts and cases |
+| [`spec/`](spec/) | The local API for programs on the PC: [`LOCAL-API.md`](spec/LOCAL-API.md). The phone protocol: [`PROTOCOL.md`](spec/PROTOCOL.md), [`SECURITY.md`](spec/SECURITY.md) (pairing, TLS and tokens), [`APPROVAL.md`](spec/APPROVAL.md) (fingerprint approval), [`PANELS.md`](spec/PANELS.md) (notifications and panels), JSON Schema, conformance transcripts and cases |
 | [`android/`](android/) | Phone app (Kotlin, Jetpack Compose, Ktor) |
-| [`pcd/`](pcd/) | PC side in Go: `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
+| [`pcd/`](pcd/) | PC side in Go: `phonetopcd` daemon, `phonetopc` CLI, `phonetopc-mock` fake phone, Go client library |
 | [`clients/python/`](clients/python/) | Python client library |
 | [`examples/`](examples/) | Python recipes: print gyro, compass, air mouse, lock PC from a phone tile, stream deck, drawing pad, notify when a command is done |
 
@@ -50,6 +51,10 @@ No phone needed — use the mock:
 (cd pcd && CGO_ENABLED=0 go build -o bin/ ./cmd/...)
 pcd/bin/phonetopc-mock &             # fake phone on 127.0.0.1:8765, in dev mode
 pcd/bin/phonetopc --insecure-dev tail gyro --rate 10   # stream from the Go CLI
+
+pcd/bin/phonetopcd --insecure-dev &   # the local API, on $XDG_RUNTIME_DIR/phonetopc.sock and 127.0.0.1:8767
+curl -sN --unix-socket $XDG_RUNTIME_DIR/phonetopc.sock 'http://phonetopc/v1/events?source=gyro&rate=10'
+curl -s --unix-socket $XDG_RUNTIME_DIR/phonetopc.sock http://phonetopc/v1/notifications -d '{"title":"Hello"}'
 
 pip install -e clients/python
 python examples/print_gyro.py ws://127.0.0.1:8765   # same stream from Python (ws:// = dev mode, no pairing)
