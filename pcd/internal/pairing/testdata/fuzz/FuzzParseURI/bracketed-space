@@ -1,0 +1,2 @@
+go test fuzz v1
+string("phonetopc://pair?v=1&id=a&h=+%5B+a%5D&p=1&pin=sha256/n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg&s=AAAA")

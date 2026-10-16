@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"type\":\"text\",\"text\":\"a\"} {\"type\":\"text\",\"text\":\"b\"}")
