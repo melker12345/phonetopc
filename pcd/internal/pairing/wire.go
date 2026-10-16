@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
@@ -75,7 +76,7 @@ func (p *PhoneInfo) validate() error {
 		return fmt.Errorf("params.phone.addresses has more than %d entries", maxAddresses)
 	}
 	for _, a := range p.Addresses {
-		if a == "" || len(a) > maxAddressLen || strings.ContainsAny(a, "/ \t\r\n") {
+		if a == "" || len(a) > maxAddressLen || strings.ContainsAny(a, "/ ") || strings.IndexFunc(a, unicode.IsControl) >= 0 {
 			return fmt.Errorf("params.phone.addresses contains an invalid entry")
 		}
 	}

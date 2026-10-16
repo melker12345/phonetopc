@@ -550,6 +550,9 @@ func TestPhoneNameIsDisplayText(t *testing.T) {
 		bad.Name = name
 		wantErr(t, r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: bad}), protocol.CodeInvalidParams)
 	}
+	bad := testPhone(t)
+	bad.Addresses = []string{"10.0.0.1\x1b[2J"}
+	wantErr(t, r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: bad}), protocol.CodeInvalidParams)
 }
 
 // idle waits until no session holds the pairing slot and n failed SAS runs

@@ -113,7 +113,8 @@ Sequence gaps (dropped events) are reported on stderr.
 
 type cli struct {
 	stdin          io.Reader
-	stdout, stderr io.Writer
+	stdout, stderr io.Writer // termSafe: they print what phones send
+	rawStdout      io.Writer // for the QR code's colors
 	getenv         func(string) string
 	addr           string
 	device         string
@@ -126,7 +127,7 @@ type cli struct {
 // code: 0 success, 1 runtime error, 2 usage error.
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	c := &cli{
-		stdin: stdin, stdout: stdout, stderr: stderr, getenv: getenv,
+		stdin: stdin, stdout: &termSafe{w: stdout}, stderr: &termSafe{w: stderr}, rawStdout: stdout, getenv: getenv,
 		addr:   getenv("PHONETOPC_ADDR"),
 		device: getenv("PHONETOPC_DEVICE"),
 		dev:    envBool(getenv("PHONETOPC_INSECURE_DEV")),

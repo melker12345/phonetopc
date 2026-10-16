@@ -91,7 +91,7 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 
 	showQR := func(secret string) error {
 		uri := pairing.URI{ID: pc.ID, Name: pc.Name, Hosts: hosts, Port: port, Pin: pc.Pin, Secret: secret}.String()
-		if err := writeQR(c.stdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
+		if err := writeQR(c.rawStdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
 			return err
 		}
 		fmt.Fprintf(c.stdout, "\n    %s\n\n", uri)
