@@ -450,6 +450,24 @@ type pcDoc struct {
 func (s *Store) PC() (*PC, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if pc, err := s.loadPC(false); pc != nil || err != nil {
+		return pc, err
+	}
+	// Creating takes the file lock and reads again, so two processes on
+	// first run can't each make an identity and pair phones to the loser.
+	if err := s.ensureDir(); err != nil {
+		return nil, err
+	}
+	unlock, err := lockPath(s.Path(lockFile))
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return s.loadPC(true)
+}
+
+// loadPC returns nil, nil if the identity is incomplete and create is false.
+func (s *Store) loadPC(create bool) (*PC, error) {
 	var doc pcDoc
 	b, err := os.ReadFile(s.Path(PCFile))
 	switch {
@@ -461,8 +479,8 @@ func (s *Store) PC() (*PC, error) {
 		return nil, err
 	}
 	if doc.ID == "" || doc.Name == "" {
-		if err := s.ensureDir(); err != nil {
-			return nil, err
+		if !create {
+			return nil, nil
 		}
 		if doc.ID == "" {
 			doc.ID = security.NewID()
@@ -487,8 +505,8 @@ func (s *Store) PC() (*PC, error) {
 			return nil, fmt.Errorf("%s: %w", s.Path(PCKeyFile), err)
 		}
 	case errors.Is(err, fs.ErrNotExist):
-		if err := s.ensureDir(); err != nil {
-			return nil, err
+		if !create {
+			return nil, nil
 		}
 		if key, err = security.GenerateKey(); err != nil {
 			return nil, err

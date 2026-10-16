@@ -73,6 +73,30 @@ func TestPCIdentity(t *testing.T) {
 	}
 }
 
+// TestPCIdentityFirstRunRace: stores that don't share a mutex, like two
+// processes on first run, all end up with the same identity.
+func TestPCIdentityFirstRunRace(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "phonetopc")
+	pins := make([]string, 8)
+	var wg sync.WaitGroup
+	for i := range pins {
+		wg.Go(func() {
+			pc, err := Open(dir).PC()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			pins[i] = pc.ID + " " + pc.Pin
+		})
+	}
+	wg.Wait()
+	for _, p := range pins[1:] {
+		if p != pins[0] {
+			t.Fatalf("identities differ: %q", pins)
+		}
+	}
+}
+
 func TestDevices(t *testing.T) {
 	dir := t.TempDir()
 	os.Chmod(dir, 0o755)
