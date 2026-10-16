@@ -131,7 +131,7 @@ func TestVectorBase64url(t *testing.T) {
 	if err != nil || hex.EncodeToString(got) != b.BytesHex {
 		t.Errorf("DecodeB64 = %x, %v", got, err)
 	}
-	for _, bad := range []string{"-_8A=", "+/8A", "-_9", "a"} {
+	for _, bad := range []string{"-_8A=", "+/8A", "-_9", "a", "-_8A\n", "-_\r\n8A", "\n"} {
 		if _, err := DecodeB64(bad); err == nil {
 			t.Errorf("DecodeB64(%q) accepted", bad)
 		}

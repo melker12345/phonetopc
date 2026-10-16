@@ -29,8 +29,13 @@ func B64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // DecodeB64 decodes base64url without padding. It is strict: padding,
 // characters of the standard alphabet and non-canonical trailing bits are
-// rejected, so every value has exactly one accepted spelling.
+// rejected, so every value has exactly one accepted spelling. The decoder
+// of encoding/base64 skips CR and LF even when strict, so they are refused
+// first.
 func DecodeB64(s string) ([]byte, error) {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return nil, base64.CorruptInputError(i)
+	}
 	return base64.RawURLEncoding.Strict().DecodeString(s)
 }
 
