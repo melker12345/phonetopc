@@ -8,10 +8,12 @@ import (
 
 type sameUserKey struct{}
 
-// ConnContext is an http.Server ConnContext for the TCP listener: it notes
-// whether the program at the other end runs as this user, which RequireToken
-// then lets in without a token.
+// ConnContext is an http.Server ConnContext for the listeners: it notes
+// the connection, whose program the phone is told about for approvals, and
+// whether the program at the other end of a TCP connection runs as this
+// user, which RequireToken then lets in without a token.
 func ConnContext(ctx context.Context, c net.Conn) context.Context {
+	ctx = context.WithValue(ctx, connKey{}, c)
 	if peerIsSameUser(c) {
 		return context.WithValue(ctx, sameUserKey{}, true)
 	}

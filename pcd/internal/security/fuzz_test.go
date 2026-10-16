@@ -108,24 +108,8 @@ func FuzzVerifyApproval(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	var valid struct {
-		Valid struct {
-			PhoneID   string `json:"phone_id"`
-			PCID      string `json:"pc_id"`
-			Nonce     string `json:"nonce"`
-			Reason    string `json:"reason"`
-			Signature string `json:"signature"`
-		} `json:"valid"`
-	}
-	b, err := os.ReadFile(filepath.Join(vectorsDir, "approval.json"))
-	if err != nil {
-		f.Fatal(err)
-	}
-	if err := json.Unmarshal(b, &valid); err != nil {
-		f.Fatal(err)
-	}
-	vv := valid.Valid
-	signed := string(ApprovalMessage(vv.PhoneID, vv.PCID, vv.Nonce, vv.Reason))
+	vv := loadApprovalVectors(f).Valid
+	signed := string(vv.approval().Message())
 	f.Add(vv.Signature, signed)
 	f.Add(vv.Signature, signed+"\n")
 	f.Add(vv.Signature+"A", signed)

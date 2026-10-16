@@ -24,6 +24,9 @@ type approvalVector struct {
 	PCID      string `json:"pc_id"`
 	Nonce     string `json:"nonce"`
 	Reason    string `json:"reason"`
+	Program   string `json:"program"`
+	Match     int    `json:"match"`
+	Expiry    int64  `json:"expiry"`
 	Key       string `json:"key"`
 	Signature string `json:"signature"`
 }
@@ -136,6 +139,19 @@ func (ap *approvalPhone) serve(t *testing.T) string {
 	})
 }
 
+// ask is an ApprovalRequest whose number nobody sees.
+func ask(reason string, timeout time.Duration) ApprovalRequest {
+	return ApprovalRequest{Reason: reason, Timeout: timeout, ShowMatch: func(int) {}}
+}
+
+// signed is the message a phone signs for p.
+func signed(phoneID, pcID string, p protocol.RequestApprovalParams) []byte {
+	return security.Approval{
+		PhoneID: phoneID, PCID: pcID, Nonce: p.Nonce, Reason: p.Reason,
+		Program: p.Program, Match: p.Match, Expiry: p.Expiry,
+	}.Message()
+}
+
 func pinOf(t *testing.T, key string) string {
 	pin, err := security.ApprovalKeyPin(key)
 	if err != nil {
@@ -146,8 +162,9 @@ func pinOf(t *testing.T, key string) string {
 
 // TestApprovalVectors replays vectors/approval.json through
 // RequestApproval: the phone's hello carries the vector's ids and key, the
-// client uses the vector's nonce and reason, and the phone answers with the
-// vector's signature. Only the valid vector may be approved.
+// client uses the vector's nonce, reason, program, number and expiry, and
+// the phone answers with the vector's signature. Only the valid vector may
+// be approved; one of the others is signed as phonetopc-approval/1.
 func TestApprovalVectors(t *testing.T) {
 	valid, invalid := loadApprovalVectors(t)
 	run := func(v approvalVector) (ApprovalResult, error) {
@@ -155,18 +172,25 @@ func TestApprovalVectors(t *testing.T) {
 			answer: func(protocol.RequestApprovalParams) any {
 				return protocol.RequestApprovalResult{Approved: true, Signature: v.Signature}
 			}}
-		c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pinOf(t, v.Key)), testAttestation, func(o *options) { o.testNonce = v.Nonce })
+		c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pinOf(t, v.Key)), testAttestation, func(o *options) {
+			o.testNonce, o.testMatch = v.Nonce, v.Match
+			o.testNow = func() time.Time {
+				return time.UnixMilli(v.Expiry).Add(-DefaultApprovalTimeout - protocol.ExpiryAfterTimeout)
+			}
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer c.Close()
-		return c.RequestApproval(ctxT(t), v.Reason, 0)
+		req := ask(v.Reason, 0)
+		req.Program = v.Program
+		return c.RequestApproval(ctxT(t), req)
 	}
 	res, err := run(valid)
-	if err != nil || !res.Approved() || res.Signature != valid.Signature || res.Nonce != valid.Nonce {
+	if err != nil || !res.Approved() || res.Signature != valid.Signature || res.Nonce != valid.Nonce || res.Expiry != valid.Expiry {
 		t.Fatalf("valid vector: %+v %v", res, err)
 	}
-	if len(invalid) < 6 {
+	if len(invalid) < 10 {
 		t.Fatalf("%d invalid vectors", len(invalid))
 	}
 	for _, v := range invalid {
@@ -187,7 +211,7 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 	keyB64, pin, _ := security.EncodeApprovalKey(&key.PublicKey)
 	ap := &approvalPhone{phoneID: "phone-1", pcID: "pc-1", key: keyB64}
 	ap.answer = func(p protocol.RequestApprovalParams) any {
-		sig, _ := security.SignApproval(key, security.ApprovalMessage("phone-1", "pc-1", p.Nonce, p.Reason))
+		sig, _ := security.SignApproval(key, signed("phone-1", "pc-1", p))
 		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
 	}
 	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin), testAttestation)
@@ -196,10 +220,10 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 	}
 	defer c.Close()
 	// Reasons are never trimmed: padded ones are refused before sending.
-	if _, err := c.RequestApproval(ctxT(t), "  Deploy?  ", 7*time.Second); err == nil || ap.requests.Load() != 0 {
+	if _, err := c.RequestApproval(ctxT(t), ask("  Deploy?  ", 7*time.Second)); err == nil || ap.requests.Load() != 0 {
 		t.Fatalf("padded reason: %v", err)
 	}
-	res, err := c.RequestApproval(ctxT(t), "Deploy?", 7*time.Second)
+	res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 7*time.Second))
 	if err != nil || !res.Approved() || res.Reason != "Deploy?" || res.KeyPin != pin {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -210,7 +234,7 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 	if p.TimeoutMS == nil || *p.TimeoutMS != 7000 || p.Reason != "Deploy?" {
 		t.Errorf("params %+v", p)
 	}
-	res2, _ := c.RequestApproval(ctxT(t), "Deploy?", 0)
+	res2, _ := c.RequestApproval(ctxT(t), ask("Deploy?", 0))
 	if p2 := ap.lastParams.Load().(protocol.RequestApprovalParams); p2.Nonce == p.Nonce || *p2.TimeoutMS != 30000 || !res2.Approved() {
 		t.Errorf("second request reused the nonce or lacks the default timeout: %+v", p2)
 	}
@@ -218,21 +242,37 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 	// The phone signs a different reason (or echoes a different nonce in
 	// its message): verification uses our values, so it fails.
 	ap.answer = func(p protocol.RequestApprovalParams) any {
-		sig, _ := security.SignApproval(key, security.ApprovalMessage("phone-1", "pc-1", p.Nonce, "something else"))
+		p.Reason = "something else"
+		sig, _ := security.SignApproval(key, signed("phone-1", "pc-1", p))
 		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
 	}
-	if res, err := c.RequestApproval(ctxT(t), "Deploy?", 0); res.Approved() || !errors.Is(err, ErrApprovalInvalid) {
+	if res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0)); res.Approved() || !errors.Is(err, ErrApprovalInvalid) {
 		t.Errorf("signature over another reason: %v %v", res.Approved(), err)
+	}
+	// Or over another program, number or expiry.
+	for name, change := range map[string]func(*protocol.RequestApprovalParams){
+		"program": func(p *protocol.RequestApprovalParams) { p.Program = "other" },
+		"match":   func(p *protocol.RequestApprovalParams) { p.Match = 10 + (p.Match-9)%90 },
+		"expiry":  func(p *protocol.RequestApprovalParams) { p.Expiry += 60000 },
+	} {
+		ap.answer = func(p protocol.RequestApprovalParams) any {
+			change(&p)
+			sig, _ := security.SignApproval(key, signed("phone-1", "pc-1", p))
+			return protocol.RequestApprovalResult{Approved: true, Signature: sig}
+		}
+		if res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0)); res.Approved() || !errors.Is(err, ErrApprovalInvalid) {
+			t.Errorf("signature over another %s: %v %v", name, res.Approved(), err)
+		}
 	}
 	// approved without a signature.
 	ap.answer = func(protocol.RequestApprovalParams) any { return map[string]any{"approved": true} }
-	if res, err := c.RequestApproval(ctxT(t), "Deploy?", 0); res.Approved() || !errors.Is(err, ErrApprovalInvalid) {
+	if res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0)); res.Approved() || !errors.Is(err, ErrApprovalInvalid) {
 		t.Errorf("no signature: %v %v", res.Approved(), err)
 	}
 	// Every refusal is a result.
 	for _, why := range protocol.Whys {
 		ap.answer = func(protocol.RequestApprovalParams) any { return protocol.RequestApprovalResult{Why: why} }
-		res, err := c.RequestApproval(ctxT(t), "Deploy?", 0)
+		res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0))
 		if err != nil || res.Approved() || res.Why != why || !strings.Contains(res.String(), string(why)) {
 			t.Errorf("%s: %+v %v", why, res, err)
 		}
@@ -256,7 +296,7 @@ func TestApprovalNoAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	res, err := c.RequestApproval(ctxT(t), "Deploy?", MinApprovalTimeout)
+	res, err := c.RequestApproval(ctxT(t), ask("Deploy?", MinApprovalTimeout))
 	if !errors.Is(err, ErrApprovalNoAnswer) || res.Approved() || res.Why != "" {
 		t.Errorf("%+v %v", res, err)
 	}
@@ -275,7 +315,7 @@ func TestApprovalKeyTrust(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	_, err = c.RequestApproval(ctxT(t), "Deploy?", 0)
+	_, err = c.RequestApproval(ctxT(t), ask("Deploy?", 0))
 	var kc *ApprovalKeyChangedError
 	if !errors.As(err, &kc) || !errors.Is(err, ErrApprovalKeyChanged) || kc.Current != pin {
 		t.Errorf("want key changed, got %v", err)
@@ -286,7 +326,7 @@ func TestApprovalKeyTrust(t *testing.T) {
 	// No trust configured at all.
 	c2, _ := Dial(ctxT(t), url)
 	defer c2.Close()
-	if _, err := c2.RequestApproval(ctxT(t), "Deploy?", 0); !errors.Is(err, ErrNoApprovalTrust) {
+	if _, err := c2.RequestApproval(ctxT(t), ask("Deploy?", 0)); !errors.Is(err, ErrNoApprovalTrust) {
 		t.Errorf("no trust: %v", err)
 	}
 	if n := ap.requests.Load(); n != 0 {
@@ -304,7 +344,7 @@ func TestApprovalKeyTrust(t *testing.T) {
 	})
 	c3, _ := Dial(ctxT(t), url2, WithApprovalKey("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), testAttestation)
 	defer c3.Close()
-	if _, err := c3.RequestApproval(ctxT(t), "Deploy?", 0); !errors.Is(err, ErrApprovalInvalid) {
+	if _, err := c3.RequestApproval(ctxT(t), ask("Deploy?", 0)); !errors.Is(err, ErrApprovalInvalid) {
 		t.Errorf("pin not matching key: %v", err)
 	}
 }
@@ -322,7 +362,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 	}
 	defer c.Close()
 	// No capability: unavailable, without asking the phone.
-	if res, err := c.RequestApproval(ctxT(t), "Deploy?", 0); err != nil || res.Approved() || res.Why != WhyUnavailable {
+	if res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0)); err != nil || res.Approved() || res.Why != WhyUnavailable {
 		t.Errorf("no capability: %+v %v", res, err)
 	}
 	if ap.requests.Load() != 0 {
@@ -332,7 +372,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 		reason  string
 		timeout time.Duration
 	}{{"", 0}, {"   ", 0}, {strings.Repeat("x", 201), 0}, {"a\nb", 0}, {"ok", 4 * time.Second}, {"ok", 121 * time.Second}, {"ok", -time.Second}} {
-		if _, err := c.RequestApproval(ctxT(t), bad.reason, bad.timeout); err == nil {
+		if _, err := c.RequestApproval(ctxT(t), ask(bad.reason, bad.timeout)); err == nil {
 			t.Errorf("accepted %q / %v", bad.reason, bad.timeout)
 		}
 	}
@@ -344,7 +384,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c2.Close()
-	if res, err := c2.RequestApproval(ctxT(t), "Deploy?", 0); err != nil || res.Why != WhyUnavailable || ap2.requests.Load() != 0 {
+	if res, err := c2.RequestApproval(ctxT(t), ask("Deploy?", 0)); err != nil || res.Why != WhyUnavailable || ap2.requests.Load() != 0 {
 		t.Errorf("capability without key: %+v %v", res, err)
 	}
 	if offered, err := c2.CheckApprovalKey(); offered || err != nil {
@@ -361,7 +401,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cd.Close()
-	if _, err := cd.RequestApproval(ctxT(t), "Deploy?", 0); !errors.Is(err, ErrApprovalNeedsSecureMode) {
+	if _, err := cd.RequestApproval(ctxT(t), ask("Deploy?", 0)); !errors.Is(err, ErrApprovalNeedsSecureMode) {
 		t.Errorf("dev mode: %v", err)
 	}
 }
@@ -372,7 +412,7 @@ func TestApprovalAttestation(t *testing.T) {
 	key, _ := security.GenerateKey()
 	keyB64, pin, _ := security.EncodeApprovalKey(&key.PublicKey)
 	answer := func(p protocol.RequestApprovalParams) any {
-		sig, _ := security.SignApproval(key, security.ApprovalMessage("p", "pc", p.Nonce, p.Reason))
+		sig, _ := security.SignApproval(key, signed("p", "pc", p))
 		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
 	}
 	request := func(attestation []string, opts ...Option) (ApprovalResult, int32, error) {
@@ -382,7 +422,7 @@ func TestApprovalAttestation(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer c.Close()
-		res, err := c.RequestApproval(ctxT(t), "Deploy?", 0)
+		res, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0))
 		return res, ap.requests.Load(), err
 	}
 	refused := func(name string, check string, attestation []string, opts ...Option) {
@@ -427,5 +467,74 @@ func TestApprovalAttestation(t *testing.T) {
 	})
 	if res, _, err := request([]string{}, testAttestation, accept); err != nil || !res.Approved() || res.Attestation != Unattested {
 		t.Fatalf("accepted unattested: %+v %v", res, err)
+	}
+}
+
+// TestApprovalMatchProgramExpiry: the number is shown before the request is
+// sent, and the request carries it, the program and an expiry of now +
+// timeout + 10 s (APPROVAL.md §4).
+func TestApprovalMatchProgramExpiry(t *testing.T) {
+	key, _ := security.GenerateKey()
+	keyB64, pin, _ := security.EncodeApprovalKey(&key.PublicKey)
+	ap := &approvalPhone{phoneID: "p", pcID: "pc", key: keyB64}
+	ap.answer = func(p protocol.RequestApprovalParams) any {
+		sig, _ := security.SignApproval(key, signed("p", "pc", p))
+		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
+	}
+	now := time.UnixMilli(1760000000000)
+	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin), testAttestation, func(o *options) { o.testNow = func() time.Time { return now } })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	shown := 0
+	req := ask("Deploy?", 20*time.Second)
+	req.Program = "deploy.sh"
+	req.ShowMatch = func(m int) {
+		if ap.requests.Load() != 0 {
+			t.Error("the number was shown after the request was sent")
+		}
+		shown = m
+	}
+	res, err := c.RequestApproval(ctxT(t), req)
+	p := ap.lastParams.Load().(protocol.RequestApprovalParams)
+	if err != nil || !res.Approved() || shown < 10 || shown > 99 || p.Match != shown || res.Match != shown {
+		t.Fatalf("shown %d, sent %d: %+v %v", shown, p.Match, res, err)
+	}
+	if p.Program != "deploy.sh" || res.Program != "deploy.sh" || p.Expiry != 1760000030000 || res.Expiry != p.Expiry {
+		t.Errorf("params %+v", p)
+	}
+	matches := map[int]bool{}
+	for range 30 {
+		if _, err := c.RequestApproval(ctxT(t), ask("Deploy?", 0)); err != nil {
+			t.Fatal(err)
+		}
+		p := ap.lastParams.Load().(protocol.RequestApprovalParams)
+		if p.Program != DefaultProgram {
+			t.Errorf("program %q", p.Program)
+		}
+		matches[p.Match] = true
+	}
+	if len(matches) < 5 {
+		t.Errorf("30 requests used only the numbers %v", matches)
+	}
+
+	sent := ap.requests.Load()
+	noShow := ask("Deploy?", 0)
+	noShow.ShowMatch = nil
+	for name, bad := range map[string]ApprovalRequest{
+		"no ShowMatch":      noShow,
+		"program too long":  {Reason: "Deploy?", Program: strings.Repeat("p", 61), ShowMatch: func(int) {}},
+		"program padded":    {Reason: "Deploy?", Program: " deploy", ShowMatch: func(int) {}},
+		"program with tab":  {Reason: "Deploy?", Program: "de\tploy", ShowMatch: func(int) {}},
+		"nonce of 31 bytes": {Reason: "Deploy?", Nonce: security.B64(make([]byte, 31)), ShowMatch: func(int) {}},
+	} {
+		if _, err := c.RequestApproval(ctxT(t), bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if ap.requests.Load() != sent {
+		t.Error("an invalid request was sent")
 	}
 }

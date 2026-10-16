@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,7 +55,7 @@ func TestDecryptRules(t *testing.T) {
 	if resp := r.response(); resp.Error != nil {
 		t.Fatal(resp.Error)
 	}
-	ok := map[string]any{"reason": "Decrypt a.age", "key_pin": pin, "ciphertext": security.B64(ct)}
+	ok := map[string]any{"reason": "Decrypt a.age", "program": "age", "match": 42, "key_pin": pin, "ciphertext": security.B64(ct)}
 	with := func(k string, val any) map[string]any {
 		p := map[string]any{}
 		for k, v := range ok {
@@ -73,6 +74,12 @@ func TestDecryptRules(t *testing.T) {
 	for name, p := range map[string]map[string]any{
 		"no reason":      with("reason", nil),
 		"padded reason":  with("reason", " Decrypt"),
+		"no program":     with("program", nil),
+		"long program":   with("program", strings.Repeat("p", 61)),
+		"no match":       with("match", nil),
+		"match 100":      with("match", 100),
+		"match 9":        with("match", 9),
+		"match string":   with("match", "42"),
 		"no key_pin":     with("key_pin", nil),
 		"no ciphertext":  with("ciphertext", nil),
 		"not base64url":  with("ciphertext", "a+b/"),
@@ -100,16 +107,16 @@ func TestDecryptRules(t *testing.T) {
 	// A PC has one approval or decryption pending at a time.
 	done := make(chan []byte, 1)
 	go func() {
-		res, err := c.Decrypt(testCtx(t), "Decrypt a.age", pin, ct, 30*time.Second)
+		res, err := c.Decrypt(testCtx(t), askDecrypt("Decrypt a.age", pin, ct, 30*time.Second))
 		if err != nil {
 			t.Error(err)
 		}
 		done <- res.Plaintext
 	}()
-	if req := <-asked; !req.Decrypt || req.Reason != "Decrypt a.age" {
+	if req := <-asked; !req.Decrypt || req.Reason != "Decrypt a.age" || req.Program != "mock test" || !slices.Contains(req.Choices[:], req.Match) {
 		t.Errorf("the user saw %+v", req)
 	}
-	if res, err := c.RequestApproval(testCtx(t), "Deploy?", 0); err != nil || res.Why != protocol.WhyBusy {
+	if res, err := c.RequestApproval(testCtx(t), ask("Deploy?", 0)); err != nil || res.Why != protocol.WhyBusy {
 		t.Errorf("approval while decrypting: %+v %v", res, err)
 	}
 	close(release)
@@ -138,7 +145,7 @@ func TestDecryptWaitsBehindAnotherPCsApproval(t *testing.T) {
 	ct, _ := security.EncryptToPhone(&key.PublicKey, []byte("file key 16 byte"))
 	done := make(chan []byte, 1)
 	go func() {
-		res, err := b.Decrypt(context.Background(), "Decrypt a.age", pin, ct, 60*time.Second)
+		res, err := b.Decrypt(context.Background(), askDecrypt("Decrypt a.age", pin, ct, 60*time.Second))
 		if err != nil {
 			t.Error(err)
 		}

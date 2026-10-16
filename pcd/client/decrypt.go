@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"crypto/rsa"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -131,69 +130,78 @@ type DecryptResult struct {
 	Plaintext []byte
 	// Why says why not; empty when decrypted.
 	Why Why
+	// Match is the number the user had to pick.
+	Match int
 }
 
 // Decrypted reports whether the phone decrypted.
 func (r DecryptResult) Decrypted() bool { return r.Why == "" }
 
-// Decrypt asks the phone's user to confirm reason with a fingerprint and
-// decrypt ciphertext, made for the key with pin keyPin (DECRYPT.md §4). It
-// waits up to timeout (0 means 30 s; allowed 5 s to 2 min).
+// DecryptRequest is what Decrypt asks for.
+type DecryptRequest struct {
+	// Reason is shown on the phone.
+	Reason string
+	// Program names who asks; "" sends DefaultProgram.
+	Program string
+	// KeyPin is the pin of the key Ciphertext was made for.
+	KeyPin     string
+	Ciphertext []byte
+	// Timeout is how long the user has; 0 means 30 s, allowed 5 s to 2 min.
+	Timeout time.Duration
+	// ShowMatch shows the user the number to pick on the phone, as in
+	// ApprovalRequest. It is required.
+	ShowMatch func(match int)
+}
+
+// Decrypt asks the phone's user to confirm req.Reason with a fingerprint,
+// after picking the number req.ShowMatch shows, and decrypt req.Ciphertext
+// (DECRYPT.md §4).
 //
-// Not decrypted (denied, cancelled, timeout, busy, lockout, unavailable,
-// failed) is a result. Errors: invalid arguments, ErrDecryptUnavailable,
-// a *DecryptKeyChangedError (nothing sent), and connection problems. It
-// doesn't need the key's attestation: that matters when encrypting.
+// Not decrypted (denied, cancelled, mismatch, timeout, busy, cooldown,
+// lockout, unavailable, failed) is a result. Errors: invalid arguments,
+// ErrDecryptUnavailable, a *DecryptKeyChangedError (nothing sent), and
+// connection problems. It doesn't need the key's attestation: that matters
+// when encrypting.
 //
 // Check what the plaintext unlocks: the phone can't prove it is correct.
-func (c *Client) Decrypt(ctx context.Context, reason, keyPin string, ciphertext []byte, timeout time.Duration) (DecryptResult, error) {
-	if err := protocol.CheckReason(reason); err != nil {
+func (c *Client) Decrypt(ctx context.Context, req DecryptRequest) (DecryptResult, error) {
+	if err := protocol.CheckReason(req.Reason); err != nil {
 		return DecryptResult{}, fmt.Errorf("phonetopc: %w", err)
 	}
-	if timeout == 0 {
-		timeout = DefaultApprovalTimeout
+	program, timeout, err := checkAsk(req.Program, req.Timeout, req.ShowMatch, "decrypt")
+	if err != nil {
+		return DecryptResult{}, err
 	}
-	if timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout {
-		return DecryptResult{}, fmt.Errorf("phonetopc: decrypt timeout %v is outside %v–%v", timeout, MinApprovalTimeout, MaxApprovalTimeout)
-	}
-	timeout = timeout.Truncate(time.Millisecond)
 	key, err := c.decryptKey(ctx, true)
 	if err != nil {
 		return DecryptResult{}, err
 	}
-	if key.Pin != keyPin {
-		return DecryptResult{}, &DecryptKeyChangedError{Want: keyPin, Current: key.Pin}
+	if key.Pin != req.KeyPin {
+		return DecryptResult{}, &DecryptKeyChangedError{Want: req.KeyPin, Current: key.Pin}
 	}
-	if len(ciphertext) != key.Public.Size() {
-		return DecryptResult{}, fmt.Errorf("phonetopc: the ciphertext is %d bytes; this key's are %d", len(ciphertext), key.Public.Size())
+	if len(req.Ciphertext) != key.Public.Size() {
+		return DecryptResult{}, fmt.Errorf("phonetopc: the ciphertext is %d bytes; this key's are %d", len(req.Ciphertext), key.Public.Size())
 	}
 	ms := timeout.Milliseconds()
-	params := protocol.DecryptParams{Reason: reason, KeyPin: keyPin, Ciphertext: security.B64(ciphertext), TimeoutMS: &ms}
-	wait := timeout + protocol.ApprovalResponseLeeway + approvalWaitSlack
-	cctx, cancel := context.WithTimeout(ctx, wait)
-	defer cancel()
-	var raw json.RawMessage
-	err = c.Call(cctx, protocol.MethodDecrypt, params, &raw)
-	switch {
-	case err == nil:
-	case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
-		return DecryptResult{}, fmt.Errorf("%w: no answer from the phone within %v", ErrApprovalNoAnswer, wait)
-	default:
-		return DecryptResult{}, err
+	match := c.match()
+	params := protocol.DecryptParams{
+		Reason: req.Reason, Program: program, Match: match,
+		KeyPin: req.KeyPin, Ciphertext: security.B64(req.Ciphertext), TimeoutMS: &ms,
 	}
+	req.ShowMatch(match)
 	var r protocol.DecryptResult
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return DecryptResult{}, fmt.Errorf("phonetopc: decoding decrypt result: %w", err)
+	if err := c.callAsk(ctx, protocol.MethodDecrypt, params, timeout, &r); err != nil {
+		return DecryptResult{}, err
 	}
 	if !r.Decrypted {
 		if r.Why == "" {
 			r.Why = WhyDenied
 		}
-		return DecryptResult{Why: r.Why}, nil
+		return DecryptResult{Why: r.Why, Match: match}, nil
 	}
 	pt, err := security.DecodeB64(r.Plaintext)
 	if err != nil {
 		return DecryptResult{}, fmt.Errorf("phonetopc: the phone's plaintext is not base64url: %w", err)
 	}
-	return DecryptResult{Plaintext: pt}, nil
+	return DecryptResult{Plaintext: pt, Match: match}, nil
 }

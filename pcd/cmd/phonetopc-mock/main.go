@@ -52,8 +52,9 @@ const usage = `Usage:
 Serving is plaintext dev mode (ws://) unless --state is given, which
 selects secure mode (wss:// with the mock's own key, tokens checked).
 In secure mode the mock offers fingerprint approval and decryption;
---approval says how its "user" answers: auto (approve), deny, cancel, timeout (never answer),
-lockout, ask (on this terminal), tamper (approve with a corrupted
+--approval says how its "user" answers: auto (pick the right number and approve), deny,
+cancel, mismatch (pick a wrong number), timeout (never answer), lockout, ask (on this
+terminal), tamper (approve with a corrupted
 signature, to test clients) or off (neither capability). Its keys are
 attested by a test root made at start, which PCs don't trust: accept
 them with phonetopc approval-key --accept --unattested.

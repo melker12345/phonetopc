@@ -53,9 +53,10 @@ Commands:
   list                 list the phone's sensors
   get <source>         read the latest value of a source
   tail <source>        stream events of a source until Ctrl-C
-  approve "reason"     ask for approval with a fingerprint on the phone; exit 0
-                       approved, 1 not approved (denied, cancelled, timeout,
-                       busy, lockout, unavailable), 2 error:
+  approve "reason"     ask for approval with a fingerprint on the phone, after
+                       picking the number printed here; exit 0 approved, 1 not
+                       approved (denied, cancelled, mismatch, timeout, busy,
+                       cooldown, lockout, unavailable), 2 error:
                          phonetopc approve "Deploy?" && ./deploy.sh
   approval-key         show the phone's accepted and current approval key, and
                        what the phone's hardware proved about it

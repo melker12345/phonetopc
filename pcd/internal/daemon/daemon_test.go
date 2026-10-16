@@ -163,10 +163,14 @@ func connectedDaemon(t *testing.T, opts mockphone.Options) (*mockphone.Server, *
 	return srv, d, url
 }
 
+// response is an answer; for NDJSON (approvals, decryptions) body and
+// last are its last line, lines all of them.
 type response struct {
 	status int
 	body   map[string]any
 	raw    string
+	last   string
+	lines  []map[string]any
 }
 
 func do(t *testing.T, method, url, body string) response {
@@ -181,8 +185,17 @@ func do(t *testing.T, method, url, body string) response {
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(res.Body)
-	r := response{status: res.StatusCode, raw: string(b)}
-	_ = json.Unmarshal(b, &r.body)
+	r := response{status: res.StatusCode, raw: string(b), last: string(b)}
+	if res.Header.Get("Content-Type") == "application/x-ndjson" {
+		lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+		for _, l := range lines {
+			var m map[string]any
+			_ = json.Unmarshal([]byte(l), &m)
+			r.lines = append(r.lines, m)
+		}
+		r.last = lines[len(lines)-1]
+	}
+	_ = json.Unmarshal([]byte(r.last), &r.body)
 	return r
 }
 
@@ -773,8 +786,11 @@ func TestApprovals(t *testing.T) {
 	}
 
 	r := do(t, "POST", url+"/v1/approvals", `{"reason":"Deploy?"}`)
-	if r.status != 200 || r.body["approved"] != true || r.body["why"] != "approved" {
+	if r.status != 200 || r.body["approved"] != true || r.body["why"] != "approved" || len(r.lines) != 2 {
 		t.Fatalf("approved: %s", r.raw)
+	}
+	if m, _ := r.lines[0]["match"].(float64); m < 10 || m > 99 || r.lines[0]["program"] != protocol.DefaultProgram {
+		t.Fatalf("first line: %s", r.raw)
 	}
 
 	// The program's own nonce: it can check the proof without trusting the daemon.
@@ -783,7 +799,7 @@ func TestApprovals(t *testing.T) {
 	var proof struct {
 		Proof daemon.ApprovalProof `json:"proof"`
 	}
-	if err := json.Unmarshal([]byte(r.raw), &proof); err != nil || r.status != 200 {
+	if err := json.Unmarshal([]byte(r.last), &proof); err != nil || r.status != 200 {
 		t.Fatalf("with a nonce: %s", r.raw)
 	}
 	p := proof.Proof
@@ -791,14 +807,31 @@ func TestApprovals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin, _ := security.ApprovalKeyPin(p.Key); pin != p.KeyPin || p.Nonce != nonce || p.PCID != sp.pcID {
+	if pin, _ := security.ApprovalKeyPin(p.Key); pin != p.KeyPin || p.Nonce != nonce || p.PCID != sp.pcID ||
+		float64(p.Match) != r.lines[0]["match"] || p.Program != protocol.DefaultProgram {
 		t.Fatalf("proof %+v", p)
 	}
-	if err := security.VerifyApproval(key, p.Signature, security.ApprovalMessage(p.PhoneID, sp.pcID, nonce, "Deploy?")); err != nil {
+	if d := time.Until(time.UnixMilli(p.Expiry)); d < 30*time.Second || d > 41*time.Second {
+		t.Errorf("expiry in %v", d)
+	}
+	signed := security.Approval{
+		PhoneID: p.PhoneID, PCID: sp.pcID, Nonce: nonce, Reason: "Deploy?",
+		Program: p.Program, Match: p.Match, Expiry: p.Expiry,
+	}
+	if err := security.VerifyApproval(key, p.Signature, signed.Message()); err != nil {
 		t.Fatalf("proof doesn't verify: %v", err)
 	}
-	if err := security.VerifyApproval(key, p.Signature, security.ApprovalMessage(p.PhoneID, sp.pcID, nonce, "Deploy!")); err == nil {
-		t.Fatal("proof verifies for another reason")
+	for _, change := range []func(*security.Approval){
+		func(a *security.Approval) { a.Reason = "Deploy!" },
+		func(a *security.Approval) { a.Program = "other" },
+		func(a *security.Approval) { a.Match = 10 + (a.Match-9)%90 },
+		func(a *security.Approval) { a.Expiry++ },
+	} {
+		other := signed
+		change(&other)
+		if err := security.VerifyApproval(key, p.Signature, other.Message()); err == nil {
+			t.Fatalf("proof verifies for %+v", other)
+		}
 	}
 	wantStatus(t, do(t, "POST", url+"/v1/approvals", `{"reason":"Deploy?","nonce":"short"}`), 400, "invalid_request")
 
@@ -856,12 +889,13 @@ func TestDecryptions(t *testing.T) {
 	}
 
 	r = do(t, "POST", url+"/v1/decryptions", body(key.Pin, ct))
-	if r.status != 200 || r.body["decrypted"] != true || r.body["plaintext"] != security.B64(secret) {
+	if r.status != 200 || r.body["decrypted"] != true || r.body["plaintext"] != security.B64(secret) || len(r.lines) != 2 {
 		t.Fatalf("decrypt: %s", r.raw)
 	}
 	mu.Lock()
-	if len(got) != 1 || !got[0].Decrypt || got[0].Reason != "Decrypt notes.age" {
-		t.Errorf("the user saw %+v", got)
+	if len(got) != 1 || !got[0].Decrypt || got[0].Reason != "Decrypt notes.age" ||
+		r.lines[0]["match"] != float64(got[0].Match) || r.lines[0]["program"] != got[0].Program {
+		t.Errorf("the user saw %+v; the program %s", got, r.raw)
 	}
 	why = protocol.WhyDenied
 	mu.Unlock()

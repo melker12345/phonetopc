@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -97,7 +98,11 @@ func TestApproveIDMismatch(t *testing.T) {
 
 func TestApproveApproved(t *testing.T) {
 	env := testEnv(t, nil)
-	ph := startApprovalPhone(t, mockphone.ApproveAll, false)
+	seen := make(chan mockphone.ApprovalRequest, 2)
+	ph := startApprovalPhone(t, func(_ context.Context, req mockphone.ApprovalRequest) protocol.Why {
+		seen <- req
+		return ""
+	}, false)
 	pairDirect(t, env, ph.phone, "phone", []string{"127.0.0.1"})
 	if storedDevice(t, env).ApprovalKey != "" {
 		t.Fatal("approval key stored before first sight")
@@ -105,6 +110,12 @@ func TestApproveApproved(t *testing.T) {
 	code, out, errs := runCLI(t, tctx(t), env, "approve", "Deploy?")
 	if code != 0 || !strings.Contains(errs, `approved on "Test Phone"`) || out != "" {
 		t.Fatalf("approve: %d %q %s", code, out, errs)
+	}
+	// The number to pick is printed before the phone answers.
+	req := <-seen
+	pick := fmt.Sprintf(`pick %d on "Test Phone"`, req.Match)
+	if req.Program != "phonetopc" || !strings.Contains(errs, pick) || strings.Index(errs, pick) > strings.Index(errs, "approved on") {
+		t.Errorf("the phone saw %+v; the CLI printed %s", req, errs)
 	}
 	// First sight stored the key; info shows it as trusted.
 	pin := storedDevice(t, env).ApprovalKey
@@ -117,13 +128,14 @@ func TestApproveApproved(t *testing.T) {
 	}
 	code, out, _ = runCLI(t, tctx(t), env, "approve", "Deploy?", "--json", "--timeout", "10s")
 	var res map[string]any
-	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || res["approved"] != true {
+	req = <-seen
+	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || res["approved"] != true || res["match"] != float64(req.Match) {
 		t.Errorf("--json: %d %s", code, out)
 	}
 }
 
 func TestApproveNotApproved(t *testing.T) {
-	for _, why := range []protocol.Why{protocol.WhyDenied, protocol.WhyCancelled, protocol.WhyLockout} {
+	for _, why := range []protocol.Why{protocol.WhyDenied, protocol.WhyCancelled, protocol.WhyMismatch, protocol.WhyLockout} {
 		env := testEnv(t, nil)
 		ph := startApprovalPhone(t, mockphone.Answer(why), false)
 		pairDirect(t, env, ph.phone, "phone", []string{"127.0.0.1"})

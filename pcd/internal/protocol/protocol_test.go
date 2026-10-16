@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckReason(t *testing.T) {
@@ -336,6 +337,47 @@ func TestDecodeParams(t *testing.T) {
 	for _, bad := range []string{`[]`, `"x"`, `1`, `{"source":1}`} {
 		if err := DecodeParams(json.RawMessage(bad), &p); err == nil || err.Code != CodeInvalidParams {
 			t.Errorf("%q: got %v, want -32602", bad, err)
+		}
+	}
+}
+
+func TestCheckProgramMatchExpiry(t *testing.T) {
+	for _, ok := range []string{"deploy.sh", "a program", "python3.12", strings.Repeat("ä", 60)} {
+		if err := CheckProgram(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", " deploy", "deploy ", strings.Repeat("x", 61), "tab\there", "rlo\u202Etxt.exe"} {
+		if err := CheckProgram(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for m, ok := range map[int]bool{9: false, 10: true, 42: true, 99: true, 100: false, -42: false} {
+		if (CheckMatch(m) == nil) != ok {
+			t.Errorf("match %d: want ok %v", m, ok)
+		}
+	}
+	now := time.UnixMilli(1760000000000)
+	ms := now.UnixMilli()
+	for _, c := range []struct {
+		expiry  int64
+		timeout time.Duration
+		ok      bool
+	}{
+		{ms, 30 * time.Second, true},
+		{ms - 300000, 30 * time.Second, true},
+		{ms - 300001, 30 * time.Second, false},
+		{ms + 30000 + 60000 + 300000, 30 * time.Second, true},
+		{ms + 30000 + 60000 + 300001, 30 * time.Second, false},
+		{ms + 120000 + 60000 + 300000, 120 * time.Second, true},
+	} {
+		if (CheckExpiry(c.expiry, c.timeout, now) == nil) != c.ok {
+			t.Errorf("expiry now%+dms, timeout %v: want ok %v", c.expiry-ms, c.timeout, c.ok)
+		}
+	}
+	for _, w := range Whys {
+		if w.CountsForCooldown() != (w == WhyDenied || w == WhyCancelled || w == WhyMismatch) {
+			t.Errorf("%s counts for the cool-down: %v", w, w.CountsForCooldown())
 		}
 	}
 }

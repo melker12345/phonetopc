@@ -173,27 +173,43 @@ daemon ends the stream with an `error` event.
 
 `reason` is shown on the phone and signed exactly as given (`APPROVAL.md` §4: 1–200 characters, no leading or
 trailing whitespace, no control characters). `timeout_ms` is optional: default 30000, 5000 to 120000. `nonce` is
-optional; without it the daemon makes one. The request waits for the user, then answers 200:
+optional; without it the daemon makes one.
+
+The answer is 200 with `Content-Type: application/x-ndjson`, one JSON object per line. The first line comes at
+once, the second once the user acted:
 
 ```json
+{"match": 42, "program": "python3"}
 {"approved": true, "why": "approved", "proof": {"signature": "…", "key": "…", "key_pin": "sha256/…",
- "nonce": "…", "phone_id": "…", "pc_id": "…"}}
-{"approved": false, "why": "denied"}
+ "nonce": "…", "phone_id": "…", "pc_id": "…", "program": "python3", "match": 42, "expiry": 1760000040000}}
 ```
 
-`why` is `approved`, or one of `denied`, `cancelled`, `timeout`, `busy` (this PC already has an approval or
-decryption pending, or too many PCs are waiting), `lockout`, `unavailable`. `approved` is `true` only after the
-daemon verified the phone's signature over a fresh nonce, the reason and both ids with the trusted approval key.
-Errors: 409 `approval_key_changed` when the phone's approval key changed (typically fingerprints were added or
-removed; accept it with `phonetopc approval-key --accept`; nothing was sent to the phone), 409
-`approval_key_unattested` when the phone's hardware didn't prove that the key needs a fingerprint for every use
-(`APPROVAL.md` §3.1; the message names the failed check; nothing was sent), and 502 `approval_invalid` for a
-signature that didn't verify.
+**Show `match` to your user** (for example "pick 42 on your phone"): the phone offers three numbers and only
+this one opens the fingerprint prompt (`APPROVAL.md` §4.2). `program` is what the phone names as the asker: the
+file name of the executable at the other end of the connection (for a script, its interpreter), which the daemon
+looks up on Linux, or `a program`.
+
+The last line is the outcome: `{"approved": false, "why": "denied"}` and so on, or an error object as in §2, for
+errors after the first line (for example 502 `approval_invalid` or 504 `no_answer`; its HTTP status was 200
+already). A request that ends before it reaches the phone has only the outcome line. Closing the connection
+cancels the request.
+
+`why` is `approved`, or one of `denied`, `cancelled`, `mismatch` (the user picked another number), `timeout`,
+`busy` (this PC already has an approval or decryption pending, or too many PCs are waiting), `cooldown` (the
+user refused this PC three times within 10 minutes; requests are refused for 5 minutes), `lockout`,
+`unavailable`. `approved` is `true` only after the daemon verified the phone's signature over a fresh nonce,
+the reason, the program, the number, the expiry and both ids with the trusted approval key. Errors: 409
+`approval_key_changed` when the phone's approval key changed (typically fingerprints were added or removed;
+accept it with `phonetopc approval-key --accept`; nothing was sent to the phone), 409 `approval_key_unattested`
+when the phone's hardware didn't prove that the key needs a fingerprint for every use (`APPROVAL.md` §3.1; the
+message names the failed check; nothing was sent), and 502 `approval_invalid` for a signature that didn't
+verify.
 
 **Checking it yourself.** `proof` lets a program verify the phone's answer instead of trusting the daemon. Send your
-own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce` is your nonce, `key_pin` is the pin
-of `key` (`SECURITY.md` §2) and equals yours, and `signature` verifies with `key` over the message of `APPROVAL.md`
-§5, built from your nonce, your reason, `phone_id` and `pc_id`.
+own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce` is your nonce, `match` is the
+number you showed, `expiry` hasn't passed, `key_pin` is the pin of `key` (`SECURITY.md` §2) and equals yours, and
+`signature` verifies with `key` over the message of `APPROVAL.md` §5, built from your nonce, your reason,
+`program`, `match`, `expiry`, `phone_id` and `pc_id`.
 
 ## 6. Decryption: `POST /v1/decryptions`
 
@@ -217,18 +233,19 @@ Encrypt to it yourself, without the phone: RSAES-OAEP with SHA-256, MGF1 with SH
 {"reason": "Decrypt the backup key", "key_pin": "sha256/…", "ciphertext": "<base64url>", "timeout_ms": 30000}
 ```
 
-`reason` follows the rules of §5. The request waits for the user, then answers 200:
+`reason` follows the rules of §5. The answer streams like §5's: first `{"match", "program"}`, which you show to
+your user, then the outcome:
 
 ```json
+{"match": 42, "program": "backup"}
 {"decrypted": true, "why": "decrypted", "plaintext": "<base64url>"}
-{"decrypted": false, "why": "denied"}
 ```
 
-`why` is `decrypted`, one of the outcomes of §5, or `failed`: the user confirmed, but the ciphertext doesn't decrypt
-with this key. The phone can't tell a right plaintext from a wrong one, so check it, for example with an
-authenticated cipher. Errors: 409 `decrypt_key_changed` when `key_pin` isn't the phone's current key (it is replaced
-when fingerprints are added or removed; nothing was sent), and 409 `decrypt_unavailable` when the phone can't
-decrypt.
+`why` is `decrypted`, one of the outcomes of §5 (`{"decrypted": false, "why": "denied"}`), or `failed`: the user
+confirmed, but the ciphertext doesn't decrypt with this key. The phone can't tell a right plaintext from a wrong
+one, so check it, for example with an authenticated cipher. Errors: 409 `decrypt_key_changed` when `key_pin` isn't
+the phone's current key (it is replaced when fingerprints are added or removed; nothing was sent), and 409
+`decrypt_unavailable` when the phone can't decrypt.
 
 ## 7. Notifications
 
@@ -286,7 +303,8 @@ Shell:
 curl -s localhost:8767/v1/sensors/battery
 curl -sN 'localhost:8767/v1/events?source=gyro&rate=20'
 curl -s localhost:8767/v1/notifications -d '{"title":"Build done"}'
-curl -s localhost:8767/v1/approvals -d '{"reason":"Deploy?"}' | grep -q '"approved":true' && ./deploy.sh
+# prints {"match": 42, …} at once; pick 42 on the phone
+curl -sN localhost:8767/v1/approvals -d '{"reason":"Deploy?"}' | tee /dev/stderr | grep -q '"approved":true' && ./deploy.sh
 
 # lock the PC when the Quick Settings tile is tapped
 curl -sN 'localhost:8767/v1/events?source=ui' |

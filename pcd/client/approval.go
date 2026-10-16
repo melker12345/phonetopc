@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/melker12345/phonetopc/pcd/internal/attest"
@@ -25,11 +26,16 @@ type Why = protocol.Why
 const (
 	WhyDenied      = protocol.WhyDenied
 	WhyCancelled   = protocol.WhyCancelled
+	WhyMismatch    = protocol.WhyMismatch
 	WhyTimeout     = protocol.WhyTimeout
 	WhyBusy        = protocol.WhyBusy
+	WhyCooldown    = protocol.WhyCooldown
 	WhyLockout     = protocol.WhyLockout
 	WhyUnavailable = protocol.WhyUnavailable
 )
+
+// DefaultProgram is the program name sent when none is given.
+const DefaultProgram = protocol.DefaultProgram
 
 // Limits of RequestApproval's timeout (APPROVAL.md §4).
 const (
@@ -44,9 +50,12 @@ type ApprovalResult struct {
 	approved bool
 	// Why says why the approval was not given; empty when approved.
 	Why Why
-	// Reason is the reason as sent, Nonce the nonce generated for this
-	// request.
-	Reason, Nonce string
+	// Reason, Program and Nonce are as sent.
+	Reason, Program, Nonce string
+	// Match is the number the user had to pick, and Expiry when the
+	// signature expires, in Unix milliseconds.
+	Match  int
+	Expiry int64
 	// Signature is the verified signature (base64url DER) when approved.
 	Signature string
 	// Key is the approval key (base64url DER SubjectPublicKeyInfo) and
@@ -269,49 +278,59 @@ func (c *Client) approvalKey(ctx context.Context) (*ecdsa.PublicKey, string, str
 	return key, pin, level, nil
 }
 
-// RequestApproval asks the phone's user to approve reason with a
-// fingerprint (APPROVAL.md §4) and waits up to timeout (0 means 30 s;
-// allowed 5 s to 2 min) for the answer.
-//
-// The result is approved only if the phone signed this request's fresh
-// nonce, reason, phone id and PC id with the trusted approval key. Not
-// approved (denied, cancelled, timeout, busy, lockout, unavailable) is a
-// result, not an error. Errors: invalid arguments; an
-// *ApprovalKeyChangedError or a *KeyAttestationError, in which case
-// nothing was sent; an
-// *ApprovalInvalidError for an approval that failed verification, or,
-// with nothing sent, for a phone whose hello ids differ from the stored
-// pairing; and
-// connection problems.
-func (c *Client) RequestApproval(ctx context.Context, reason string, timeout time.Duration) (ApprovalResult, error) {
-	nonce := security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
-	if c.opts.testNonce != "" {
-		nonce = c.opts.testNonce // tests replaying signed vectors only
-	}
-	return c.RequestApprovalNonce(ctx, reason, nonce, timeout)
+// ApprovalRequest is what RequestApproval asks for.
+type ApprovalRequest struct {
+	// Reason is shown on the phone and signed exactly as given.
+	Reason string
+	// Program names who asks, shown on the phone as "<Program> on <PC>";
+	// "" sends DefaultProgram.
+	Program string
+	// Timeout is how long the user has; 0 means 30 s, allowed 5 s to 2 min.
+	Timeout time.Duration
+	// Nonce is base64url of 32 bytes, which must never be reused; "" makes
+	// a fresh one. A program that picks the nonce can verify the signature
+	// itself, without trusting whoever relayed it.
+	Nonce string
+	// ShowMatch shows the user the number to pick on the phone
+	// (APPROVAL.md §4.2). It is required, and called once, right before the
+	// request is sent; it must not block.
+	ShowMatch func(match int)
 }
 
-// RequestApprovalNonce is RequestApproval with a nonce chosen by the
-// caller: base64url of 32 bytes, which it must never reuse. A program
-// that picks the nonce can verify the signature itself, without trusting
-// whoever relayed it.
-func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string, timeout time.Duration) (ApprovalResult, error) {
+// RequestApproval asks the phone's user to approve req.Reason with a
+// fingerprint (APPROVAL.md §4), after picking the number req.ShowMatch
+// shows, and waits for the answer.
+//
+// The result is approved only if the phone signed this request's fresh
+// nonce, reason, program, number, expiry, phone id and PC id with the
+// trusted approval key. Not approved (denied, cancelled, mismatch,
+// timeout, busy, cooldown, lockout, unavailable) is a result, not an
+// error. Errors: invalid arguments; an *ApprovalKeyChangedError or a
+// *KeyAttestationError, in which case nothing was sent; an
+// *ApprovalInvalidError for an approval that failed verification, or,
+// with nothing sent, for a phone whose hello ids differ from the stored
+// pairing; and connection problems.
+func (c *Client) RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResult, error) {
+	nonce := req.Nonce
+	switch {
+	case c.opts.testNonce != "":
+		nonce = c.opts.testNonce // tests replaying signed vectors only
+	case nonce == "":
+		nonce = security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
+	}
 	if n, err := security.DecodeB64(nonce); err != nil || len(n) != protocol.ApprovalNonceSize {
 		return ApprovalResult{}, fmt.Errorf("phonetopc: the nonce must be base64url of %d bytes", protocol.ApprovalNonceSize)
 	}
 	// APPROVAL.md §4: the reason is sent and signed exactly as given, never
 	// trimmed; check it before sending, as the phone would.
-	if err := protocol.CheckReason(reason); err != nil {
+	if err := protocol.CheckReason(req.Reason); err != nil {
 		return ApprovalResult{}, fmt.Errorf("phonetopc: %w", err)
 	}
-	if timeout == 0 {
-		timeout = DefaultApprovalTimeout
+	program, timeout, err := checkAsk(req.Program, req.Timeout, req.ShowMatch, "approval")
+	if err != nil {
+		return ApprovalResult{}, err
 	}
-	if timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout {
-		return ApprovalResult{}, fmt.Errorf("phonetopc: approval timeout %v is outside %v–%v", timeout, MinApprovalTimeout, MaxApprovalTimeout)
-	}
-	timeout = timeout.Truncate(time.Millisecond)
-	res := ApprovalResult{Reason: reason}
+	res := ApprovalResult{Reason: req.Reason, Program: program}
 
 	h := c.Server()
 	if h.PC == nil {
@@ -340,25 +359,16 @@ func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string,
 	}
 	res.Key, res.KeyPin, res.Attestation = h.Approval.Key, pin, level
 	res.Nonce = nonce
+	res.Match = c.match()
+	res.Expiry = c.now().Add(timeout + protocol.ExpiryAfterTimeout).UnixMilli()
 	ms := timeout.Milliseconds()
-	params := protocol.RequestApprovalParams{Reason: reason, Nonce: res.Nonce, TimeoutMS: &ms}
-	// §4: never give up before timeout_ms + 5 s; allow a little more.
-	wait := timeout + protocol.ApprovalResponseLeeway + approvalWaitSlack
-	cctx, cancel := context.WithTimeout(ctx, wait)
-	defer cancel()
-	var raw json.RawMessage
-	err = c.Call(cctx, protocol.MethodRequestApproval, params, &raw)
-	switch {
-	case err == nil:
-	case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
-		// §4: our own wait running out is an error, not a why.
-		return res, fmt.Errorf("%w: no answer from the phone within %v", ErrApprovalNoAnswer, wait)
-	default:
-		return res, err
+	params := protocol.RequestApprovalParams{
+		Reason: req.Reason, Program: program, Nonce: nonce, Match: res.Match, Expiry: res.Expiry, TimeoutMS: &ms,
 	}
+	req.ShowMatch(res.Match)
 	var r protocol.RequestApprovalResult
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return res, fmt.Errorf("phonetopc: decoding request_approval result: %w", err)
+	if err := c.callAsk(ctx, protocol.MethodRequestApproval, params, timeout, &r); err != nil {
+		return res, err
 	}
 	if !r.Approved {
 		res.Why = r.Why
@@ -370,12 +380,74 @@ func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string,
 	if r.Signature == "" {
 		return res, &ApprovalInvalidError{Problem: "the phone said approved without a signature"}
 	}
-	// §5: built from our own nonce, reason and ids, never echoed values.
-	msg := security.ApprovalMessage(phoneID, pcID, res.Nonce, reason)
+	// §5: built from our own values, never echoed ones.
+	msg := security.Approval{
+		PhoneID: phoneID, PCID: pcID, Nonce: nonce, Reason: req.Reason,
+		Program: program, Match: res.Match, Expiry: res.Expiry,
+	}.Message()
 	if err := security.VerifyApproval(key, r.Signature, msg); err != nil {
 		return res, &ApprovalInvalidError{Problem: "the phone said approved, but the signature is invalid", Err: err}
 	}
 	res.approved = true
 	res.Signature = r.Signature
 	return res, nil
+}
+
+// checkAsk checks what request_approval and decrypt have in common, and
+// returns the program to send and the timeout.
+func checkAsk(program string, timeout time.Duration, show func(int), what string) (string, time.Duration, error) {
+	if program == "" {
+		program = DefaultProgram
+	}
+	if err := protocol.CheckProgram(program); err != nil {
+		return "", 0, fmt.Errorf("phonetopc: %w", err)
+	}
+	if show == nil {
+		return "", 0, errors.New("phonetopc: ShowMatch is required: the user must see the number to pick on the phone")
+	}
+	if timeout == 0 {
+		timeout = DefaultApprovalTimeout
+	}
+	if timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout {
+		return "", 0, fmt.Errorf("phonetopc: %s timeout %v is outside %v–%v", what, timeout, MinApprovalTimeout, MaxApprovalTimeout)
+	}
+	return program, timeout.Truncate(time.Millisecond), nil
+}
+
+// match picks the number the user must pick (APPROVAL.md §4).
+func (c *Client) match() int {
+	if c.opts.testMatch != 0 {
+		return c.opts.testMatch
+	}
+	return protocol.MinMatch + rand.IntN(protocol.MaxMatch-protocol.MinMatch+1)
+}
+
+func (c *Client) now() time.Time {
+	if c.opts.testNow != nil {
+		return c.opts.testNow()
+	}
+	return time.Now()
+}
+
+// callAsk calls request_approval or decrypt, which answer once the user
+// acted, and decodes the result into res.
+func (c *Client) callAsk(ctx context.Context, method string, params any, timeout time.Duration, res any) error {
+	// §4: never give up before timeout_ms + 5 s; allow a little more.
+	wait := timeout + protocol.ApprovalResponseLeeway + approvalWaitSlack
+	cctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	var raw json.RawMessage
+	err := c.Call(cctx, method, params, &raw)
+	switch {
+	case err == nil:
+	case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
+		// §4: our own wait running out is an error, not a why.
+		return fmt.Errorf("%w: no answer from the phone within %v", ErrApprovalNoAnswer, wait)
+	default:
+		return err
+	}
+	if err := json.Unmarshal(raw, res); err != nil {
+		return fmt.Errorf("phonetopc: decoding the %s result: %w", method, err)
+	}
+	return nil
 }

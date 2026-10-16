@@ -8,20 +8,36 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
 // Fingerprint approval signatures (APPROVAL.md §5).
 
 // ApprovalLabel is the first line of the signed approval message.
-const ApprovalLabel = "phonetopc-approval/1"
+const ApprovalLabel = "phonetopc-approval/2"
 
-// ApprovalMessage returns the bytes a phone signs for an approval: the
-// label, phone id, PC id, nonce (base64url as sent) and
-// base64url(SHA-256(reason)), joined by "\n" without a trailing newline.
-func ApprovalMessage(phoneID, pcID, nonce, reason string) []byte {
-	sum := sha256.Sum256([]byte(reason))
-	return []byte(strings.Join([]string{ApprovalLabel, phoneID, pcID, nonce, B64(sum[:])}, "\n"))
+// Approval holds what an approval signature covers.
+type Approval struct {
+	PhoneID, PCID string
+	// Nonce is base64url as sent.
+	Nonce           string
+	Reason, Program string
+	Match           int
+	// Expiry is in Unix milliseconds.
+	Expiry int64
+}
+
+// Message returns the bytes a phone signs for a: the label, phone id, PC
+// id, nonce, base64url(SHA-256(reason)), base64url(SHA-256(program)), match
+// and expiry, joined by "\n" without a trailing newline.
+func (a Approval) Message() []byte {
+	reason := sha256.Sum256([]byte(a.Reason))
+	program := sha256.Sum256([]byte(a.Program))
+	return []byte(strings.Join([]string{
+		ApprovalLabel, a.PhoneID, a.PCID, a.Nonce, B64(reason[:]), B64(program[:]),
+		strconv.Itoa(a.Match), strconv.FormatInt(a.Expiry, 10),
+	}, "\n"))
 }
 
 // ErrBadApprovalSignature is returned (wrapped) by VerifyApproval for a

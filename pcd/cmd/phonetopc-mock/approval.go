@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +20,7 @@ import (
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
-const approvalModes = "auto, deny, cancel, timeout, lockout, ask, tamper or off"
+const approvalModes = "auto, deny, cancel, mismatch, timeout, lockout, ask, tamper or off"
 
 // st holds the approval key; in is read only for "ask".
 func approvalOptions(opts *mockphone.Options, mode string, delay time.Duration, st *mockphone.State, in io.Reader, out io.Writer) error {
@@ -67,6 +69,8 @@ func approvalOptions(opts *mockphone.Options, mode string, delay time.Duration, 
 		opts.Approve = after(protocol.WhyDenied)
 	case "cancel":
 		opts.Approve = after(protocol.WhyCancelled)
+	case "mismatch":
+		opts.Approve = after(protocol.WhyMismatch)
 	case "lockout":
 		opts.Approve = after(protocol.WhyLockout)
 	case "timeout":
@@ -106,7 +110,9 @@ func (a *asker) ask(ctx context.Context, req mockphone.ApprovalRequest) protocol
 	if req.Decrypt {
 		what = "to decrypt"
 	}
-	fmt.Fprintf(a.out, "\n%q asks %s (%v to answer):\n    %s\nApprove with your fingerprint? [y = approve, n = deny, c = cancel, l = lockout] ", req.PC.Name, what, req.Timeout, req.Reason)
+	choices := fmt.Sprintf("%d / %d / %d", req.Choices[0], req.Choices[1], req.Choices[2])
+	fmt.Fprintf(a.out, "\n%s on %q asks %s (%v to answer):\n    %s\nPick the number shown on the PC to approve [%s], or n = deny, c = cancel, l = lockout: ",
+		req.Program, req.PC.Name, what, req.Timeout, req.Reason, choices)
 	for {
 		select {
 		case <-ctx.Done():
@@ -121,9 +127,14 @@ func (a *asker) ask(ctx context.Context, req mockphone.ApprovalRequest) protocol
 				fmt.Fprintln(a.out, "\n(no terminal input; cancelled)")
 				return protocol.WhyCancelled
 			}
-			switch strings.ToLower(strings.TrimSpace(line)) {
-			case "y", "yes":
+			answer := strings.ToLower(strings.TrimSpace(line))
+			if n, err := strconv.Atoi(answer); err == nil && slices.Contains(req.Choices[:], n) {
+				if n != req.Match {
+					return protocol.WhyMismatch
+				}
 				return ""
+			}
+			switch answer {
 			case "n", "no":
 				return protocol.WhyDenied
 			case "c":
@@ -131,7 +142,7 @@ func (a *asker) ask(ctx context.Context, req mockphone.ApprovalRequest) protocol
 			case "l":
 				return protocol.WhyLockout
 			}
-			fmt.Fprint(a.out, "[y/n/c/l] ")
+			fmt.Fprintf(a.out, "[%s/n/c/l] ", choices)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -74,15 +75,19 @@ func TestApprovalApproved(t *testing.T) {
 	if !h.HasCapability(protocol.CapabilityApproval) || h.Approval == nil || h.Approval.Pin != m.pin {
 		t.Fatalf("hello %+v approval %+v", h, h.Approval)
 	}
-	res, err := c.RequestApproval(testCtx(t), "Run deploy.sh?", 10*time.Second)
+	res, err := c.RequestApproval(testCtx(t), ask("Run deploy.sh?", 10*time.Second))
 	if err != nil || !res.Approved() {
 		t.Fatalf("%+v %v", res, err)
 	}
-	if seen.Reason != "Run deploy.sh?" || seen.PC.ID != "pc-1" || seen.Timeout != 10*time.Second {
+	if seen.Reason != "Run deploy.sh?" || seen.PC.ID != "pc-1" || seen.Timeout != 10*time.Second ||
+		seen.Program != "mock test" || seen.Match != res.Match || !slices.Contains(seen.Choices[:], res.Match) {
 		t.Errorf("the user saw %+v", seen)
 	}
 	// The signature is over exactly the message of §5.
-	msg := security.ApprovalMessage(h.Device.ID, "pc-1", res.Nonce, "Run deploy.sh?")
+	msg := security.Approval{
+		PhoneID: h.Device.ID, PCID: "pc-1", Nonce: res.Nonce, Reason: "Run deploy.sh?",
+		Program: "mock test", Match: res.Match, Expiry: res.Expiry,
+	}.Message()
 	if err := security.VerifyApproval(&m.key.PublicKey, res.Signature, msg); err != nil {
 		t.Error(err)
 	}
@@ -94,9 +99,9 @@ func TestApprovalApproved(t *testing.T) {
 }
 
 func TestApprovalOutcomes(t *testing.T) {
-	for _, why := range []protocol.Why{protocol.WhyDenied, protocol.WhyCancelled, protocol.WhyLockout} {
+	for _, why := range []protocol.Why{protocol.WhyDenied, protocol.WhyCancelled, protocol.WhyMismatch, protocol.WhyLockout} {
 		m := startApproval(t, mockphone.Answer(why), nil)
-		res, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+		res, err := m.dialApproval(t).RequestApproval(testCtx(t), ask("Deploy?", 0))
 		if err != nil || res.Approved() || res.Why != why {
 			t.Errorf("%s: %+v %v", why, res, err)
 		}
@@ -119,7 +124,7 @@ func TestApprovalTimeoutKeepsEventsFlowing(t *testing.T) {
 	)
 	go func() {
 		defer close(done)
-		res, rerr = c.RequestApproval(testCtx(t), "Deploy?", client.MinApprovalTimeout)
+		res, rerr = c.RequestApproval(testCtx(t), ask("Deploy?", client.MinApprovalTimeout))
 	}()
 	// Events and other calls continue while the approval is pending.
 	nextEvent(t, sub)
@@ -145,12 +150,12 @@ func TestApprovalBusyAndCancelOnClose(t *testing.T) {
 		return protocol.WhyTimeout
 	}, nil)
 	first := m.dialApproval(t)
-	go first.RequestApproval(context.Background(), "first", 60*time.Second)
+	go first.RequestApproval(context.Background(), ask("first", 60*time.Second))
 	<-asked
 
 	// One at a time per PC, across sessions.
 	second := m.dialApproval(t)
-	res, err := second.RequestApproval(testCtx(t), "second", 0)
+	res, err := second.RequestApproval(testCtx(t), ask("second", 0))
 	if err != nil || res.Why != client.WhyBusy {
 		t.Fatalf("want busy, got %+v %v", res, err)
 	}
@@ -167,7 +172,7 @@ func TestApprovalBusyAndCancelOnClose(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		go second.RequestApproval(context.Background(), "third", 60*time.Second)
+		go second.RequestApproval(context.Background(), ask("third", 60*time.Second))
 		select {
 		case <-asked:
 			return // shown to the user: no longer busy
@@ -243,7 +248,7 @@ func (q *queueMock) ask(t *testing.T, c *client.Client, timeout time.Duration) <
 	t.Helper()
 	ch := make(chan approvalAnswer, 1)
 	go func() {
-		res, err := c.RequestApproval(context.Background(), "Deploy?", timeout)
+		res, err := c.RequestApproval(context.Background(), ask("Deploy?", timeout))
 		ch <- approvalAnswer{res, err}
 	}()
 	select {
@@ -379,7 +384,7 @@ func TestApprovalQueueBound(t *testing.T) {
 
 func TestApprovalTampered(t *testing.T) {
 	m := startApproval(t, mockphone.ApproveAll, func(o *mockphone.Options) { o.TamperApprovals = true })
-	res, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+	res, err := m.dialApproval(t).RequestApproval(testCtx(t), ask("Deploy?", 0))
 	if res.Approved() || !errors.Is(err, client.ErrApprovalInvalid) {
 		t.Fatalf("tampered signature: %+v %v", res, err)
 	}
@@ -403,17 +408,17 @@ func TestApprovalUnavailableAndDevMode(t *testing.T) {
 		t.Fatal(resp.Error)
 	}
 	nonce := security.B64(security.RandomBytes(32))
-	resp := r.call(protocol.MethodRequestApproval, map[string]any{"reason": "Deploy?", "nonce": nonce})
+	resp := r.call(protocol.MethodRequestApproval, approvalParams(nonce, nil))
 	if resp.Error != nil || !strings.Contains(string(resp.Result), `"why":"unavailable"`) {
 		t.Errorf("no key: %s %+v", resp.Result, resp.Error)
 	}
-	wantError(t, r.call(protocol.MethodRequestApproval, map[string]any{"reason": " Deploy?", "nonce": nonce}), protocol.CodeInvalidParams, "2")
+	wantError(t, r.call(protocol.MethodRequestApproval, approvalParams(nonce, map[string]any{"reason": " Deploy?"})), protocol.CodeInvalidParams, "2")
 
 	// Dev mode: the method doesn't exist.
 	_, url := start(t, quietOptions())
 	rd := dialRaw(t, url, nil)
 	rd.hello()
-	wantError(t, rd.call(protocol.MethodRequestApproval, map[string]any{"reason": "Deploy?", "nonce": nonce}), protocol.CodeMethodNotFound, "2")
+	wantError(t, rd.call(protocol.MethodRequestApproval, approvalParams(nonce, nil)), protocol.CodeMethodNotFound, "2")
 }
 
 func TestApprovalKeyFromState(t *testing.T) {
@@ -442,7 +447,7 @@ func TestApprovalKeyFromState(t *testing.T) {
 // anything is sent.
 func TestApprovalAttestation(t *testing.T) {
 	m := startApproval(t, mockphone.ApproveAll, nil)
-	res, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+	res, err := m.dialApproval(t).RequestApproval(testCtx(t), ask("Deploy?", 0))
 	if err != nil || !res.Approved() || res.Attestation != client.AttestedTEE {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -471,7 +476,7 @@ func TestApprovalAttestation(t *testing.T) {
 			}
 		})
 		pin = cmp.Or(c.pin, m.id.Pin)
-		_, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+		_, err := m.dialApproval(t).RequestApproval(testCtx(t), ask("Deploy?", 0))
 		var kae *client.KeyAttestationError
 		if !errors.As(err, &kae) || kae.Check != c.check || asked {
 			t.Errorf("%s: %v, asked %v", c.check, err, asked)

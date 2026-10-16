@@ -17,7 +17,8 @@ func TestApprovalModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := mockphone.ApprovalRequest{PC: protocol.PCInfo{Name: "desk"}, Reason: "Deploy?", Timeout: time.Second}
+	req := mockphone.ApprovalRequest{PC: protocol.PCInfo{Name: "desk"}, Program: "deploy.sh", Reason: "Deploy?",
+		Choices: [3]int{12, 42, 77}, Match: 42, Timeout: time.Second}
 	decide := func(mode, input string) (mockphone.Options, protocol.Why, string) {
 		var o mockphone.Options
 		var out bytes.Buffer
@@ -29,7 +30,7 @@ func TestApprovalModes(t *testing.T) {
 		return o, o.Approve(ctx, req), out.String()
 	}
 	for mode, want := range map[string]protocol.Why{
-		"auto": "", "tamper": "", "deny": protocol.WhyDenied, "cancel": protocol.WhyCancelled,
+		"auto": "", "tamper": "", "deny": protocol.WhyDenied, "cancel": protocol.WhyCancelled, "mismatch": protocol.WhyMismatch,
 		"lockout": protocol.WhyLockout, "timeout": protocol.WhyTimeout,
 	} {
 		o, why, _ := decide(mode, "")
@@ -37,8 +38,12 @@ func TestApprovalModes(t *testing.T) {
 			t.Errorf("%s: why %q, options %+v", mode, why, o)
 		}
 	}
-	if _, why, out := decide("ask", "maybe\ny\n"); why != "" || !strings.Contains(out, `"desk" asks for approval`) || !strings.Contains(out, "Deploy?") {
-		t.Errorf("ask y: %q\n%s", why, out)
+	if _, why, out := decide("ask", "maybe\n13\n42\n"); why != "" || !strings.Contains(out, `deploy.sh on "desk" asks for approval`) ||
+		!strings.Contains(out, "Deploy?") || !strings.Contains(out, "[12 / 42 / 77]") {
+		t.Errorf("ask 42: %q\n%s", why, out)
+	}
+	if _, why, _ := decide("ask", "77\n"); why != protocol.WhyMismatch {
+		t.Errorf("ask 77: %q", why)
 	}
 	if _, why, _ := decide("ask", "n\n"); why != protocol.WhyDenied {
 		t.Errorf("ask n: %q", why)

@@ -218,9 +218,12 @@ func unixClient(path string) *http.Client {
 	}}
 }
 
+// response is an answer; for NDJSON (approvals) first is its first line
+// and body its last.
 type response struct {
 	status int
 	body   map[string]any
+	first  map[string]any
 	raw    string
 }
 
@@ -247,7 +250,13 @@ func tryDo(c *http.Client, method, url, token, body string) (response, error) {
 	defer res.Body.Close()
 	b, err := io.ReadAll(res.Body)
 	r := response{status: res.StatusCode, raw: string(b)}
-	json.Unmarshal(b, &r.body)
+	last := b
+	if res.Header.Get("Content-Type") == "application/x-ndjson" {
+		lines := bytes.Split(bytes.TrimSuffix(b, []byte("\n")), []byte("\n"))
+		json.Unmarshal(lines[0], &r.first)
+		last = lines[len(lines)-1]
+	}
+	json.Unmarshal(last, &r.body)
 	return r, err
 }
 
@@ -483,7 +492,12 @@ func TestPairedModeStreamsApprovesAndSeesRevocation(t *testing.T) {
 		t.Fatalf("approval-key --accept --unattested: %v\n%s", err, out)
 	}
 	r = do(t, uc, "POST", "http://phonetopc/v1/approvals", "", `{"reason":"Deploy?"}`)
-	if r.status != 200 || r.body["approved"] != true {
+	exe, _ := os.Executable()
+	program := filepath.Base(exe)
+	if runtime.GOOS != "linux" {
+		program = "a program"
+	}
+	if r.status != 200 || r.body["approved"] != true || r.first["match"] == nil || r.first["program"] != program {
 		t.Fatalf("approval: %s", r.raw)
 	}
 

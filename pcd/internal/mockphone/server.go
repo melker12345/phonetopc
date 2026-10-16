@@ -107,6 +107,9 @@ type Options struct {
 	// TamperApprovals corrupts the signature of every approval it gives: a
 	// test hook for clients, which must report an error, not approval.
 	TamperApprovals bool
+	// Now, if set, is the phone's clock for the expiry and cool-down of
+	// approvals (APPROVAL.md §4, §4.3). Default time.Now.
+	Now func() time.Time
 
 	// NoNotify and NoPanels play a user who hasn't allowed notifications or
 	// panels (PANELS.md §1): the methods fail with not_allowed. A phone
@@ -204,6 +207,8 @@ type Server struct {
 	// their turn (APPROVAL.md §4).
 	approvalShown   *approvalSlot
 	approvalWaiting []*approvalSlot
+	// cooldowns by PC id (APPROVAL.md §4.3).
+	cooldowns map[string]*cooldown
 }
 
 // New creates a server and starts its simulation.
@@ -211,11 +216,12 @@ func New(opts Options) *Server {
 	opts.setDefaults()
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		opts:     opts,
-		start:    time.Now(),
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[*session]struct{}),
+		opts:      opts,
+		start:     time.Now(),
+		ctx:       ctx,
+		cancel:    cancel,
+		sessions:  make(map[*session]struct{}),
+		cooldowns: make(map[string]*cooldown),
 
 		authFailures: hostlimit.New(opts.MaxAuthFailures, time.Minute),
 	}

@@ -38,6 +38,8 @@ func (s *Server) decryptInfo(key *rsa.PrivateKey) *protocol.DecryptInfo {
 func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result any, async bool, rpcErr *protocol.Error) {
 	var p struct {
 		Reason     *string         `json:"reason"`
+		Program    *string         `json:"program"`
+		Match      json.RawMessage `json:"match"`
 		KeyPin     *string         `json:"key_pin"`
 		Ciphertext *string         `json:"ciphertext"`
 		TimeoutMS  json.RawMessage `json:"timeout_ms"`
@@ -45,11 +47,9 @@ func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result an
 	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, false, err
 	}
-	if p.Reason == nil {
-		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.reason is required")
-	}
-	if err := protocol.CheckReason(*p.Reason); err != nil {
-		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+	req, rpcErr := parseShown(p.Reason, p.Program, p.Match)
+	if rpcErr != nil {
+		return nil, false, rpcErr
 	}
 	if p.KeyPin == nil {
 		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.key_pin is required")
@@ -75,12 +75,15 @@ func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result an
 	if key == nil || pc == nil || s.srv.decryptInfo(key).Pin != *p.KeyPin {
 		return protocol.DecryptResult{Why: protocol.WhyUnavailable}, false, nil
 	}
+	if s.srv.inCooldown(pc.ID) {
+		return protocol.DecryptResult{Why: protocol.WhyCooldown}, false, nil
+	}
 	slot := s.srv.beginApproval(pc.ID)
 	if slot == nil {
 		return protocol.DecryptResult{Why: protocol.WhyBusy}, false, nil
 	}
-	req := ApprovalRequest{Decrypt: true, PC: *pc, Reason: *p.Reason, Timeout: timeout, Remote: s.remote}
-	s.srv.logf("mock: %s: PC %q asks to decrypt: %q (timeout %v)", s.remote, pc.Name, req.Reason, timeout)
+	req.Decrypt, req.PC, req.Timeout, req.Remote = true, *pc, timeout, s.remote
+	s.srv.logf("mock: %s: %s on PC %q asks to decrypt: %q (pick %d, timeout %v)", s.remote, req.Program, pc.Name, req.Reason, req.Match, timeout)
 	s.srv.wg.Go(func() {
 		end := func() { s.srv.endApproval(slot) }
 		defer end()
@@ -94,6 +97,7 @@ func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result an
 		case ctx.Err() != nil:
 			why = protocol.WhyTimeout
 		}
+		s.srv.noteOutcome(pc.ID, why)
 		res := protocol.DecryptResult{Why: why}
 		if why == "" {
 			if pt, err := security.DecryptAsPhone(key, ct); err != nil {

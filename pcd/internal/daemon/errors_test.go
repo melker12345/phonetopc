@@ -147,8 +147,8 @@ func panelCalls(n int) []call {
 	return calls
 }
 
-// Every row of LOCAL-API.md §2 the daemon can be made to answer. Not
-// here: 409 approval_key_changed (TestApprovals), decrypt_key_changed
+// Every row of LOCAL-API.md §2 the daemon can be made to answer. A
+// streamed one comes as the last line of a 200 answer (§5). Not here: 409 approval_key_changed (TestApprovals), decrypt_key_changed
 // (TestDecryptions), 500 internal_error (a
 // bug) and 504 no_answer (takes the approval timeout plus slack, 10 s).
 func TestErrorTable(t *testing.T) {
@@ -162,6 +162,7 @@ func TestErrorTable(t *testing.T) {
 		status  int
 		code    string
 		rpcCode protocol.ErrorCode
+		stream  bool
 	}{
 		{name: "bad JSON", daemon: devDaemon(nil), req: call{"POST", "/v1/notifications", `{"title":`}, status: 400, code: "invalid_request"},
 		{name: "unknown member", daemon: devDaemon(nil), req: call{"PUT", "/v1/panels/x", `{"title":"X","layout":` + buttonLayout + `,"colour":"red"}`}, status: 400, code: "invalid_request"},
@@ -184,7 +185,7 @@ func TestErrorTable(t *testing.T) {
 		{name: "decryption in dev mode", daemon: devDaemon(nil), req: call{"GET", "/v1/decryption-key", ""}, status: 409, code: "decrypt_unavailable"},
 		{name: "too many notifications", daemon: devDaemon(func(o *mockphone.Options) { o.NotifyPerMinute = 1 }), before: []call{{"POST", "/v1/notifications", `{"title":"a"}`}}, req: call{"POST", "/v1/notifications", `{"title":"b"}`}, status: 429, code: "rate_limited", rpcCode: protocol.CodeRateLimited},
 		{name: "phone lacks the method", daemon: refusingDaemon(map[string]*protocol.Error{protocol.MethodGet: protocol.NewError(protocol.CodeMethodNotFound, "no get")}), req: call{"GET", "/v1/sensors/battery", ""}, status: 501, code: "method_not_found", rpcCode: protocol.CodeMethodNotFound},
-		{name: "forged approval", daemon: secureDaemon(func(o *mockphone.Options) { o.TamperApprovals = true }), req: call{"POST", "/v1/approvals", fiveSecs}, status: 502, code: "approval_invalid"},
+		{name: "forged approval", daemon: secureDaemon(func(o *mockphone.Options) { o.TamperApprovals = true }), req: call{"POST", "/v1/approvals", fiveSecs}, status: 502, code: "approval_invalid", stream: true},
 		{name: "unattested approval key", daemon: secureDaemon(func(o *mockphone.Options) { o.Attest = nil }), req: call{"POST", "/v1/approvals", fiveSecs}, status: 409, code: "approval_key_unattested"},
 		{name: "unattested decryption key", daemon: secureDaemon(func(o *mockphone.Options) { o.Attest = nil }), req: call{"GET", "/v1/decryption-key", ""}, status: 409, code: "decrypt_key_unattested"},
 		{name: "phone error with a name", daemon: refusingDaemon(map[string]*protocol.Error{protocol.MethodGet: protocol.NewError(protocol.CodeInternalError, "boom")}), req: call{"GET", "/v1/sensors/battery", ""}, status: 502, code: "internal_error", rpcCode: protocol.CodeInternalError},
@@ -217,14 +218,24 @@ func TestErrorTable(t *testing.T) {
 					RPCCode protocol.ErrorCode `json:"rpc_code"`
 				} `json:"error"`
 			}
-			if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			dec := json.NewDecoder(res.Body)
+			if err := dec.Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			e := body.Error
-			if res.StatusCode != tc.status || e.Code != tc.code || e.RPCCode != tc.rpcCode || e.Message == "" {
-				t.Fatalf("got %d %+v, want %d %q rpc_code %d", res.StatusCode, e, tc.status, tc.code, tc.rpcCode)
+			status, contentType := tc.status, "application/json"
+			if tc.stream {
+				status, contentType = 200, "application/x-ndjson"
+				for dec.More() {
+					if err := dec.Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
-			if ct := res.Header.Get("Content-Type"); ct != "application/json" {
+			e := body.Error
+			if res.StatusCode != status || e.Code != tc.code || e.RPCCode != tc.rpcCode || e.Message == "" {
+				t.Fatalf("got %d %+v, want %d %q rpc_code %d", res.StatusCode, e, status, tc.code, tc.rpcCode)
+			}
+			if ct := res.Header.Get("Content-Type"); ct != contentType {
 				t.Errorf("Content-Type %q", ct)
 			}
 			if tc.status == 405 && res.Header.Get("Allow") == "" {

@@ -20,6 +20,8 @@ type DecryptInfo struct {
 // §4.
 type DecryptParams struct {
 	Reason     string `json:"reason"`
+	Program    string `json:"program"`
+	Match      int    `json:"match"`
 	KeyPin     string `json:"key_pin"`
 	Ciphertext string `json:"ciphertext"`
 	// TimeoutMS is optional (default 30000).

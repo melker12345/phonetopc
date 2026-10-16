@@ -151,12 +151,13 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func writeRPCError(w http.ResponseWriter, status int, code, msg string, rpc protocol.ErrorCode) {
+	writeJSON(w, status, newAPIError(code, msg, rpc))
+}
+
+func newAPIError(code, msg string, rpc protocol.ErrorCode) apiError {
 	var e apiError
 	e.Error.Code, e.Error.Message, e.Error.RPCCode = code, msg, int(rpc)
-	b, _ := json.Marshal(e)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(append(b, '\n'))
+	return e
 }
 
 // badRequest is a request the daemon refuses before asking the phone.
@@ -186,6 +187,11 @@ var hintOf = map[protocol.ErrorCode]string{
 }
 
 func (d *Daemon) fail(w http.ResponseWriter, err error) {
+	status, e := errorOf(err)
+	writeJSON(w, status, e)
+}
+
+func errorOf(err error) (int, apiError) {
 	var (
 		br  badRequest
 		ue  *unavailableError
@@ -195,11 +201,11 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 	)
 	switch {
 	case errors.As(err, &br):
-		writeError(w, http.StatusBadRequest, "invalid_request", br.msg)
+		return plainErr(http.StatusBadRequest, "invalid_request", br.msg)
 	case errors.As(err, &ue) && client.IsUnauthorized(ue.err):
-		writeRPCError(w, http.StatusServiceUnavailable, "unauthorized", ue.Error(), protocol.CodeUnauthorized)
+		return rpcErr(http.StatusServiceUnavailable, "unauthorized", ue.Error(), protocol.CodeUnauthorized)
 	case errors.As(err, &ue):
-		writeError(w, http.StatusServiceUnavailable, "phone_unavailable", ue.Error())
+		return plainErr(http.StatusServiceUnavailable, "phone_unavailable", ue.Error())
 	case errors.As(err, &pe):
 		status, ok := statusOf[pe.Code]
 		if !ok {
@@ -209,30 +215,36 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 		if name == "" {
 			name = "phone_error"
 		}
-		writeRPCError(w, status, name, pe.Message+hintOf[pe.Code], pe.Code)
+		return rpcErr(status, name, pe.Message+hintOf[pe.Code], pe.Code)
 	case errors.As(err, &kae) && kae.Key == "approval":
-		writeError(w, http.StatusConflict, "approval_key_unattested", kae.Error()+
+		return plainErr(http.StatusConflict, "approval_key_unattested", kae.Error()+
 			". Approvals are refused; to accept the key anyway, run `phonetopc approval-key --accept --unattested`. Nothing was sent")
 	case errors.As(err, &kae):
-		writeError(w, http.StatusConflict, "decrypt_key_unattested", kae.Error()+
+		return plainErr(http.StatusConflict, "decrypt_key_unattested", kae.Error()+
 			". To use the key anyway, ask for /v1/decryption-key?unattested=true")
 	case errors.As(err, &kce):
-		writeError(w, http.StatusConflict, "approval_key_changed", kce.Error()+
+		return plainErr(http.StatusConflict, "approval_key_changed", kce.Error()+
 			". Typically fingerprints were added or removed on the phone; if so, accept the new key with `phonetopc approval-key --accept`. Nothing was sent")
 	case errors.Is(err, client.ErrApprovalInvalid):
-		writeError(w, http.StatusBadGateway, "approval_invalid", strings.TrimPrefix(err.Error(), "phonetopc: ")+". This is NOT an approval")
+		return plainErr(http.StatusBadGateway, "approval_invalid", strings.TrimPrefix(err.Error(), "phonetopc: ")+". This is NOT an approval")
 	case errors.Is(err, client.ErrApprovalNoAnswer):
-		writeError(w, http.StatusGatewayTimeout, "no_answer", strings.TrimPrefix(err.Error(), "phonetopc: "))
+		return plainErr(http.StatusGatewayTimeout, "no_answer", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	case errors.Is(err, client.ErrDecryptKeyChanged):
-		writeError(w, http.StatusConflict, "decrypt_key_changed", strings.TrimPrefix(err.Error(), "phonetopc: ")+
+		return plainErr(http.StatusConflict, "decrypt_key_changed", strings.TrimPrefix(err.Error(), "phonetopc: ")+
 			". What was encrypted to the old key needs your recovery key. Nothing was sent")
 	case errors.Is(err, client.ErrDecryptUnavailable):
-		writeError(w, http.StatusConflict, "decrypt_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
+		return plainErr(http.StatusConflict, "decrypt_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	case errors.Is(err, client.ErrApprovalNeedsSecureMode):
-		writeError(w, http.StatusConflict, "approval_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
+		return plainErr(http.StatusConflict, "approval_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	default:
-		writeError(w, http.StatusBadGateway, "phone_error", strings.TrimPrefix(err.Error(), "phonetopc: "))
+		return plainErr(http.StatusBadGateway, "phone_error", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	}
+}
+
+func plainErr(status int, code, msg string) (int, apiError) { return status, newAPIError(code, msg, 0) }
+
+func rpcErr(status int, code, msg string, rpc protocol.ErrorCode) (int, apiError) {
+	return status, newAPIError(code, msg, rpc)
 }
 
 // Unknown members are refused so a typo doesn't go unnoticed.
@@ -319,7 +331,15 @@ type ApprovalRequest struct {
 	Nonce     string `json:"nonce,omitempty"`      // "": the daemon makes one
 }
 
-// ApprovalResponse is the answer to POST /v1/approvals.
+// MatchLine is the first line of the answer to POST /v1/approvals and
+// /v1/decryptions: the number the user must pick on the phone, and the
+// program the phone names.
+type MatchLine struct {
+	Match   int    `json:"match"`
+	Program string `json:"program"`
+}
+
+// ApprovalResponse is the last line of the answer to POST /v1/approvals.
 type ApprovalResponse struct {
 	Approved bool           `json:"approved"`
 	Why      string         `json:"why"`
@@ -334,6 +354,58 @@ type ApprovalProof struct {
 	Nonce     string `json:"nonce"`
 	PhoneID   string `json:"phone_id"`
 	PCID      string `json:"pc_id"`
+	Program   string `json:"program"`
+	Match     int    `json:"match"`
+	Expiry    int64  `json:"expiry"`
+}
+
+func checkTimeout(ms int64) (time.Duration, error) {
+	timeout := time.Duration(ms) * time.Millisecond
+	if ms != 0 && (timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout) {
+		return 0, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds())
+	}
+	return timeout, nil
+}
+
+// ask answers an approval or decryption as NDJSON (LOCAL-API.md §5): a
+// MatchLine as soon as f calls show, then f's result or error. Until show,
+// an error is an HTTP error as usual.
+func (d *Daemon) ask(w http.ResponseWriter, r *http.Request, f func(cl *client.Client, program string, show func(int)) (any, error)) {
+	cl, err := d.phone(r.Context())
+	if err != nil {
+		d.fail(w, err)
+		return
+	}
+	prog := program(r)
+	started := false
+	line := func(v any) {
+		b, _ := json.Marshal(v)
+		w.Write(append(b, '\n'))
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+	}
+	start := func() {
+		started = true
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+	}
+	res, err := f(cl, prog, func(match int) {
+		start()
+		line(MatchLine{Match: match, Program: prog})
+	})
+	switch {
+	case err == nil && !started:
+		start()
+		line(res)
+	case err == nil:
+		line(res)
+	case !started:
+		d.fail(w, err)
+	default:
+		_, e := errorOf(err)
+		line(e)
+	}
 }
 
 func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
@@ -346,9 +418,9 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequest{err.Error()})
 		return
 	}
-	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
-	if req.TimeoutMS != 0 && (timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout) {
-		d.fail(w, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds()))
+	timeout, err := checkTimeout(req.TimeoutMS)
+	if err != nil {
+		d.fail(w, err)
 		return
 	}
 	if req.Nonce != "" {
@@ -357,14 +429,10 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	d.call(w, r, func(cl *client.Client) (any, error) {
-		var res client.ApprovalResult
-		var err error
-		if req.Nonce != "" {
-			res, err = cl.RequestApprovalNonce(r.Context(), req.Reason, req.Nonce, timeout)
-		} else {
-			res, err = cl.RequestApproval(r.Context(), req.Reason, timeout)
-		}
+	d.ask(w, r, func(cl *client.Client, program string, show func(int)) (any, error) {
+		res, err := cl.RequestApproval(r.Context(), client.ApprovalRequest{
+			Reason: req.Reason, Program: program, Timeout: timeout, Nonce: req.Nonce, ShowMatch: show,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -372,6 +440,7 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 			return ApprovalResponse{Approved: true, Why: "approved", Proof: &ApprovalProof{
 				Signature: res.Signature, Key: res.Key, KeyPin: res.KeyPin,
 				Nonce: res.Nonce, PhoneID: res.PhoneID, PCID: res.PCID,
+				Program: res.Program, Match: res.Match, Expiry: res.Expiry,
 			}}, nil
 		}
 		return ApprovalResponse{Why: string(res.Why)}, nil
@@ -416,7 +485,7 @@ type DecryptRequest struct {
 	TimeoutMS  int64  `json:"timeout_ms,omitempty"`
 }
 
-// DecryptResponse is the answer to POST /v1/decryptions.
+// DecryptResponse is the last line of the answer to POST /v1/decryptions.
 type DecryptResponse struct {
 	Decrypted bool   `json:"decrypted"`
 	Why       string `json:"why"`
@@ -442,16 +511,18 @@ func (d *Daemon) handleDecrypt(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequestf("key_pin is required"))
 		return
 	}
-	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
-	if req.TimeoutMS != 0 && (timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout) {
-		d.fail(w, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds()))
+	timeout, err := checkTimeout(req.TimeoutMS)
+	if err != nil {
+		d.fail(w, err)
 		return
 	}
-	d.call(w, r, func(cl *client.Client) (any, error) {
+	d.ask(w, r, func(cl *client.Client, program string, show func(int)) (any, error) {
 		if k, err := cl.DecryptKey(); err == nil && k.Pin == req.KeyPin && len(ct) != k.Public.Size() {
 			return nil, badRequestf("ciphertext is %d bytes; this key's are %d", len(ct), k.Public.Size())
 		}
-		res, err := cl.Decrypt(r.Context(), req.Reason, req.KeyPin, ct, timeout)
+		res, err := cl.Decrypt(r.Context(), client.DecryptRequest{
+			Reason: req.Reason, Program: program, KeyPin: req.KeyPin, Ciphertext: ct, Timeout: timeout, ShowMatch: show,
+		})
 		if err != nil {
 			return nil, err
 		}

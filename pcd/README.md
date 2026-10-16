@@ -134,9 +134,11 @@ bin/phonetopc pc                            # this PC's id, name and pin
 
 Flags go before or after the command.
 
-**`approve`** exits 0 when approved and the phone's signature verified, 1 when not approved (`denied`,
-`cancelled`, `timeout`, `busy`, `lockout`, `unavailable`; the reason is printed), and 2 on any error. The reason is
-shown on the phone: 1–200 characters, no leading or trailing whitespace, no control characters.
+**`approve`** prints a number; pick the same one on the phone, then confirm with your fingerprint. It exits 0 when
+approved and the phone's signature verified, 1 when not approved (`denied`, `cancelled`, `mismatch`, `timeout`,
+`busy`, `cooldown`, `lockout`, `unavailable`; the reason is printed), and 2 on any error. The reason is shown on the
+phone: 1–200 characters, no leading or trailing whitespace, no control characters. After three refusals within 10
+minutes the phone ignores this PC's requests for 5 minutes (`cooldown`).
 
 **Notifications and panels** are off on the phone for every PC until the user allows them there; until then the
 calls fail with `-32030`. Panels need a program that stays connected; use the daemon's `/v1/panels`.
@@ -153,7 +155,7 @@ age -r age1phonetopc1… -r "$(age-keygen -y recovery.txt)" -o secrets.age secre
 age -d -i phone.txt secrets.age
 ```
 
-`phone.txt` holds no secret. The phone's key is replaced when fingerprints are added or removed, and is lost with the
+When decrypting, age shows a number to pick on the phone before the fingerprint. `phone.txt` holds no secret. The phone's key is replaced when fingerprints are added or removed, and is lost with the
 phone, so always encrypt to a recovery key as well. `--generate` needs the phone's hardware to prove that the key
 needs a fingerprint for every use; `--unattested` takes the key without that proof.
 

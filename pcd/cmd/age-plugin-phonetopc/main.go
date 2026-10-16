@@ -156,10 +156,15 @@ func askWith(p *plugin.Plugin) askPhone {
 			return nil, err
 		}
 		defer cl.Close()
-		if p != nil {
-			p.DisplayMessage(fmt.Sprintf("confirm with your fingerprint on %q", cl.Server().Device.Name))
+		show := func(match int) {
+			msg := matchMessage(cl.Server().Device.Name, match)
+			if p == nil || p.DisplayMessage(msg) != nil {
+				fmt.Fprintln(os.Stderr, "age-plugin-phonetopc:", msg)
+			}
 		}
-		res, err := cl.Decrypt(ctx, reason(parentCommand()), keyPin, ciphertext, 0)
+		res, err := cl.Decrypt(ctx, client.DecryptRequest{
+			Reason: reason(parentCommand()), Program: "age-plugin-phonetopc", KeyPin: keyPin, Ciphertext: ciphertext, ShowMatch: show,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -168,6 +173,11 @@ func askWith(p *plugin.Plugin) askPhone {
 		}
 		return res.Plaintext, nil
 	}
+}
+
+// matchMessage tells the user what to do on the phone (DECRYPT.md §5).
+func matchMessage(phone string, match int) string {
+	return fmt.Sprintf("confirm with your fingerprint on %q; pick %d", phone, match)
 }
 
 const plainReason = "Decrypt a file with age"

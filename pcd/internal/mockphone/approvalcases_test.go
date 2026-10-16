@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -30,6 +31,7 @@ type approvalCases struct {
 		ApprovalKey string                `json:"approval_key"`
 		Approval    protocol.ApprovalInfo `json:"approval"`
 		Decision    string                `json:"decision"`
+		NowMS       int64                 `json:"now_ms"`
 	} `json:"fixture"`
 	Cases []struct {
 		Name        string          `json:"name"`
@@ -98,6 +100,7 @@ func TestApprovalServerCases(t *testing.T) {
 	}
 	opts.ApprovalKey = func() *ecdsa.PrivateKey { return approvalKey }
 	opts.Approve = mockphone.ApproveAll
+	opts.Now = func() time.Time { return time.UnixMilli(ac.Fixture.NowMS) }
 	_, addr := serveTLS(t, opts, cert)
 	url := client.SecureURL(addr)
 	pc := ac.Fixture.PCs[0]
@@ -157,7 +160,11 @@ func TestApprovalServerCases(t *testing.T) {
 				if err := json.Unmarshal(c.Send, &sent); err != nil {
 					t.Fatal(err)
 				}
-				msg := security.ApprovalMessage(deviceID, pc.ID, sent.Params.Nonce, sent.Params.Reason)
+				sp := sent.Params
+				msg := security.Approval{
+					PhoneID: deviceID, PCID: pc.ID, Nonce: sp.Nonce, Reason: sp.Reason,
+					Program: sp.Program, Match: sp.Match, Expiry: sp.Expiry,
+				}.Message()
 				if err := security.VerifyApproval(pubKey, res.Signature, msg); err != nil {
 					t.Errorf("signature: %v", err)
 				}

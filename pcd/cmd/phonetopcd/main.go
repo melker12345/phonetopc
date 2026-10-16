@@ -145,9 +145,7 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 			Handler:           h,
 			ReadHeaderTimeout: 10 * time.Second,
 			ErrorLog:          log.New(io.Discard, "", 0),
-		}
-		if ln.Addr().Network() == "tcp" {
-			srv.ConnContext = daemon.ConnContext
+			ConnContext:       daemon.ConnContext,
 		}
 		servers = append(servers, srv)
 		go srv.Serve(ln)

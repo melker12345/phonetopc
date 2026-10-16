@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/json"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"sync"
@@ -26,14 +27,21 @@ type ApprovalRequest struct {
 	// Decrypt is set for a decrypt request (DECRYPT.md §4).
 	Decrypt bool
 	PC      protocol.PCInfo
+	Program string
 	Reason  string
+	// Choices are the numbers offered to pick from (APPROVAL.md §4.2), in
+	// the order shown; Match is the right one, which a real user reads on
+	// the PC.
+	Choices [3]int
+	Match   int
 	Timeout time.Duration
 	Remote  string // the PC's address
 }
 
-// Approver plays the phone's user. It returns "" to approve, or why not.
-// ctx is done when the request times out or the session closes; the
-// return value is then ignored.
+// Approver plays the phone's user. It returns "" to pick Match and
+// approve, or why not: protocol.WhyMismatch for a wrong pick. ctx is done
+// when the request times out or the session closes; the return value is
+// then ignored.
 type Approver func(ctx context.Context, req ApprovalRequest) protocol.Why
 
 func ApproveAll(context.Context, ApprovalRequest) protocol.Why { return "" }
@@ -108,7 +116,65 @@ func (s *Server) ask(ctx context.Context, slot *approvalSlot, req ApprovalReques
 	if approve == nil {
 		approve = ApproveAll
 	}
+	req.Choices = choices(s.newRand(), req.Match)
 	return approve(ctx, req)
+}
+
+// choices returns match and two other numbers of 10–99, all different, in
+// random order (APPROVAL.md §4.2).
+func choices(r *rand.Rand, match int) [3]int {
+	c := [3]int{match}
+	for i := 1; i < 3; {
+		n := protocol.MinMatch + r.IntN(protocol.MaxMatch-protocol.MinMatch+1)
+		if !slices.Contains(c[:i], n) {
+			c[i] = n
+			i++
+		}
+	}
+	r.Shuffle(3, func(i, j int) { c[i], c[j] = c[j], c[i] })
+	return c
+}
+
+func (s *Server) now() time.Time {
+	if s.opts.Now != nil {
+		return s.opts.Now()
+	}
+	return time.Now()
+}
+
+// cooldown is a PC's recent refusals (APPROVAL.md §4.3).
+type cooldown struct {
+	refusals []time.Time
+	until    time.Time
+}
+
+func (s *Server) inCooldown(pcID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.cooldowns[pcID]
+	return c != nil && s.now().Before(c.until)
+}
+
+// noteOutcome counts why towards pcID's cool-down.
+func (s *Server) noteOutcome(pcID string, why protocol.Why) {
+	if !why.CountsForCooldown() {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.cooldowns[pcID]
+	if c == nil {
+		c = &cooldown{}
+		s.cooldowns[pcID] = c
+	}
+	now := s.now()
+	c.refusals = slices.DeleteFunc(c.refusals, func(t time.Time) bool { return now.Sub(t) >= protocol.CooldownWindow })
+	c.refusals = append(c.refusals, now)
+	if len(c.refusals) >= protocol.CooldownRefusals {
+		c.refusals = nil
+		c.until = now.Add(protocol.CooldownDuration)
+		s.logf("mock: PC %s was refused %d times; cool-down until %s", pcID, protocol.CooldownRefusals, c.until.Format(time.TimeOnly))
+	}
 }
 
 // approvalKey is nil if the phone can't do approvals (dev mode, or none
@@ -184,17 +250,18 @@ func TestAttestation(ca *attesttest.CA, tlsPin string, tweak func(*attesttest.De
 func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (result any, async bool, rpcErr *protocol.Error) {
 	var p struct {
 		Reason    *string         `json:"reason"`
+		Program   *string         `json:"program"`
 		Nonce     *string         `json:"nonce"`
+		Match     json.RawMessage `json:"match"`
+		Expiry    json.RawMessage `json:"expiry"`
 		TimeoutMS json.RawMessage `json:"timeout_ms"`
 	}
 	if err := protocol.DecodeParams(params, &p); err != nil {
 		return nil, false, err
 	}
-	if p.Reason == nil {
-		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.reason is required")
-	}
-	if err := protocol.CheckReason(*p.Reason); err != nil {
-		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+	req, rpcErr := parseShown(p.Reason, p.Program, p.Match)
+	if rpcErr != nil {
+		return nil, false, rpcErr
 	}
 	if p.Nonce == nil {
 		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.nonce is required")
@@ -206,6 +273,13 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 	if rpcErr != nil {
 		return nil, false, rpcErr
 	}
+	expiry, ok := parseInt(p.Expiry)
+	if !ok {
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.expiry is required, an integer")
+	}
+	if err := protocol.CheckExpiry(expiry, timeout, s.srv.now()); err != nil {
+		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+	}
 
 	s.mu.Lock()
 	key, pc := s.approvalKey, s.pc
@@ -213,13 +287,19 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 	if key == nil || pc == nil {
 		return protocol.RequestApprovalResult{Why: protocol.WhyUnavailable}, false, nil
 	}
+	if s.srv.inCooldown(pc.ID) {
+		return protocol.RequestApprovalResult{Why: protocol.WhyCooldown}, false, nil
+	}
 	slot := s.srv.beginApproval(pc.ID)
 	if slot == nil {
 		return protocol.RequestApprovalResult{Why: protocol.WhyBusy}, false, nil
 	}
-	req := ApprovalRequest{PC: *pc, Reason: *p.Reason, Timeout: timeout, Remote: s.remote}
-	nonce := *p.Nonce
-	s.srv.logf("mock: %s: PC %q asks for approval: %q (timeout %v)", s.remote, pc.Name, req.Reason, timeout)
+	req.PC, req.Timeout, req.Remote = *pc, timeout, s.remote
+	signed := security.Approval{
+		PhoneID: s.srv.opts.Device.ID, PCID: pc.ID, Nonce: *p.Nonce,
+		Reason: req.Reason, Program: req.Program, Match: req.Match, Expiry: expiry,
+	}
+	s.srv.logf("mock: %s: %s on PC %q asks for approval: %q (pick %d, timeout %v)", s.remote, req.Program, pc.Name, req.Reason, req.Match, timeout)
 	s.srv.wg.Go(func() {
 		end := func() { s.srv.endApproval(slot) }
 		defer end()
@@ -233,10 +313,10 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 		case ctx.Err() != nil:
 			why = protocol.WhyTimeout
 		}
+		s.srv.noteOutcome(pc.ID, why)
 		res := protocol.RequestApprovalResult{Why: why}
 		if why == "" {
-			msg := security.ApprovalMessage(s.srv.opts.Device.ID, pc.ID, nonce, req.Reason)
-			sig, err := security.SignApproval(key, msg)
+			sig, err := security.SignApproval(key, signed.Message())
 			if err != nil {
 				s.srv.logf("mock: signing: %v", err)
 				res.Why = protocol.WhyUnavailable
@@ -254,15 +334,43 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 	return nil, true, nil
 }
 
+// parseShown checks what request_approval and decrypt show the user:
+// reason, program and match.
+func parseShown(reason, program *string, match json.RawMessage) (ApprovalRequest, *protocol.Error) {
+	if reason == nil {
+		return ApprovalRequest{}, protocol.NewError(protocol.CodeInvalidParams, "params.reason is required")
+	}
+	if err := protocol.CheckReason(*reason); err != nil {
+		return ApprovalRequest{}, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+	}
+	if program == nil {
+		return ApprovalRequest{}, protocol.NewError(protocol.CodeInvalidParams, "params.program is required")
+	}
+	if err := protocol.CheckProgram(*program); err != nil {
+		return ApprovalRequest{}, protocol.NewError(protocol.CodeInvalidParams, "params.%v", err)
+	}
+	m, ok := parseInt(match)
+	if !ok || protocol.CheckMatch(int(m)) != nil {
+		return ApprovalRequest{}, protocol.NewError(protocol.CodeInvalidParams,
+			"params.match is required, an integer %d-%d", protocol.MinMatch, protocol.MaxMatch)
+	}
+	return ApprovalRequest{Reason: *reason, Program: *program, Match: int(m)}, nil
+}
+
+// parseInt accepts an integer literal only: no fraction, exponent, string
+// or null.
+func parseInt(raw json.RawMessage) (int64, bool) {
+	n, err := strconv.ParseInt(string(bytes.TrimSpace(raw)), 10, 64)
+	return n, err == nil
+}
+
 // parseTimeout checks timeout_ms of request_approval and decrypt.
 func parseTimeout(raw json.RawMessage) (time.Duration, *protocol.Error) {
-	t := bytes.TrimSpace(raw)
-	if len(t) == 0 {
+	if len(bytes.TrimSpace(raw)) == 0 {
 		return protocol.DefaultApprovalTimeout, nil
 	}
-	// An integer literal only: no fraction, exponent or null.
-	ms, err := strconv.ParseInt(string(t), 10, 64)
-	if err != nil {
+	ms, ok := parseInt(raw)
+	if !ok {
 		return 0, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be an integer")
 	}
 	timeout := time.Duration(ms) * time.Millisecond

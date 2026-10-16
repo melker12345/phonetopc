@@ -141,9 +141,13 @@ type options struct {
 	// signed test vectors and to attest over plaintext.
 	testNonce     string
 	testChallenge []byte
-	dialOptions   *websocket.DialOptions
-	pin           string
-	token         string
+	// testMatch and testNow replace the approval's match number and
+	// clock, for the same reason.
+	testMatch   int
+	testNow     func() time.Time
+	dialOptions *websocket.DialOptions
+	pin         string
+	token       string
 
 	// DialPaired only.
 	configDir        string

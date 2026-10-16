@@ -27,8 +27,8 @@ func (e exitError) Error() string {
 func (e exitError) Unwrap() error { return e.err }
 
 // approve asks the phone's user for a fingerprint approval (APPROVAL.md).
-// Exit codes: 0 approved; 1 not approved (denied, cancelled, timeout, busy,
-// lockout, unavailable); 2 errors, including an approval that failed
+// Exit codes: 0 approved; 1 not approved (denied, cancelled, mismatch,
+// timeout, busy, cooldown, lockout, unavailable); 2 errors, including an approval that failed
 // verification, a changed approval key, and connection problems.
 func (c *cli) approve(ctx context.Context, args []string) error {
 	fs := c.flagSet("approve")
@@ -56,15 +56,15 @@ func (c *cli) approve(ctx context.Context, args []string) error {
 	}
 	defer cl.Close()
 	name := cl.Server().Device.Name
-	if !c.json {
-		fmt.Fprintf(c.stderr, "phonetopc: waiting for approval on %q (up to %v)…\n", name, *timeout)
+	show := func(match int) {
+		fmt.Fprintf(c.stderr, "phonetopc: pick %d on %q, then confirm with your fingerprint (up to %v)…\n", match, name, *timeout)
 	}
-	res, err := cl.RequestApproval(ctx, pos[0], *timeout)
+	res, err := cl.RequestApproval(ctx, client.ApprovalRequest{Reason: pos[0], Program: "phonetopc", Timeout: *timeout, ShowMatch: show})
 	if err != nil {
 		return fail(err)
 	}
 	if c.json {
-		out := map[string]any{"approved": res.Approved(), "device": cl.Server().Device.ID}
+		out := map[string]any{"approved": res.Approved(), "device": cl.Server().Device.ID, "match": res.Match}
 		if !res.Approved() {
 			out["why"] = res.Why
 		}

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http/httptest"
@@ -185,7 +186,11 @@ func TestEncryptDecryptWithThePhone(t *testing.T) {
 		t.Fatal("encrypting asked the phone")
 	}
 
-	id, err := plugin.NewIdentity(idStr, ui)
+	var shown []string
+	id, err := plugin.NewIdentity(idStr, &plugin.ClientUI{DisplayMessage: func(name, msg string) error {
+		shown = append(shown, name+": "+msg)
+		return nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,8 +198,13 @@ func TestEncryptDecryptWithThePhone(t *testing.T) {
 		t.Fatalf("decrypt: %q %v", got, err)
 	}
 	reqs := p.requests()
-	if len(reqs) != 1 || !reqs[0].Decrypt || !strings.HasPrefix(reqs[0].Reason, "Decrypt") {
+	if len(reqs) != 1 || !reqs[0].Decrypt || !strings.HasPrefix(reqs[0].Reason, "Decrypt") || reqs[0].Program != "age-plugin-phonetopc" {
 		t.Fatalf("the phone was asked %+v", reqs)
+	}
+	// age shows the number to pick (DECRYPT.md §5).
+	want := fmt.Sprintf(`phonetopc: confirm with your fingerprint on "Test Phone"; pick %d`, reqs[0].Match)
+	if len(shown) != 1 || shown[0] != want {
+		t.Errorf("age showed %q, want %q", shown, want)
 	}
 
 	// The identity is also a recipient.

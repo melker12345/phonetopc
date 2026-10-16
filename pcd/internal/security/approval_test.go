@@ -15,6 +15,9 @@ type approvalVector struct {
 	PCID      string `json:"pc_id"`
 	Nonce     string `json:"nonce"`
 	Reason    string `json:"reason"`
+	Program   string `json:"program"`
+	Match     int    `json:"match"`
+	Expiry    int64  `json:"expiry"`
 	Key       string `json:"key"`
 	Signature string `json:"signature"`
 }
@@ -28,7 +31,11 @@ type approvalVectors struct {
 	Invalid     []approvalVector `json:"invalid"`
 }
 
-func loadApprovalVectors(t *testing.T) approvalVectors {
+func (v approvalVector) approval() Approval {
+	return Approval{PhoneID: v.PhoneID, PCID: v.PCID, Nonce: v.Nonce, Reason: v.Reason, Program: v.Program, Match: v.Match, Expiry: v.Expiry}
+}
+
+func loadApprovalVectors(t testing.TB) approvalVectors {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(vectorsDir, "approval.json"))
 	if err != nil {
@@ -46,12 +53,12 @@ func verifyVector(v approvalVector) error {
 	if err != nil {
 		return err
 	}
-	return VerifyApproval(key, v.Signature, ApprovalMessage(v.PhoneID, v.PCID, v.Nonce, v.Reason))
+	return VerifyApproval(key, v.Signature, v.approval().Message())
 }
 
 func TestVectorApproval(t *testing.T) {
 	v := loadApprovalVectors(t)
-	msg := ApprovalMessage(v.Valid.PhoneID, v.Valid.PCID, v.Valid.Nonce, v.Valid.Reason)
+	msg := v.Valid.approval().Message()
 	if string(msg) != v.MessageUTF8 || hex.EncodeToString(msg) != v.MessageHex {
 		t.Errorf("message %q, want %q", msg, v.MessageUTF8)
 	}
@@ -61,13 +68,18 @@ func TestVectorApproval(t *testing.T) {
 	if err := verifyVector(v.Valid); err != nil {
 		t.Errorf("valid vector: %v", err)
 	}
-	if len(v.Invalid) < 6 {
+	if len(v.Invalid) < 10 {
 		t.Fatalf("only %d invalid vectors", len(v.Invalid))
 	}
+	v1 := false
 	for _, inv := range v.Invalid {
 		if err := verifyVector(inv); err == nil {
 			t.Errorf("%s: accepted", inv.Name)
 		}
+		v1 = v1 || inv.Name == "signature over phonetopc-approval/1"
+	}
+	if !v1 {
+		t.Error("no vector with a phonetopc-approval/1 signature")
 	}
 
 	// The key PEM matches the key, and our own signatures verify.

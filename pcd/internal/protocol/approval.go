@@ -26,8 +26,12 @@ type ApprovalInfo struct {
 
 // §4.
 type RequestApprovalParams struct {
-	Reason string `json:"reason"`
-	Nonce  string `json:"nonce"`
+	Reason  string `json:"reason"`
+	Program string `json:"program"`
+	Nonce   string `json:"nonce"`
+	Match   int    `json:"match"`
+	// Expiry is in Unix milliseconds.
+	Expiry int64 `json:"expiry"`
 	// TimeoutMS is optional (default 30000). A pointer, so that absent can
 	// be told apart from 0.
 	TimeoutMS *int64 `json:"timeout_ms,omitempty"`
@@ -46,14 +50,16 @@ type Why string
 const (
 	WhyDenied      Why = "denied"      // the user pressed Deny
 	WhyCancelled   Why = "cancelled"   // the user dismissed the prompt or notification
+	WhyMismatch    Why = "mismatch"    // the user picked a number other than match
 	WhyTimeout     Why = "timeout"     // timeout_ms passed without an answer
 	WhyBusy        Why = "busy"        // another approval was pending
+	WhyCooldown    Why = "cooldown"    // this PC was refused too often lately (§4.3)
 	WhyLockout     Why = "lockout"     // too many failed fingerprint attempts
 	WhyUnavailable Why = "unavailable" // no strong biometric enrolled, or no approval key
 )
 
 // In the order of §4.1.
-var Whys = []Why{WhyDenied, WhyCancelled, WhyTimeout, WhyBusy, WhyLockout, WhyUnavailable}
+var Whys = []Why{WhyDenied, WhyCancelled, WhyMismatch, WhyTimeout, WhyBusy, WhyCooldown, WhyLockout, WhyUnavailable}
 
 func (w Why) Valid() bool {
 	for _, x := range Whys {
@@ -70,10 +76,14 @@ func (w Why) Describe() string {
 		return "the user pressed Deny"
 	case WhyCancelled:
 		return "the user dismissed the prompt"
+	case WhyMismatch:
+		return "the user picked another number than the one shown on the PC"
 	case WhyTimeout:
 		return "nobody answered in time"
 	case WhyBusy:
 		return "another approval is pending on the phone"
+	case WhyCooldown:
+		return "this PC's requests were refused 3 times within 10 minutes; the phone ignores it for 5 minutes"
 	case WhyLockout:
 		return "too many failed fingerprint attempts; biometrics are locked for now"
 	case WhyUnavailable:
@@ -87,39 +97,92 @@ func (w Why) Describe() string {
 // Limits of request_approval params (§4).
 const (
 	MaxReasonLen           = 200
+	MaxProgramLen          = 60
+	MinMatch, MaxMatch     = 10, 99
 	DefaultApprovalTimeout = 30 * time.Second
 	MinApprovalTimeout     = 5 * time.Second
 	MaxApprovalTimeout     = 120 * time.Second
 	ApprovalNonceSize      = 32
 	ApprovalResponseLeeway = 5 * time.Second // §4: clients wait at least timeout_ms + 5 s
+	// ExpiryAfterTimeout is how long after timeout_ms a PC's expiry is.
+	ExpiryAfterTimeout = 10 * time.Second
+	// A phone refuses an expiry further than timeout_ms + MaxExpiryAfterTimeout
+	// ahead of its clock, or ExpiryClockTolerance further either way.
+	MaxExpiryAfterTimeout = 60 * time.Second
+	ExpiryClockTolerance  = 5 * time.Minute
+	// DefaultProgram is what a PC sends as program when it can't tell
+	// which program asks.
+	DefaultProgram = "a program"
 )
+
+// Cool-down of §4.3: CooldownRefusals refusals within CooldownWindow
+// start a cool-down of CooldownDuration.
+const (
+	CooldownRefusals = 3
+	CooldownWindow   = 10 * time.Minute
+	CooldownDuration = 5 * time.Minute
+)
+
+// CountsForCooldown reports the outcomes that count towards a cool-down.
+func (w Why) CountsForCooldown() bool {
+	return w == WhyDenied || w == WhyCancelled || w == WhyMismatch
+}
+
+// CheckExpiry checks expiry (Unix ms) against the phone's clock now, as §4
+// requires.
+func CheckExpiry(expiry int64, timeout time.Duration, now time.Time) error {
+	ms := now.UnixMilli()
+	switch {
+	case expiry < ms-ExpiryClockTolerance.Milliseconds():
+		return fmt.Errorf("expiry is %v behind the phone's clock; check that the PC's and the phone's clocks are right",
+			time.Duration(ms-expiry)*time.Millisecond)
+	case expiry > ms+(timeout+MaxExpiryAfterTimeout+ExpiryClockTolerance).Milliseconds():
+		return fmt.Errorf("expiry is %v ahead of the phone's clock, more than timeout_ms + 60 s; check that the PC's and the phone's clocks are right",
+			time.Duration(expiry-ms)*time.Millisecond)
+	}
+	return nil
+}
+
+// CheckMatch checks a match number (§4).
+func CheckMatch(match int) error {
+	if match < MinMatch || match > MaxMatch {
+		return fmt.Errorf("match must be %d-%d", MinMatch, MaxMatch)
+	}
+	return nil
+}
 
 // CheckReason checks a reason exactly as received, as §4 requires: 1–200
 // Unicode code points, no leading or trailing whitespace (Unicode
 // White_Space), no control characters (Cc) and no hidden characters.
 // Nobody trims or normalizes a reason: it is shown, sent and signed as is.
-func CheckReason(reason string) error {
-	if !utf8.ValidString(reason) {
-		return fmt.Errorf("reason is not valid UTF-8")
+func CheckReason(reason string) error { return checkShown("reason", reason, MaxReasonLen) }
+
+// CheckProgram checks a program name exactly as received: the rules of
+// CheckReason, with at most 60 code points.
+func CheckProgram(program string) error { return checkShown("program", program, MaxProgramLen) }
+
+func checkShown(name, text string, maxLen int) error {
+	if !utf8.ValidString(text) {
+		return fmt.Errorf("%s is not valid UTF-8", name)
 	}
-	n := utf8.RuneCountInString(reason)
+	n := utf8.RuneCountInString(text)
 	switch {
 	case n == 0:
-		return fmt.Errorf("reason must not be empty")
-	case n > MaxReasonLen:
-		return fmt.Errorf("reason has %d characters, at most %d are allowed", n, MaxReasonLen)
+		return fmt.Errorf("%s must not be empty", name)
+	case n > maxLen:
+		return fmt.Errorf("%s has %d characters, at most %d are allowed", name, n, maxLen)
 	}
-	first, _ := utf8.DecodeRuneInString(reason)
-	last, _ := utf8.DecodeLastRuneInString(reason)
+	first, _ := utf8.DecodeRuneInString(text)
+	last, _ := utf8.DecodeLastRuneInString(text)
 	if unicode.IsSpace(first) || unicode.IsSpace(last) {
-		return fmt.Errorf("reason must not start or end with whitespace")
+		return fmt.Errorf("%s must not start or end with whitespace", name)
 	}
-	for _, r := range reason {
+	for _, r := range text {
 		if unicode.Is(unicode.Cc, r) {
-			return fmt.Errorf("reason must not contain control characters (%U)", r)
+			return fmt.Errorf("%s must not contain control characters (%U)", name, r)
 		}
 		if IsHidden(r) {
-			return fmt.Errorf("reason must not contain bidirectional controls, invisible characters or line separators (%U)", r)
+			return fmt.Errorf("%s must not contain bidirectional controls, invisible characters or line separators (%U)", name, r)
 		}
 	}
 	return nil
