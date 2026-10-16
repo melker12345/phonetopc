@@ -300,6 +300,24 @@ func TestDevicesBadVersion(t *testing.T) {
 	}
 }
 
+// Members that differ from known ones only in case are read as those, so a
+// rewrite must not keep them as unknown members that win at the next read.
+func TestDevicesCaseInsensitiveMembers(t *testing.T) {
+	s := Open(t.TempDir())
+	os.WriteFile(s.Path(DevicesFile), []byte(`{"Version":2,"version":1,"devices":[
+		{"id":"p1","Approval_Key":"sha256/other","approval_key":"sha256/ak","Token":"x","token":"t"}]}`), 0o600)
+	if err := s.NoteAddress("p1", "10.1.1.1", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.Find("p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ApprovalKey != "sha256/ak" || d.Token != "t" || d.Extra != nil {
+		t.Errorf("after a rewrite: %+v", d)
+	}
+}
+
 // TestConcurrentUpdates checks that updates from several stores on the same
 // directory (as from several processes) don't lose each other's devices.
 func TestConcurrentUpdates(t *testing.T) {

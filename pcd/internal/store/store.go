@@ -141,9 +141,12 @@ func unknownMembers(b []byte, known []string) (map[string]json.RawMessage, error
 	if err := json.Unmarshal(b, &all); err != nil {
 		return nil, err
 	}
-	for _, k := range known {
-		delete(all, k)
-	}
+	// encoding/json matches member names case-insensitively, so "Token"
+	// was read as the token too; written back as an unknown member after
+	// the known ones, it would win at the next read.
+	maps.DeleteFunc(all, func(k string, _ json.RawMessage) bool {
+		return slices.ContainsFunc(known, func(name string) bool { return strings.EqualFold(k, name) })
+	})
 	if len(all) == 0 {
 		return nil, nil
 	}
