@@ -1,7 +1,37 @@
 # phonetopc audit — 2026-10-09
 
 Four read-only reviews of `main` at `3fd5d88`: Android app, Go PC side, Python client, protocol/crypto design.
-Each finding was checked against the code; "tested" means the reviewer reproduced it. **Nothing is fixed yet.**
+Each finding was checked against the code; "tested" means the reviewer reproduced it.
+
+## Status (re-checked 2026-10-16)
+
+| Finding | Status |
+|---|---|
+| H1 | Fixed (`a43e7ba`). Leftover: `store.PutDevice` doesn't re-check the old pin between the prompt and the save. |
+| H2 | Fixed (`58a812c`). |
+| H3 | Fixed (`82be0a3`). Leftover: in dev mode Ktor may keep a dropped socket open; nothing is queued for it. |
+| M1 | Fixed (`1223f32`). Leftover: tty input isn't flushed right before each prompt. |
+| M2 | Fixed (`66329e8`); the optional check code on both screens wasn't built. |
+| M3 | Fixed (`50e483f`, `5aec614`). |
+| M4 | Fixed (`a80d69e`). |
+| M5 | Fixed (`53b22d2`). |
+| L-A1 | Fixed (`5ba8591`). |
+| L-A2 | Fixed (`eecf6ed`). |
+| L-A3 | Fixed (`9526a01`). |
+| L-A4 | Fixed (`65c5337`). |
+| L-A5 | Fixed (`103c407`). |
+| L-G1 | Fixed (`91abdb3`). |
+| L-G2 | Fixed (`a43e7ba`, `bf45249`). |
+| L-G3 | Fixed (`2ee3cba`). |
+| L-P1–L-P4 | Gone with the Python client and examples. |
+| L-S1 | Claim softened (`9de3d93`). Binding the key at pairing and key attestation are still to do. |
+| L-S2 | Fixed (`2ea44ae`). |
+| L-S3 | Fixed (`a43e7ba`, `65c5337`). |
+| L-S4 | Fixed (`58a812c`). |
+| L-S5 | Fixed (`a370a79`). |
+| L-S6 | Loopback exempt from the failed-`hello` limit (`e8bf2d7`). **Open:** one pending approval per phone, so one stolen token keeps every PC's approvals `busy`. |
+| L-S7 | Fixed (`9de3d93`). |
+| L-S8 | Fixed (`9de3d93`), except `plan.md` §4.3, which still describes the old approval message. |
 
 **Summary:** 3 high, 5 medium, ~20 low. The core cryptography holds up in all three implementations
 (pinning, tokens, approval signatures). The problems are in limits, timeouts, prompts and races around it.
