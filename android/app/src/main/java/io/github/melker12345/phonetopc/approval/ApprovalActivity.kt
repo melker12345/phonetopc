@@ -1,15 +1,14 @@
 package io.github.melker12345.phonetopc.approval
 
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -17,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalWhy
+import io.github.melker12345.phonetopc.ui.theme.PhonetopcTheme
 import kotlinx.coroutines.launch
 
 /**
@@ -35,8 +35,8 @@ import kotlinx.coroutines.launch
 class ApprovalActivity : FragmentActivity() {
     private var requestId = NO_REQUEST
     private var prompt: BiometricPrompt? = null
-    private var choice: AlertDialog? = null
-    private var picked = false
+    private var picked by mutableStateOf(false)
+    private var closing by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,8 +52,20 @@ class ApprovalActivity : FragmentActivity() {
         // On recreation after the pick, the prompt's fragment survives and reconnects to the new
         // callback; before it, the choice is shown again.
         picked = savedInstanceState?.getBoolean(STATE_PICKED) ?: false
-        if (!picked) {
-            choice = showChoice(pending.prompt) { authenticate(biometricPrompt, pending) }
+        setContent {
+            PhonetopcTheme {
+                if (!picked && !closing) {
+                    NumberChoice(
+                        pending.prompt,
+                        onPick = { n ->
+                            picked = true
+                            if (n == pending.prompt.match) authenticate(biometricPrompt, pending) else finishWith(ApprovalWhy.MISMATCH)
+                        },
+                        onDeny = { finishWith(ApprovalWhy.DENIED) },
+                        onCancel = { finishWith(ApprovalWhy.CANCELLED) },
+                    )
+                }
+            }
         }
         // §4.2: when the request ends for any reason, the prompt goes away.
         lifecycleScope.launch {
@@ -68,52 +80,6 @@ class ApprovalActivity : FragmentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_PICKED, picked)
-    }
-
-    /** The number choice: the reason, three numbers and Deny. [onMatch] runs for the right number. */
-    private fun showChoice(p: ApprovalPrompts.Prompt, onMatch: () -> Unit): AlertDialog {
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val numbers = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        lateinit var dialog: AlertDialog
-        for (n in p.choices) {
-            numbers.addView(
-                Button(this).apply {
-                    text = n.toString()
-                    textSize = 24f
-                    setOnClickListener {
-                        picked = true
-                        dialog.setOnCancelListener(null)
-                        dialog.dismiss()
-                        if (n == p.match) onMatch() else finishWith(ApprovalWhy.MISMATCH)
-                    }
-                },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-            )
-        }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad / 2, pad, 0)
-            addView(TextView(this@ApprovalActivity).apply { text = p.reason })
-            addView(
-                TextView(this@ApprovalActivity).apply {
-                    text = getString(R.string.approval_pick_number)
-                    setPadding(0, pad, 0, pad / 2)
-                },
-            )
-            addView(numbers)
-        }
-        dialog = AlertDialog.Builder(this)
-            .setTitle(getString(if (p.decrypt) R.string.decrypt_notification_title else R.string.approval_notification_title, p.program, p.pcName))
-            .setView(content)
-            .setNegativeButton(R.string.approval_deny) { _, _ -> finishWith(ApprovalWhy.DENIED) }
-            .setOnCancelListener { finishWith(ApprovalWhy.CANCELLED) }
-            .create()
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.show()
-        return dialog
     }
 
     private fun authenticate(biometricPrompt: BiometricPrompt, pending: ApprovalPrompts.Pending) {
@@ -134,9 +100,7 @@ class ApprovalActivity : FragmentActivity() {
     }
 
     private fun close() {
-        choice?.setOnCancelListener(null)
-        choice?.dismiss()
-        choice = null
+        closing = true
         prompt?.cancelAuthentication()
         prompt = null
         if (!isFinishing) finish()

@@ -223,13 +223,13 @@ func errorOf(err error) (int, apiError) {
 		return rpcErr(status, name, pe.Message+hintOf[pe.Code], pe.Code)
 	case errors.As(err, &kae) && kae.Key == "approval":
 		return plainErr(http.StatusConflict, "approval_key_unattested", kae.Error()+
-			". Approvals are refused; to accept the key anyway, run `phonetopc approval-key --accept --unattested`. Nothing was sent")
+			". Approvals are refused; to accept the key anyway, run `phonetopc approval-key --accept --unattested` (with sudo when phonetopcd is the system service). Nothing was sent")
 	case errors.As(err, &kae):
 		return plainErr(http.StatusConflict, "decrypt_key_unattested", kae.Error()+
 			". To use the key anyway, ask for /v1/decryption-key?unattested=true")
 	case errors.As(err, &kce):
 		return plainErr(http.StatusConflict, "approval_key_changed", kce.Error()+
-			". Typically fingerprints were added or removed on the phone; if so, accept the new key with `phonetopc approval-key --accept`. Nothing was sent")
+			". Typically fingerprints were added or removed on the phone; if so, accept the new key with `phonetopc approval-key --accept` (with sudo when phonetopcd is the system service). Nothing was sent")
 	case errors.Is(err, client.ErrApprovalInvalid):
 		return plainErr(http.StatusBadGateway, "approval_invalid", strings.TrimPrefix(err.Error(), "phonetopc: ")+". This is NOT an approval")
 	case errors.Is(err, client.ErrApprovalNoAnswer):

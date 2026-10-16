@@ -27,6 +27,8 @@
     <string name="approval_prompt_title">%1$s on %2$s</string>
     <string name="decrypt_prompt_title">Decrypt for %1$s on %2$s</string>
     <string name="approval_pick_number">Pick the number shown on your PC</string>
+    <string name="approval_choice_approve">asks for your approval</string>
+    <string name="approval_choice_decrypt">asks to decrypt</string>
     <string name="approval_approve">Approve</string>
     <string name="approval_deny">Deny</string>
 
