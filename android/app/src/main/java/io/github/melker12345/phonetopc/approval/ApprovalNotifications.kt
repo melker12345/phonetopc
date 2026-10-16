@@ -7,11 +7,11 @@ import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import io.github.melker12345.phonetopc.R
-import io.github.melker12345.phonetopc.protocol.approval.ApprovalRequest
 
 /**
  * The heads-up notification of APPROVAL.md §4.2: channel "Approval requests", title
- * "<PC name> asks for approval", text = reason, actions Approve and Deny.
+ * "<PC name> asks for approval" (or "asks to decrypt", DECRYPT.md §4), text = reason, actions
+ * Approve and Deny.
  */
 object ApprovalNotifications {
     const val CHANNEL_ID = "approval"
@@ -35,7 +35,7 @@ object ApprovalNotifications {
     }
 
     /** `false` if the user blocked it, so nobody would see it. */
-    fun show(context: Context, request: ApprovalRequest): Boolean {
+    fun show(context: Context, request: ApprovalPrompts.Prompt): Boolean {
         ensureChannel(context)
         if (!canShow(context)) return false
         val id = request.id
@@ -52,7 +52,10 @@ object ApprovalNotifications {
             0, context.getString(R.string.approval_deny),
             ApprovalActionReceiver.pending(context, ApprovalActionReceiver.ACTION_DENY, id),
         ).build()
-        val title = context.getString(R.string.approval_notification_title, request.pc.name)
+        val title = context.getString(
+            if (request.decrypt) R.string.decrypt_notification_title else R.string.approval_notification_title,
+            request.pcName,
+        )
         // What the lock screen shows unless the user allows sensitive content there.
         val public = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_phonetopc)

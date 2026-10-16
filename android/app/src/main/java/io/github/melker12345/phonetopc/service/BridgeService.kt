@@ -16,6 +16,7 @@ import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.appGraph
 import io.github.melker12345.phonetopc.approval.AndroidApprover
 import io.github.melker12345.phonetopc.data.ApprovalKey
+import io.github.melker12345.phonetopc.data.DecryptKey
 import io.github.melker12345.phonetopc.data.DeviceIdentity
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
 import io.github.melker12345.phonetopc.data.PhoneKey
@@ -234,9 +235,12 @@ class BridgeService : Service() {
             authenticate = { token -> graph.pairedPcs.authenticate(token)?.info },
             onAuthenticated = { pc -> graph.appScope.launch { graph.pairedPcs.touch(pc.id) } },
         )
-        // Create or check the approval key now, off the main thread, so the first hello doesn't
-        // wait for key generation.
-        withContext(Dispatchers.IO) { ApprovalKey.status(applicationContext, fresh = true) }
+        // Create or check the keys now, off the main thread, so the first hello doesn't wait
+        // for key generation (an RSA key can take seconds).
+        withContext(Dispatchers.IO) {
+            ApprovalKey.status(applicationContext, fresh = true)
+            DecryptKey.status(applicationContext, fresh = true)
+        }
         val approvals = ApprovalService(AndroidApprover(applicationContext), onError = { e -> Log.w(TAG, "approval failed", e) })
         return SecureMode(tls, security, approvals)
     }

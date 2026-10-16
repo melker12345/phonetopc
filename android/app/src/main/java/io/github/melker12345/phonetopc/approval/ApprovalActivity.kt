@@ -11,14 +11,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.melker12345.phonetopc.R
-import io.github.melker12345.phonetopc.protocol.approval.ApprovalOutcome
 import kotlinx.coroutines.launch
 
 /**
  * A transparent screen that only hosts the biometric prompt of an approval (APPROVAL.md §4.2):
  * title the PC's name, subtitle the reason, negative button "Deny", strong biometrics only
- * (no PIN/pattern fallback). The prompt carries the approval key's `Signature` as its
- * CryptoObject, so a successful check is what lets the key sign.
+ * (no PIN/pattern fallback). The prompt carries the key's `Signature` or `Cipher` as its
+ * CryptoObject, so a successful check is what lets the key sign or decrypt.
  *
  * Deliberately not shown over the lock screen (no `setShowWhenLocked`): opened from a
  * notification on a locked phone, Android asks the user to unlock first, and only then shows
@@ -32,7 +31,7 @@ class ApprovalActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestId = intent.getLongExtra(EXTRA_ID, NO_REQUEST)
-        val pending = ApprovalPrompts.current.value?.takeIf { it.request.id == requestId }
+        val pending = ApprovalPrompts.current.value?.takeIf { it.prompt.id == requestId }
         if (pending == null) {
             // The request already ended (answered, timed out, or the PC went away).
             finish()
@@ -43,19 +42,21 @@ class ApprovalActivity : FragmentActivity() {
         // On recreation the prompt's fragment survives and reconnects to the new callback.
         if (savedInstanceState == null) {
             val info = BiometricPrompt.PromptInfo.Builder()
-                .setTitle(pending.request.pc.name)
-                .setSubtitle(pending.request.reason)
+                .setTitle(
+                    if (pending.prompt.decrypt) getString(R.string.decrypt_prompt_title, pending.prompt.pcName) else pending.prompt.pcName,
+                )
+                .setSubtitle(pending.prompt.reason)
                 .setNegativeButtonText(getString(R.string.approval_deny))
                 .setAllowedAuthenticators(BIOMETRIC_STRONG)
                 .setConfirmationRequired(true)
                 .build()
-            biometricPrompt.authenticate(info, BiometricPrompt.CryptoObject(pending.signature))
+            biometricPrompt.authenticate(info, pending.crypto)
         }
         // §4.2: when the request ends for any reason, the prompt goes away.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {
                 ApprovalPrompts.current.collect { current ->
-                    if (current?.request?.id != requestId) close()
+                    if (current?.prompt?.id != requestId) close()
                 }
             }
         }
@@ -71,12 +72,12 @@ class ApprovalActivity : FragmentActivity() {
 
     private inner class Callback(private val id: Long) : BiometricPrompt.AuthenticationCallback() {
         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-            ApprovalPrompts.signed(id, result.cryptoObject?.signature)
+            ApprovalPrompts.authenticated(id, result.cryptoObject)
             close()
         }
 
         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-            ApprovalPrompts.finish(id, ApprovalOutcome.Refused(BiometricOutcomes.forError(errorCode)))
+            ApprovalPrompts.finish(id, BiometricOutcomes.forError(errorCode))
             close()
         }
 

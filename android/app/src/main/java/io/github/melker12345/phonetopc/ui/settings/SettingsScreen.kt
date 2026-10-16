@@ -77,7 +77,7 @@ import io.github.melker12345.phonetopc.BuildConfig
 import io.github.melker12345.phonetopc.R
 import io.github.melker12345.phonetopc.approval.ApprovalNotifications
 import io.github.melker12345.phonetopc.data.AppSettings
-import io.github.melker12345.phonetopc.data.ApprovalKey
+import io.github.melker12345.phonetopc.data.BiometricKey
 import io.github.melker12345.phonetopc.data.SettingsRepository
 import io.github.melker12345.phonetopc.protocol.PROTOCOL_VERSION
 import io.github.melker12345.phonetopc.protocol.SensorCatalog
@@ -443,7 +443,7 @@ fun VendorGuideCard(vendor: Vendor, modifier: Modifier = Modifier) {
 
 /** APPROVAL.md: whether approvals are possible, and the approval key's pin. */
 @Composable
-private fun ApprovalsGroup(status: ApprovalKey.Status?, devMode: Boolean, refresh: () -> Unit) {
+private fun ApprovalsGroup(status: BiometricKey.Status?, devMode: Boolean, refresh: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -453,7 +453,7 @@ private fun ApprovalsGroup(status: ApprovalKey.Status?, devMode: Boolean, refres
         onPauseOrDispose { }
     }
     val notificationsOk = rememberOnResume(ApprovalNotifications::canShow)
-    val available = status as? ApprovalKey.Status.Available
+    val available = status as? BiometricKey.Status.Available
     Group {
         ListItem(
             colors = transparentItem,
@@ -464,22 +464,22 @@ private fun ApprovalsGroup(status: ApprovalKey.Status?, devMode: Boolean, refres
             supportingContent = {
                 val text = when (status) {
                     null -> "…"
-                    is ApprovalKey.Status.Available -> stringResource(
+                    is BiometricKey.Status.Available -> stringResource(
                         if (devMode) R.string.settings_approval_secure_only else R.string.settings_approval_available,
                     )
-                    is ApprovalKey.Status.Unavailable -> stringResource(
+                    is BiometricKey.Status.Unavailable -> stringResource(
                         when (status.problem) {
-                            ApprovalKey.Problem.NO_HARDWARE -> R.string.settings_approval_no_hardware
-                            ApprovalKey.Problem.NONE_ENROLLED -> R.string.settings_approval_none_enrolled
-                            ApprovalKey.Problem.HW_UNAVAILABLE -> R.string.settings_approval_hw_unavailable
-                            ApprovalKey.Problem.SECURITY_UPDATE_REQUIRED -> R.string.settings_approval_update_required
-                            ApprovalKey.Problem.OTHER -> R.string.settings_approval_other
+                            BiometricKey.Problem.NO_HARDWARE -> R.string.settings_approval_no_hardware
+                            BiometricKey.Problem.NONE_ENROLLED -> R.string.settings_approval_none_enrolled
+                            BiometricKey.Problem.HW_UNAVAILABLE -> R.string.settings_approval_hw_unavailable
+                            BiometricKey.Problem.SECURITY_UPDATE_REQUIRED -> R.string.settings_approval_update_required
+                            BiometricKey.Problem.OTHER -> R.string.settings_approval_other
                         },
                     )
                 }
                 Text(text)
             },
-            trailingContent = if ((status as? ApprovalKey.Status.Unavailable)?.problem == ApprovalKey.Problem.NONE_ENROLLED) {
+            trailingContent = if ((status as? BiometricKey.Status.Unavailable)?.problem == BiometricKey.Problem.NONE_ENROLLED) {
                 {
                     FilledTonalButton(onClick = { SystemSettings.enrollBiometric(context) }) {
                         Text(stringResource(R.string.settings_approval_enroll))

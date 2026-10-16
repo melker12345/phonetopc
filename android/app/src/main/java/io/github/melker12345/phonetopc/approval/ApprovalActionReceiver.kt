@@ -4,7 +4,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import io.github.melker12345.phonetopc.protocol.approval.ApprovalOutcome
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalWhy
 
 /** The approval notification's Deny action and its dismissal (APPROVAL.md §4.1). */
@@ -16,7 +15,7 @@ class ApprovalActionReceiver : BroadcastReceiver() {
             ACTION_DISMISSED -> ApprovalWhy.CANCELLED
             else -> return
         }
-        ApprovalPrompts.finish(id, ApprovalOutcome.Refused(why))
+        ApprovalPrompts.finish(id, why)
     }
 
     companion object {

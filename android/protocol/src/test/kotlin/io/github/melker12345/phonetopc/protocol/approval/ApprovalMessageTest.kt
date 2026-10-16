@@ -172,8 +172,9 @@ class ApprovalMessageTest {
             """{"approved":true,"signature":"AQI"}""",
             ApprovalOutcome.Approved(byteArrayOf(1, 2)).toJson().toString(),
         )
+        // `failed` is for decrypt only (DECRYPT.md §4).
         assertEquals(
-            listOf("denied", "cancelled", "timeout", "busy", "lockout", "unavailable"),
+            listOf("denied", "cancelled", "timeout", "busy", "lockout", "unavailable", "failed"),
             ApprovalWhy.entries.map { it.wire },
         )
         assertEquals("""{"approved":false,"why":"lockout"}""", ApprovalOutcome.Refused(ApprovalWhy.LOCKOUT).toJson().toString())

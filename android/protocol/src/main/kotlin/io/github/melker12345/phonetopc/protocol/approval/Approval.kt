@@ -38,6 +38,9 @@ enum class ApprovalWhy(val wire: String) {
     BUSY("busy"),
     LOCKOUT("lockout"),
     UNAVAILABLE("unavailable"),
+
+    /** `decrypt` only: the user confirmed, but the ciphertext doesn't decrypt (DECRYPT.md §4). */
+    FAILED("failed"),
 }
 
 sealed interface ApprovalOutcome {
@@ -91,6 +94,15 @@ interface Approver {
      * and prompt for it must go away.
      */
     suspend fun approve(request: ApprovalRequest): ApprovalOutcome
+
+    /** The decryption key (DECRYPT.md §1), like [keyInfo]; `null` if decrypting isn't possible. */
+    fun decryptKeyInfo(): ApprovalKeyInfo? = null
+
+    /**
+     * Asks the user and, on success, decrypts [DecryptRequest.ciphertext] with the decryption
+     * key. Cancellation as for [approve].
+     */
+    suspend fun decrypt(request: DecryptRequest): DecryptOutcome = DecryptOutcome.Refused(ApprovalWhy.UNAVAILABLE)
 }
 
 /** The signed message of APPROVAL.md §5, and its verification. */
@@ -137,6 +149,14 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
 
         /** @throws RpcException `-32602` for anything that breaks the rules of §4. */
         fun parse(params: JsonObject): ApprovalParams {
+            val reason = parseReason(params)
+            val nonce = params.string("nonce") ?: invalidParams("nonce is required")
+            if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalidParams("nonce must be $NONCE_BYTES bytes, base64url")
+            return ApprovalParams(reason, nonce, parseTimeout(params))
+        }
+
+        /** `reason` of `request_approval` and `decrypt`. */
+        internal fun parseReason(params: JsonObject): String {
             // Accepted or rejected exactly as received: never trimmed or normalized, because the
             // PC hashes the string it sent.
             val reason = params.string("reason") ?: invalidParams("reason is required")
@@ -149,10 +169,11 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
             if (isSpace(reason.codePointAt(0)) || isSpace(reason.codePointBefore(reason.length))) {
                 invalidParams("reason must not start or end with whitespace")
             }
+            return reason
+        }
 
-            val nonce = params.string("nonce") ?: invalidParams("nonce is required")
-            if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalidParams("nonce must be $NONCE_BYTES bytes, base64url")
-
+        /** `timeout_ms` of `request_approval` and `decrypt`. */
+        internal fun parseTimeout(params: JsonObject): Long {
             val timeout = when (val t = params["timeout_ms"]) {
                 null, JsonNull -> DEFAULT_TIMEOUT_MS
                 else -> integer(t) ?: invalidParams("timeout_ms must be an integer")
@@ -160,7 +181,7 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
             if (timeout !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) {
                 invalidParams("timeout_ms must be between $MIN_TIMEOUT_MS and $MAX_TIMEOUT_MS")
             }
-            return ApprovalParams(reason, nonce, timeout)
+            return timeout
         }
 
         /**

@@ -49,6 +49,8 @@ internal data class HelloResult(
     val pc: PcInfo? = null,
     /** With capability `approval`: the approval key (APPROVAL.md §1). */
     val approval: ApprovalKeyInfo? = null,
+    /** With capability `decrypt`: the decryption key (DECRYPT.md §1). */
+    val decrypt: ApprovalKeyInfo? = null,
 )
 
 @Serializable

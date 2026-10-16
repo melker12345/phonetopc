@@ -5,6 +5,8 @@ import io.github.melker12345.phonetopc.protocol.approval.ApprovalOutcome
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalParams
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalService
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalWhy
+import io.github.melker12345.phonetopc.protocol.approval.DecryptOutcome
+import io.github.melker12345.phonetopc.protocol.approval.DecryptParams
 import io.github.melker12345.phonetopc.protocol.panels.NotifyParams
 import io.github.melker12345.phonetopc.protocol.panels.PanelOwner
 import io.github.melker12345.phonetopc.protocol.panels.PanelService
@@ -98,7 +100,11 @@ class Session internal constructor(
     @Volatile var approvalKey: ApprovalKeyInfo? = null
         private set
 
-    /** Pending `request_approval`s; cancelled when the session closes (APPROVAL.md §4). */
+    /** The decryption key this session's `hello` announced (DECRYPT.md §1), if any. */
+    @Volatile var decryptKey: ApprovalKeyInfo? = null
+        private set
+
+    /** Pending `request_approval`s and `decrypt`s; cancelled when the session closes (APPROVAL.md §4). */
     private val approvals: MutableSet<Job> = ConcurrentHashMap.newKeySet()
 
     /**
@@ -282,7 +288,7 @@ class Session internal constructor(
         if (method.content != "hello" && !helloDone) {
             return error(replyId, RpcException(RpcError.HELLO_REQUIRED))
         }
-        // request_approval exists only in secure mode (APPROVAL.md §1).
+        // request_approval and decrypt exist only in secure mode (APPROVAL.md §1, DECRYPT.md §1).
         if (!methodExists(method.content)) {
             return error(replyId, RpcException(RpcError.METHOD_NOT_FOUND, "Method not found: ${method.content}"))
         }
@@ -339,12 +345,12 @@ class Session internal constructor(
     )
 
     /**
-     * request_approval exists only in secure mode (APPROVAL.md §1); notifications and panels
+     * request_approval and decrypt exist only in secure mode (APPROVAL.md §1, DECRYPT.md §1); notifications and panels
      * only when the phone offers them (PANELS.md §1).
      */
     private fun methodExists(method: String): Boolean = when (method) {
         in METHODS -> true
-        APPROVAL_METHOD -> hub.security != null
+        APPROVAL_METHOD, DECRYPT_METHOD -> hub.security != null
         in NOTIFY_METHODS -> hub.notifications != null
         in PANEL_METHODS -> hub.panels != null
         else -> false
@@ -372,6 +378,7 @@ class Session internal constructor(
             "unsubscribe" -> Handled(unsubscribe(params))
             "get" -> Handled(get(params))
             APPROVAL_METHOD -> requestApproval(params, replyId)
+            DECRYPT_METHOD -> decrypt(params, replyId)
             "notify" -> {
                 val parsed = NotifyParams.parse(params)
                 Handled(buildJsonObject { put("id", JsonPrimitive(hub.notifications!!.notify(pcRef, parsed))) })
@@ -444,7 +451,9 @@ class Session internal constructor(
         }
         // APPROVAL.md §1: secure mode only, and only while the phone can do approvals.
         val approval = if (auth != null) hub.approvals?.keyInfo() else null
+        val decrypt = if (auth != null) hub.approvals?.decryptKeyInfo() else null
         approvalKey = approval
+        decryptKey = decrypt
         helloDone = true
         hub.sessionChanged()
         pcInfo?.let { hub.security?.onAuthenticated?.invoke(it) }
@@ -456,11 +465,13 @@ class Session internal constructor(
                 add("events")
                 add("get")
                 if (approval != null) add("approval")
+                if (decrypt != null) add("decrypt")
                 if (hub.notifications != null) add("notify")
                 if (hub.panels != null) add("panels")
             },
             pc = pcInfo,
             approval = approval,
+            decrypt = decrypt,
         )
         return ProtocolJson.encodeToJsonElement(HelloResult.serializer(), result)
     }
@@ -493,6 +504,20 @@ class Session internal constructor(
      * answer comes when the user acted or the request timed out; other requests and events
      * carry on meanwhile.
      */
+    /** DECRYPT.md §4, run like [requestApproval]. */
+    private fun decrypt(params: JsonObject, replyId: JsonElement): Handled {
+        val parsed = DecryptParams.parse(params)
+        val service = hub.approvals
+        val pcInfo = pc
+        if (service == null || pcInfo == null) {
+            return Handled(DecryptOutcome.Refused(ApprovalWhy.UNAVAILABLE).toJson())
+        }
+        val start = service.startDecrypt(pcInfo, decryptKey, parsed) { outcome ->
+            if (!closed && !ending) enqueueResponse(Rpc.result(replyId, outcome.toJson()))
+        }
+        return started(start)
+    }
+
     private fun requestApproval(params: JsonObject, replyId: JsonElement): Handled {
         val parsed = ApprovalParams.parse(params)
         val service = hub.approvals
@@ -503,8 +528,13 @@ class Session internal constructor(
         val start = service.start(hub.deviceId, pcInfo, approvalKey, parsed) { outcome ->
             if (!closed && !ending) enqueueResponse(Rpc.result(replyId, outcome.toJson()))
         }
+        return started(start)
+    }
+
+    private fun started(start: ApprovalService.Start): Handled {
         return when (start) {
             is ApprovalService.Start.Answered -> Handled(start.outcome.toJson())
+            is ApprovalService.Start.DecryptAnswered -> Handled(start.outcome.toJson())
             is ApprovalService.Start.Pending -> {
                 val job = start.job
                 approvals += job
@@ -598,6 +628,7 @@ class Session internal constructor(
         val EMPTY = JsonObject(emptyMap())
         val METHODS = setOf("hello", "list_sensors", "subscribe", "unsubscribe", "get")
         const val APPROVAL_METHOD = "request_approval"
+        const val DECRYPT_METHOD = "decrypt"
         val NOTIFY_METHODS = setOf("notify", "notify_cancel")
         val PANEL_METHODS = setOf("panel_show", "panel_attach", "panel_update", "panel_close", "panel_list", "canvas_clear")
 
