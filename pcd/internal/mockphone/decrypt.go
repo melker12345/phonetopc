@@ -10,8 +10,8 @@ import (
 )
 
 // Decryption (spec/DECRYPT.md), with a software RSA key in place of the
-// phone's biometric-bound Keystore key. It shares the approvals' pending
-// slot and Approver.
+// phone's biometric-bound Keystore key. It shares the approvals' queue
+// and Approver.
 
 // decryptKey is nil if the phone can't decrypt (dev mode, or none set).
 func (s *Server) decryptKey() *rsa.PrivateKey {
@@ -74,27 +74,18 @@ func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result an
 	if key == nil || pc == nil || decryptInfo(key).Pin != *p.KeyPin {
 		return protocol.DecryptResult{Why: protocol.WhyUnavailable}, false, nil
 	}
-	if !s.srv.beginApproval() {
+	slot := s.srv.beginApproval(pc.ID)
+	if slot == nil {
 		return protocol.DecryptResult{Why: protocol.WhyBusy}, false, nil
 	}
 	req := ApprovalRequest{Decrypt: true, PC: *pc, Reason: *p.Reason, Timeout: timeout, Remote: s.remote}
 	s.srv.logf("mock: %s: PC %q asks to decrypt: %q (timeout %v)", s.remote, pc.Name, req.Reason, timeout)
 	s.srv.wg.Go(func() {
-		ended := false
-		end := func() {
-			if !ended {
-				ended = true
-				s.srv.endApproval()
-			}
-		}
+		end := func() { s.srv.endApproval(slot) }
 		defer end()
 		ctx, cancel := context.WithTimeout(s.ctx, timeout)
 		defer cancel()
-		approve := s.srv.opts.Approve
-		if approve == nil {
-			approve = ApproveAll
-		}
-		why := approve(ctx, req)
+		why := s.srv.ask(ctx, slot, req)
 		switch {
 		case s.ctx.Err() != nil:
 			s.srv.logf("mock: %s: session closed, decrypt prompt cancelled", s.remote)

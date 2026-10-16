@@ -68,8 +68,8 @@ result `{"decrypted": false, "why": "unavailable"}`, without asking the user.
 `unavailable`), or `failed`: the user confirmed, but the ciphertext doesn't decrypt with this key (damaged, or made
 for another key).
 
-Timing, waiting and cancellation are as in `APPROVAL.md` §4. Approvals and decryptions share the one pending slot:
-while either is pending, both answer `busy`.
+Timing, waiting, queueing and cancellation are as in `APPROVAL.md` §4. Approvals and decryptions count together: a PC
+with either pending gets `busy` for both, and they wait in the same queue.
 
 What the user sees is as in `APPROVAL.md` §4.2, with the notification titled "<PC name> asks to decrypt".
 

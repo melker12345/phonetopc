@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"time"
 
@@ -43,22 +44,67 @@ func NeverAnswer(ctx context.Context, _ ApprovalRequest) protocol.Why {
 	return protocol.WhyTimeout
 }
 
-// beginApproval reports false if an approval is already pending: one at a
-// time per phone (§4).
-func (s *Server) beginApproval() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.approvalPending {
-		return false
-	}
-	s.approvalPending = true
-	return true
+// MaxWaitingApprovals is how many PCs' approvals may wait behind the one
+// shown; more are answered busy.
+const MaxWaitingApprovals = 8
+
+type approvalSlot struct {
+	pc   string
+	turn chan struct{} // closed when the approval is shown
 }
 
-func (s *Server) endApproval() {
+// beginApproval returns nil if the PC already has an approval pending or
+// the queue is full (§4). Otherwise the slot's turn comes after those of
+// the PCs before it.
+func (s *Server) beginApproval(pcID string) *approvalSlot {
 	s.mu.Lock()
-	s.approvalPending = false
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.approvalShown != nil && s.approvalShown.pc == pcID ||
+		slices.ContainsFunc(s.approvalWaiting, func(w *approvalSlot) bool { return w.pc == pcID }) {
+		return nil
+	}
+	slot := &approvalSlot{pc: pcID, turn: make(chan struct{})}
+	switch {
+	case s.approvalShown == nil:
+		s.approvalShown = slot
+		close(slot.turn)
+	case len(s.approvalWaiting) < MaxWaitingApprovals:
+		s.approvalWaiting = append(s.approvalWaiting, slot)
+	default:
+		return nil
+	}
+	return slot
+}
+
+// endApproval is idempotent. If slot was shown, the next one gets its turn.
+func (s *Server) endApproval(slot *approvalSlot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.approvalShown != slot {
+		s.approvalWaiting = slices.DeleteFunc(s.approvalWaiting, func(w *approvalSlot) bool { return w == slot })
+		return
+	}
+	s.approvalShown = nil
+	if len(s.approvalWaiting) > 0 {
+		s.approvalShown = s.approvalWaiting[0]
+		s.approvalWaiting = s.approvalWaiting[1:]
+		close(s.approvalShown.turn)
+	}
+}
+
+// ask waits for slot's turn, then asks the user. If ctx ends first, the
+// user never sees the request.
+func (s *Server) ask(ctx context.Context, slot *approvalSlot, req ApprovalRequest) protocol.Why {
+	select {
+	case <-slot.turn:
+	case <-ctx.Done():
+		return ""
+	}
+	approve := s.opts.Approve
+	if approve == nil {
+		approve = ApproveAll
+	}
+	return approve(ctx, req)
 }
 
 // approvalKey is nil if the phone can't do approvals (dev mode, or none
@@ -118,28 +164,19 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 	if key == nil || pc == nil {
 		return protocol.RequestApprovalResult{Why: protocol.WhyUnavailable}, false, nil
 	}
-	if !s.srv.beginApproval() {
+	slot := s.srv.beginApproval(pc.ID)
+	if slot == nil {
 		return protocol.RequestApprovalResult{Why: protocol.WhyBusy}, false, nil
 	}
 	req := ApprovalRequest{PC: *pc, Reason: *p.Reason, Timeout: timeout, Remote: s.remote}
 	nonce := *p.Nonce
 	s.srv.logf("mock: %s: PC %q asks for approval: %q (timeout %v)", s.remote, pc.Name, req.Reason, timeout)
 	s.srv.wg.Go(func() {
-		ended := false
-		end := func() {
-			if !ended {
-				ended = true
-				s.srv.endApproval()
-			}
-		}
+		end := func() { s.srv.endApproval(slot) }
 		defer end()
 		ctx, cancel := context.WithTimeout(s.ctx, timeout)
 		defer cancel()
-		approve := s.srv.opts.Approve
-		if approve == nil {
-			approve = ApproveAll
-		}
-		why := approve(ctx, req)
+		why := s.srv.ask(ctx, slot, req)
 		switch {
 		case s.ctx.Err() != nil:
 			s.srv.logf("mock: %s: session closed, approval prompt cancelled", s.remote)

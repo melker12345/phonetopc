@@ -181,11 +181,11 @@ optional; without it the daemon makes one. The request waits for the user, then 
 {"approved": false, "why": "denied"}
 ```
 
-`why` is `approved`, or one of `denied`, `cancelled`, `timeout`, `busy` (another approval is pending), `lockout`,
-`unavailable`. `approved` is `true` only after the daemon verified the phone's signature over a fresh nonce, the
-reason and both ids with the trusted approval key. Errors: 409 `approval_key_changed` when the phone's approval key
-changed (typically fingerprints were added or removed; accept it with `phonetopc approval-key --accept`; nothing
-was sent to the phone), and 502 `approval_invalid` for a signature that didn't verify.
+`why` is `approved`, or one of `denied`, `cancelled`, `timeout`, `busy` (this PC already has an approval or
+decryption pending, or too many PCs are waiting), `lockout`, `unavailable`. `approved` is `true` only after the
+daemon verified the phone's signature over a fresh nonce, the reason and both ids with the trusted approval key.
+Errors: 409 `approval_key_changed` when the phone's approval key changed (typically fingerprints were added or
+removed; accept it with `phonetopc approval-key --accept`; nothing was sent to the phone), and 502 `approval_invalid` for a signature that didn't verify.
 
 **Checking it yourself.** `proof` lets a program verify the phone's answer instead of trusting the daemon. Send your
 own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce` is your nonce, `key_pin` is the pin

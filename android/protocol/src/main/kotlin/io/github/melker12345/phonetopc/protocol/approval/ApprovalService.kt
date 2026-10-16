@@ -3,6 +3,7 @@ package io.github.melker12345.phonetopc.protocol.approval
 import io.github.melker12345.phonetopc.protocol.PcInfo
 import io.github.melker12345.phonetopc.protocol.invalidParams
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,8 +16,8 @@ import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Runs `request_approval` (APPROVAL.md §4) and `decrypt` (DECRYPT.md §4) for every session of a
- * hub: one of them at a time per phone, the timeout, and a check of the signature before it
- * leaves the phone.
+ * hub: one pending per PC, those of different PCs shown one after another, the timeout, and a
+ * check of the signature before it leaves the phone.
  *
  * @param scope where approvals run; sessions cancel their own approval when they close.
  */
@@ -25,8 +26,13 @@ class ApprovalService(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val onError: (Throwable) -> Unit = {},
 ) {
-    /** Id of the pending approval, 0 when none. */
-    private val pending = AtomicLong(0)
+    private class Slot(val pcId: String) {
+        val turn = CompletableDeferred<Unit>()
+    }
+
+    private val lock = Any()
+    private var shown: Slot? = null
+    private val waiting = ArrayDeque<Slot>()
     private val nextId = AtomicLong(1)
 
     /** `hello.approval`, or `null` when the capability isn't offered. Never throws. */
@@ -70,10 +76,10 @@ class ApprovalService(
     ): Start {
         val key = keyInfo()
         if (key == null || key != announced) return Start.Answered(ApprovalOutcome.Refused(ApprovalWhy.UNAVAILABLE))
-        val id = nextId.getAndIncrement()
-        if (!pending.compareAndSet(0, id)) return Start.Answered(ApprovalOutcome.Refused(ApprovalWhy.BUSY))
+        val slot = Slot(pc.id)
+        if (!enter(slot)) return Start.Answered(ApprovalOutcome.Refused(ApprovalWhy.BUSY))
         val request = ApprovalRequest(
-            id = id,
+            id = nextId.getAndIncrement(),
             pc = pc,
             reason = params.reason,
             nonce = params.nonce,
@@ -81,7 +87,7 @@ class ApprovalService(
             message = ApprovalMessage.build(phoneId, pc.id, params.nonce, params.reason),
         )
         return Start.Pending(
-            run(id, request.timeoutMillis, { approver.approve(request) }, ApprovalOutcome::Refused) {
+            run(slot, request.timeoutMillis, { approver.approve(request) }, ApprovalOutcome::Refused) {
                 respond(checked(it, key, request))
             },
         )
@@ -106,15 +112,15 @@ class ApprovalService(
         if (key == null || key != announced || key.pin != params.keyPin) {
             return Start.DecryptAnswered(DecryptOutcome.Refused(ApprovalWhy.UNAVAILABLE))
         }
-        val id = nextId.getAndIncrement()
-        if (!pending.compareAndSet(0, id)) return Start.DecryptAnswered(DecryptOutcome.Refused(ApprovalWhy.BUSY))
-        val request = DecryptRequest(id, pc, params.reason, params.timeoutMillis, params.ciphertext)
-        return Start.Pending(run(id, request.timeoutMillis, { approver.decrypt(request) }, DecryptOutcome::Refused, respond))
+        val slot = Slot(pc.id)
+        if (!enter(slot)) return Start.DecryptAnswered(DecryptOutcome.Refused(ApprovalWhy.BUSY))
+        val request = DecryptRequest(nextId.getAndIncrement(), pc, params.reason, params.timeoutMillis, params.ciphertext)
+        return Start.Pending(run(slot, request.timeoutMillis, { approver.decrypt(request) }, DecryptOutcome::Refused, respond))
     }
 
-    /** Runs [ask] holding the pending slot [id], which the caller has taken. */
+    /** Runs [ask] once it is [slot]'s turn; [enter] gave the caller the slot. */
     private fun <O> run(
-        id: Long,
+        slot: Slot,
         timeoutMillis: Long,
         ask: suspend () -> O,
         refused: (ApprovalWhy) -> O,
@@ -122,7 +128,10 @@ class ApprovalService(
     ): Job {
         val job = scope.launch {
             val outcome = try {
-                withTimeoutOrNull(timeoutMillis) { ask() } ?: refused(ApprovalWhy.TIMEOUT)
+                withTimeoutOrNull(timeoutMillis) {
+                    slot.turn.await()
+                    ask()
+                } ?: refused(ApprovalWhy.TIMEOUT)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -130,13 +139,39 @@ class ApprovalService(
                 refused(ApprovalWhy.UNAVAILABLE)
             } finally {
                 // Free before answering, so the PC may ask again as soon as it has the answer.
-                pending.compareAndSet(id, 0)
+                leave(slot)
             }
             respond(outcome)
         }
         // A job cancelled before it ever ran skips its finally block.
-        job.invokeOnCompletion { pending.compareAndSet(id, 0) }
+        job.invokeOnCompletion { leave(slot) }
         return job
+    }
+
+    /** False if [slot]'s PC already has a request pending, or [MAX_WAITING] PCs are waiting. */
+    private fun enter(slot: Slot): Boolean = synchronized(lock) {
+        if (shown?.pcId == slot.pcId || waiting.any { it.pcId == slot.pcId }) return false
+        when {
+            shown == null -> {
+                shown = slot
+                slot.turn.complete(Unit)
+            }
+            waiting.size < MAX_WAITING -> waiting.addLast(slot)
+            else -> return false
+        }
+        true
+    }
+
+    /** Idempotent. If [slot] was shown, the next waiting one gets its turn. */
+    private fun leave(slot: Slot) {
+        synchronized(lock) {
+            if (shown !== slot) {
+                waiting.remove(slot)
+                return
+            }
+            shown = waiting.removeFirstOrNull()
+            shown?.turn?.complete(Unit)
+        }
     }
 
     /**
@@ -153,4 +188,9 @@ class ApprovalService(
 
     /** Ends every pending approval (server stopping). */
     fun cancelAll() = scope.coroutineContext[Job]?.cancelChildren()
+
+    companion object {
+        /** PCs whose request waits behind the one shown; more are answered `busy`. */
+        const val MAX_WAITING = 8
+    }
 }

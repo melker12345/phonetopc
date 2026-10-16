@@ -158,7 +158,7 @@ dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_
 - `fixture.decision` is `"approve"`: a test hook stands in for the user and approves every
   request at once, without a biometric prompt. Denial, timeouts, `busy` and cancellation depend on
   timing or a user and are left to each implementation's own tests.
-- The cases run one after another, never in parallel: a phone allows one approval at a time.
+- The cases run one after another, never in parallel: a phone allows one pending approval or decryption per PC.
 
 **`expect`** gains two optional members:
 

@@ -110,7 +110,7 @@ func TestApprovalServerCases(t *testing.T) {
 		}
 		seen[c.Name] = true
 		t.Run(c.Name, func(t *testing.T) {
-			// Not parallel: one approval at a time per phone.
+			// Not parallel: one pending approval per PC.
 			hc := &http.Client{Transport: &http.Transport{TLSClientConfig: security.PinnedClientTLSConfig(ac.Fixture.Pin)}}
 			r := dialRaw(t, url, &websocket.DialOptions{HTTPClient: hc})
 			var deviceID string

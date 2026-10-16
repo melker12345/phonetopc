@@ -97,7 +97,7 @@ func TestDecryptRules(t *testing.T) {
 	default:
 	}
 
-	// Approvals and decryptions share one pending slot.
+	// A PC has one approval or decryption pending at a time.
 	done := make(chan []byte, 1)
 	go func() {
 		res, err := c.Decrypt(testCtx(t), "Decrypt a.age", pin, ct, 30*time.Second)
@@ -122,6 +122,39 @@ func TestDecryptRules(t *testing.T) {
 	rd := dialRaw(t, url, nil)
 	rd.hello()
 	wantError(t, rd.call(protocol.MethodDecrypt, ok), protocol.CodeMethodNotFound, "2")
+}
+
+func TestDecryptWaitsBehindAnotherPCsApproval(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, pin, _ := security.EncodeDecryptKey(&key.PublicKey)
+	q := startQueue(t, func(o *mockphone.Options) { o.DecryptKey = func() *rsa.PrivateKey { return key } })
+	a, b := q.dialApproval(t), q.dialAs(t, "pc-2")
+	ra := q.ask(t, a, 60*time.Second)
+	q.wantShown(t, "pc-1")
+
+	ct, _ := security.EncryptToPhone(&key.PublicKey, []byte("file key 16 byte"))
+	done := make(chan []byte, 1)
+	go func() {
+		res, err := b.Decrypt(context.Background(), "Decrypt a.age", pin, ct, 60*time.Second)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- res.Plaintext
+	}()
+	<-q.arrived
+	q.wantBusy(t, b)
+	q.wantNothingShown(t)
+
+	q.release <- protocol.WhyDenied
+	wantAnswer(t, ra, protocol.WhyDenied)
+	q.wantShown(t, "pc-2")
+	q.release <- ""
+	if pt := <-done; string(pt) != "file key 16 byte" {
+		t.Errorf("plaintext %q", pt)
+	}
 }
 
 func TestDecryptKeyFromState(t *testing.T) {

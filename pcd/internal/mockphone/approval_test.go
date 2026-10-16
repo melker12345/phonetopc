@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -144,7 +145,7 @@ func TestApprovalBusyAndCancelOnClose(t *testing.T) {
 	go first.RequestApproval(context.Background(), "first", 60*time.Second)
 	<-asked
 
-	// One at a time per phone, across sessions.
+	// One at a time per PC, across sessions.
 	second := m.dialApproval(t)
 	res, err := second.RequestApproval(testCtx(t), "second", 0)
 	if err != nil || res.Why != client.WhyBusy {
@@ -173,6 +174,204 @@ func TestApprovalBusyAndCancelOnClose(t *testing.T) {
 			t.Fatal("still busy after the first session closed")
 		}
 	}
+}
+
+// queueMock is an approval mock whose user reports the PC of each
+// approval shown and answers it with what release gets.
+type queueMock struct {
+	*approvalMock
+	shown   chan string
+	release chan protocol.Why
+	arrived chan struct{} // a request_approval or decrypt reached the phone
+}
+
+func startQueue(t *testing.T, tweak func(*mockphone.Options)) *queueMock {
+	q := &queueMock{
+		shown:   make(chan string, 16),
+		release: make(chan protocol.Why),
+		arrived: make(chan struct{}, 64),
+	}
+	q.approvalMock = startApproval(t, func(ctx context.Context, req mockphone.ApprovalRequest) protocol.Why {
+		q.shown <- req.PC.ID
+		select {
+		case why := <-q.release:
+			return why
+		case <-ctx.Done():
+			return protocol.WhyTimeout
+		}
+	}, func(o *mockphone.Options) {
+		o.Tap = func(dir mockphone.Direction, frame []byte) {
+			f := string(frame)
+			if dir == mockphone.ClientToServer &&
+				(strings.Contains(f, `"method":"request_approval"`) || strings.Contains(f, `"method":"decrypt"`)) {
+				q.arrived <- struct{}{}
+			}
+		}
+		if tweak != nil {
+			tweak(o)
+		}
+	})
+	return q
+}
+
+// dialAs pairs another PC and dials as it.
+func (q *queueMock) dialAs(t *testing.T, id string) *client.Client {
+	t.Helper()
+	pc := mockphone.PairedPC{ID: id, Name: id, Pin: q.id.Pin, Token: security.NewToken()}
+	if err := q.state.PutPC(pc); err != nil {
+		t.Fatal(err)
+	}
+	c, err := q.dial(t, client.WithApprovalKey(q.pin), client.WithToken(pc.Token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+type approvalAnswer struct {
+	res client.ApprovalResult
+	err error
+}
+
+// ask returns once the request reached the phone; its answer follows on
+// the channel.
+func (q *queueMock) ask(t *testing.T, c *client.Client, timeout time.Duration) <-chan approvalAnswer {
+	t.Helper()
+	ch := make(chan approvalAnswer, 1)
+	go func() {
+		res, err := c.RequestApproval(context.Background(), "Deploy?", timeout)
+		ch <- approvalAnswer{res, err}
+	}()
+	select {
+	case <-q.arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request never reached the phone")
+	}
+	return ch
+}
+
+// queued asks and checks that the request is pending (shown or waiting).
+func (q *queueMock) queued(t *testing.T, c *client.Client) <-chan approvalAnswer {
+	t.Helper()
+	ch := q.ask(t, c, 60*time.Second)
+	q.wantBusy(t, c)
+	return ch
+}
+
+func (q *queueMock) wantBusy(t *testing.T, c *client.Client) {
+	t.Helper()
+	wantAnswer(t, q.ask(t, c, 0), client.WhyBusy)
+}
+
+func (q *queueMock) wantShown(t *testing.T, pc string) {
+	t.Helper()
+	select {
+	case got := <-q.shown:
+		if got != pc {
+			t.Fatalf("shown %s, want %s", got, pc)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s not shown", pc)
+	}
+}
+
+func (q *queueMock) wantNothingShown(t *testing.T) {
+	t.Helper()
+	select {
+	case got := <-q.shown:
+		t.Fatalf("shown %s meanwhile", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func wantAnswer(t *testing.T, ch <-chan approvalAnswer, why client.Why) {
+	t.Helper()
+	select {
+	case a := <-ch:
+		if a.err != nil || a.res.Why != why || a.res.Approved() != (why == "") {
+			t.Fatalf("got %+v %v, want %q", a.res, a.err, why)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no answer")
+	}
+}
+
+func TestApprovalOtherPCsWaitTheirTurn(t *testing.T) {
+	q := startQueue(t, nil)
+	a, b, c := q.dialApproval(t), q.dialAs(t, "pc-2"), q.dialAs(t, "pc-3")
+	ra := q.ask(t, a, 60*time.Second)
+	q.wantShown(t, "pc-1")
+	rb := q.queued(t, b)
+	rc := q.queued(t, c)
+	q.wantNothingShown(t)
+
+	q.release <- protocol.WhyDenied
+	wantAnswer(t, ra, client.WhyDenied)
+	q.wantShown(t, "pc-2")
+	q.release <- ""
+	wantAnswer(t, rb, "")
+	q.wantShown(t, "pc-3")
+	q.release <- protocol.WhyCancelled
+	wantAnswer(t, rc, client.WhyCancelled)
+}
+
+func TestApprovalWaitingTimesOutUnseen(t *testing.T) {
+	t.Parallel()
+	q := startQueue(t, nil)
+	a, b := q.dialApproval(t), q.dialAs(t, "pc-2")
+	ra := q.ask(t, a, 60*time.Second)
+	q.wantShown(t, "pc-1")
+	wantAnswer(t, q.ask(t, b, client.MinApprovalTimeout), client.WhyTimeout)
+	q.release <- protocol.WhyDenied
+	wantAnswer(t, ra, client.WhyDenied)
+	q.wantNothingShown(t)
+}
+
+func TestApprovalWaitingOfClosedSessionVanishes(t *testing.T) {
+	q := startQueue(t, nil)
+	a, b, c := q.dialApproval(t), q.dialAs(t, "pc-2"), q.dialAs(t, "pc-3")
+	ra := q.ask(t, a, 60*time.Second)
+	q.wantShown(t, "pc-1")
+	q.queued(t, b)
+	q.queued(t, c)
+	b.Close()
+
+	// pc-2 can ask again once its old request left the queue, and now
+	// waits behind pc-3.
+	b2 := q.dialAs(t, "pc-2")
+	deadline := time.Now().Add(5 * time.Second)
+	for queued := false; !queued; {
+		select {
+		case got := <-q.ask(t, b2, 60*time.Second):
+			if got.res.Why != client.WhyBusy || time.Now().After(deadline) {
+				t.Fatalf("pc-2 asking again: %+v %v", got.res, got.err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		case <-time.After(200 * time.Millisecond):
+			queued = true
+		}
+	}
+	q.release <- protocol.WhyDenied
+	wantAnswer(t, ra, client.WhyDenied)
+	q.wantShown(t, "pc-3")
+	q.release <- protocol.WhyDenied
+	q.wantShown(t, "pc-2")
+}
+
+func TestApprovalQueueBound(t *testing.T) {
+	q := startQueue(t, nil)
+	ra := q.ask(t, q.dialApproval(t), 60*time.Second)
+	q.wantShown(t, "pc-1")
+	for i := range mockphone.MaxWaitingApprovals {
+		q.queued(t, q.dialAs(t, fmt.Sprintf("pc-%d", i+2)))
+	}
+	last := q.dialAs(t, "pc-last")
+	q.wantBusy(t, last)
+	q.release <- protocol.WhyDenied
+	wantAnswer(t, ra, client.WhyDenied)
+	q.wantShown(t, "pc-2")
+	q.queued(t, last)
 }
 
 func TestApprovalTampered(t *testing.T) {

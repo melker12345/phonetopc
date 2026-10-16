@@ -86,8 +86,9 @@ class AndroidApprover(context: Context) : io.github.melker12345.phonetopc.protoc
 }
 
 /**
- * The one approval or decryption being shown (there is at most one per phone, APPROVAL.md §4),
- * shared by the notification, its actions and [ApprovalActivity].
+ * The one approval or decryption being shown, shared by the notification, its actions and
+ * [ApprovalActivity]. [io.github.melker12345.phonetopc.protocol.approval.ApprovalService] asks
+ * for one at a time; those of other PCs wait their turn there (APPROVAL.md §4).
  */
 object ApprovalPrompts {
     private const val TAG = "ApprovalPrompts"

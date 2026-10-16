@@ -69,8 +69,13 @@ capability without `hello.approval` (or the reverse) MUST treat approval as unav
 - If the client's own wait runs out, that's a client-side error (e.g. a timeout exception), not a `why`.
 - The response is sent only once there's an outcome, which can take up to `timeout_ms` plus a little; clients MUST
   NOT time out the request earlier than `timeout_ms` + 5 s. Events and other responses continue meanwhile.
-- **One approval at a time per phone.** While one is pending, others get `"why": "busy"`.
-- If the session closes while an approval is pending, the phone cancels the prompt.
+- **One pending approval per PC** (by paired PC id, across its sessions, counting `decrypt`, `DECRYPT.md` §4).
+  Another request from the same PC gets `"why": "busy"` at once.
+- The phone shows one request at a time. Those of other PCs wait their turn, first come first served, at most
+  8 waiting; beyond that `busy`. `timeout_ms` runs while a request waits: one that times out waiting is
+  answered `timeout` and never shown.
+- If the session closes while an approval is pending, the phone cancels the prompt, or drops the request if it
+  is still waiting.
 
 ### 4.1 Outcomes
 
@@ -80,7 +85,7 @@ capability without `hello.approval` (or the reverse) MUST treat approval as unav
 | `false` | `denied` | The user pressed Deny |
 | `false` | `cancelled` | The user dismissed the prompt or notification |
 | `false` | `timeout` | `timeout_ms` passed without an answer |
-| `false` | `busy` | Another approval was pending |
+| `false` | `busy` | This PC already had a request pending, or 8 other PCs' requests were waiting |
 | `false` | `lockout` | Too many failed fingerprint attempts; Android locked biometrics for now |
 | `false` | `unavailable` | No strong biometric enrolled, or no approval key |
 

@@ -109,6 +109,8 @@ class DecryptTest {
 
     private val token = Secrets.newToken()
     private val pc = PcInfo("81d7d5f3b885fd1d", "arch-desktop")
+    private val otherToken = Secrets.newToken()
+    private val otherPc = PcInfo("5c1e0e9a7d3b2f41", "laptop")
     private val approver = FakeApprover()
     private val scope = TestScope()
     private val service = ApprovalService(approver, scope)
@@ -117,7 +119,15 @@ class DecryptTest {
         source = FakeSensorSource(),
         serverInfo = ServerInfo("phonetopc-android", "test"),
         deviceInfoProvider = { DeviceInfo("635f3a01db1859bc", "Test Phone", platform = "android") },
-        security = if (secure) SecureAccess(authenticate = { t -> pc.takeIf { TokenHash.matches(t, TokenHash.of(token)) } }) else null,
+        security = if (secure) SecureAccess(
+            authenticate = { t ->
+                when {
+                    TokenHash.matches(t, TokenHash.of(token)) -> pc
+                    TokenHash.matches(t, TokenHash.of(otherToken)) -> otherPc
+                    else -> null
+                }
+            },
+        ) else null,
         approvals = service,
     )
 
@@ -129,8 +139,8 @@ class DecryptTest {
         drain()
     }
 
-    private fun session(): Pair<Session, JsonObject> = hub().openSession("pc").let {
-        it to it.send("""{"jsonrpc":"2.0","id":0,"method":"hello","params":{"protocol":"phonetopc/1","auth":{"token":"$token"}}}""")
+    private fun session(t: String = token): Pair<Session, JsonObject> = hub().openSession("pc").let {
+        it to it.send("""{"jsonrpc":"2.0","id":0,"method":"hello","params":{"protocol":"phonetopc/1","auth":{"token":"$t"}}}""")
             .single()["result"]!!.jsonObject
     }
 
@@ -195,7 +205,7 @@ class DecryptTest {
         assertTrue(approver.requests.isEmpty())
     }
 
-    @Test fun sharesThePendingSlotWithApprovals() {
+    @Test fun oneRequestPerPcWithApprovals() {
         val (s, _) = session()
         s.send(request(id = 1))
         scope.runCurrent()
@@ -203,6 +213,20 @@ class DecryptTest {
         val nonce = Base64Url.encode(Secrets.bytes(32))
         val approval = s.send("""{"jsonrpc":"2.0","id":3,"method":"request_approval","params":{"reason":"Deploy?","nonce":"$nonce"}}""")
         assertEquals("busy", approval.single().why())
+    }
+
+    @Test fun anotherPcWaitsItsTurn() {
+        val (a, _) = session()
+        val (b, _) = session(otherToken)
+        a.send(request(id = 1))
+        assertTrue(b.send(request(id = 2)).isEmpty())
+        scope.runCurrent()
+        assertEquals(listOf(pc), approver.requests.map { it.pc })
+        approver.answer.complete(null)
+        scope.runCurrent()
+        assertTrue(a.drain().single().result()["decrypted"]!!.jsonPrimitive.boolean)
+        assertTrue(b.drain().single().result()["decrypted"]!!.jsonPrimitive.boolean)
+        assertEquals(listOf(pc, otherPc), approver.requests.map { it.pc })
     }
 
     @Test fun devModeHasNoSuchMethod() {

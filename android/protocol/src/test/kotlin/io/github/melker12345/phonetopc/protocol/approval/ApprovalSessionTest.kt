@@ -66,8 +66,9 @@ class ApprovalSessionTest {
         }
     }
 
-    private val token = Secrets.newToken()
     private val pc = PcInfo("81d7d5f3b885fd1d", "arch-desktop")
+    private val otherPcs = (1..ApprovalService.MAX_WAITING + 1).map { PcInfo("pc$it", "laptop $it") }
+    private val tokens = (listOf(pc) + otherPcs).associateBy { Secrets.newToken() }
     private val approver = FakeApprover()
     private val scope = TestScope()
     private val service = ApprovalService(approver, scope)
@@ -76,7 +77,7 @@ class ApprovalSessionTest {
         source = FakeSensorSource(),
         serverInfo = ServerInfo("phonetopc-android", "test"),
         deviceInfoProvider = { DeviceInfo("635f3a01db1859bc", "Test Phone", platform = "android") },
-        security = if (secure) SecureAccess(authenticate = { t -> pc.takeIf { TokenHash.matches(t, TokenHash.of(token)) } }) else null,
+        security = if (secure) SecureAccess(authenticate = { t -> tokens.entries.firstOrNull { TokenHash.matches(t, TokenHash.of(it.key)) }?.value }) else null,
         approvals = approvals,
     )
 
@@ -90,11 +91,14 @@ class ApprovalSessionTest {
         drain()
     }
 
-    private fun Session.helloResult(): JsonObject =
-        send("""{"jsonrpc":"2.0","id":0,"method":"hello","params":{"protocol":"phonetopc/1","auth":{"token":"$token"}}}""")
+    private fun Session.helloResult(who: PcInfo): JsonObject {
+        val token = tokens.entries.single { it.value == who }.key
+        return send("""{"jsonrpc":"2.0","id":0,"method":"hello","params":{"protocol":"phonetopc/1","auth":{"token":"$token"}}}""")
             .single()["result"]!!.jsonObject
+    }
 
-    private fun session(h: BridgeHub = hub): Pair<Session, JsonObject> = h.openSession("pc").let { it to it.helloResult() }
+    private fun session(h: BridgeHub = hub, who: PcInfo = pc): Pair<Session, JsonObject> =
+        h.openSession("pc").let { it to it.helloResult(who) }
 
     private val nonce = Base64Url.encode(Secrets.bytes(32))
     private val reason = "Run deploy.sh on arch-desktop?"
@@ -189,7 +193,7 @@ class ApprovalSessionTest {
         assertEquals("denied", s.drain().single().why())
     }
 
-    @Test fun oneAtATimePerPhone() {
+    @Test fun oneAtATimePerPc() {
         val (a, _) = session()
         val (b, _) = session()
         a.send(approvalRequest(id = 1))
@@ -204,6 +208,80 @@ class ApprovalSessionTest {
         assertTrue(b.send(approvalRequest(id = 4)).isEmpty())
         scope.runCurrent()
         assertEquals(2, approver.requests.size)
+    }
+
+    @Test fun otherPcsWaitTheirTurn() {
+        val (a, _) = session()
+        val (b, _) = session(who = otherPcs[0])
+        val (c, _) = session(who = otherPcs[1])
+        assertTrue(a.send(approvalRequest(id = 1)).isEmpty())
+        assertTrue(b.send(approvalRequest(id = 2)).isEmpty())
+        assertTrue(c.send(approvalRequest(id = 3)).isEmpty())
+        scope.runCurrent()
+        assertEquals(listOf(pc), approver.requests.map { it.pc })
+        assertEquals("busy", b.send(approvalRequest(id = 4)).single().why())
+
+        approver.answer.complete(ApprovalOutcome.Refused(ApprovalWhy.DENIED))
+        approver.answer = CompletableDeferred()
+        scope.runCurrent()
+        assertEquals("denied", a.drain().single().why())
+        assertEquals(listOf(pc, otherPcs[0]), approver.requests.map { it.pc })
+
+        val signed = approver.requests.last().message
+        approver.answer.complete(ApprovalOutcome.Approved(approver.sign(signed)))
+        scope.runCurrent()
+        assertTrue(b.drain().single().result()["approved"]!!.jsonPrimitive.boolean)
+        assertEquals(listOf(pc, otherPcs[0], otherPcs[1]), approver.requests.map { it.pc })
+    }
+
+    @Test fun aWaitingRequestTimesOutUnseen() {
+        val (a, _) = session()
+        val (b, _) = session(who = otherPcs[0])
+        a.send(approvalRequest(id = 1, timeout = 10_000))
+        b.send(approvalRequest(id = 2, timeout = 5_000))
+        scope.runCurrent()
+        scope.advanceTimeBy(5_001)
+        scope.runCurrent()
+        assertEquals("timeout", b.drain().single().why())
+        assertTrue(a.drain().isEmpty())
+        approver.answer.complete(ApprovalOutcome.Refused(ApprovalWhy.DENIED))
+        scope.runCurrent()
+        assertEquals("denied", a.drain().single().why())
+        assertEquals(listOf(pc), approver.requests.map { it.pc })
+        approver.answer = CompletableDeferred()
+        assertTrue("may ask again", b.send(approvalRequest(id = 3)).isEmpty())
+        scope.runCurrent()
+        assertEquals(otherPcs[0], approver.requests.last().pc)
+    }
+
+    @Test fun aWaitingRequestOfAClosedSessionVanishes() {
+        val (a, _) = session()
+        val (b, _) = session(who = otherPcs[0])
+        val (c, _) = session(who = otherPcs[1])
+        a.send(approvalRequest(id = 1))
+        b.send(approvalRequest(id = 2))
+        c.send(approvalRequest(id = 3))
+        scope.runCurrent()
+        b.close()
+        scope.runCurrent()
+        approver.answer.complete(ApprovalOutcome.Refused(ApprovalWhy.DENIED))
+        approver.answer = CompletableDeferred()
+        scope.runCurrent()
+        assertEquals("denied", a.drain().single().why())
+        assertTrue(b.drain().isEmpty())
+        assertEquals(listOf(pc, otherPcs[1]), approver.requests.map { it.pc })
+        assertEquals(0, approver.cancellations)
+    }
+
+    @Test fun theQueueIsBounded() {
+        val sessions = (listOf(pc) + otherPcs).map { session(who = it).first }
+        val last = sessions.last()
+        sessions.dropLast(1).forEachIndexed { i, s -> assertTrue(s.send(approvalRequest(id = i)).isEmpty()) }
+        scope.runCurrent()
+        assertEquals("busy", last.send(approvalRequest(id = 99)).single().why())
+        approver.answer.complete(ApprovalOutcome.Refused(ApprovalWhy.DENIED))
+        scope.runCurrent()
+        assertTrue("a place is free again", last.send(approvalRequest(id = 100)).isEmpty())
     }
 
     @Test fun timeoutEndsThePrompt() {

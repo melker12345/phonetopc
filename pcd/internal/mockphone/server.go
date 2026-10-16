@@ -195,7 +195,10 @@ type Server struct {
 	// authFailures counts failed hellos per remote host (SECURITY.md §5).
 	authFailures *hostlimit.Limiter
 
-	approvalPending bool // one approval at a time per phone (APPROVAL.md §4)
+	// The approval shown to the user, and those of other PCs waiting
+	// their turn (APPROVAL.md §4).
+	approvalShown   *approvalSlot
+	approvalWaiting []*approvalSlot
 }
 
 // New creates a server and starts its simulation.
