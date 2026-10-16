@@ -196,9 +196,11 @@ func checkValidity(path []*x509.Certificate, kd *KeyDescription, now time.Time) 
 		now = time.Now()
 	}
 	at := now
-	created := kd.SoftwareEnforced.CreationDateTime
+	// The secure hardware's own value if it has one; the software list is
+	// filled in by the phone's OS.
+	created := kd.HardwareEnforced.CreationDateTime
 	if created == nil {
-		created = kd.HardwareEnforced.CreationDateTime
+		created = kd.SoftwareEnforced.CreationDateTime
 	}
 	if created != nil {
 		if t := time.UnixMilli(*created); t.Before(now) {
