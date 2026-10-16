@@ -529,6 +529,35 @@ func TestOnePairingAtATime(t *testing.T) {
 	}
 }
 
+// A failed attempt frees the slot before it is answered: the phone may
+// start over on a new connection while the old one is still open, and the
+// old one is then the second phone.
+func TestFailedAttemptFreesTheSlot(t *testing.T) {
+	asked, answer := make(chan struct{}), make(chan bool)
+	h := startListener(t, &prompter{qr: func(PhoneInfo) bool { close(asked); return <-answer }}, nil)
+	t.Cleanup(func() { close(answer) })
+	first := dialRaw(t, h)
+	wantErr(t, first.call(MethodQR, QRParams{Protocol: Protocol, Secret: security.NewSecret(), Phone: testPhone(t)}), protocol.CodeBadSecret)
+
+	second := dialRaw(t, h)
+	b, _ := json.Marshal(protocol.NewRequest(protocol.IntID(1), MethodQR, QRParams{Protocol: Protocol, Secret: h.l.Secret(), Phone: testPhone(t)}))
+	if err := second.ws.Write(ctx(t), websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second phone's pair_qr didn't reach the prompt")
+	}
+	b, _ = json.Marshal(protocol.NewRequest(protocol.IntID(2), MethodQR, QRParams{Protocol: Protocol, Secret: h.l.Secret(), Phone: testPhone(t)}))
+	if err := first.ws.Write(ctx(t), websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := first.ws.Read(ctx(t)); websocket.CloseStatus(err) != websocket.StatusTryAgainLater {
+		t.Fatalf("want close 1013, got %v", err)
+	}
+}
+
 func TestPhoneIDFormat(t *testing.T) {
 	h := startListener(t, yes(), nil)
 	r := dialRaw(t, h)

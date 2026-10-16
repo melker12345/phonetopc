@@ -34,6 +34,7 @@ type session struct {
 	conn   *websocket.Conn
 	remote string
 	ctx    context.Context // done when the phone is gone or Serve stops
+	slot   bool            // the session holds the listener's pairing slot
 
 	state      state
 	way        Way
@@ -53,6 +54,9 @@ type promptAnswer struct {
 
 // errGone means the session ended while a handler waited.
 var errGone = errors.New("session gone")
+
+// errBusy means another session took the pairing slot.
+var errBusy = errors.New(reasonBusy)
 
 func (s *session) run() {
 	// ctx ends waits (prompts) when the phone goes away or Serve stops. The
@@ -121,6 +125,7 @@ func (s *session) run() {
 					websocket.StatusNormalClosure:   "paired",
 					websocket.StatusPolicyViolation: "too many failed pairing attempts",
 					websocket.StatusGoingAway:       "pairing expired",
+					websocket.StatusTryAgainLater:   reasonBusy,
 				}[closeCode]
 				s.conn.Close(closeCode, reason)
 				if after != nil {
@@ -146,10 +151,11 @@ func (s *session) write(resp *protocol.Response) bool {
 }
 
 // reset discards everything learned in this session (§4.3: "both sides
-// discard everything"). It runs after a failed attempt and when the
-// connection ends; a SAS run that revealed Npc and didn't pair counts
-// towards MaxSASRuns either way, and a QR run that reached the prompt and
-// didn't pair uses up the QR secret.
+// discard everything") and frees the pairing slot, so that the phone can
+// start over on a new connection as soon as it has the answer. It runs
+// after a failed attempt and when the connection ends; a SAS run that
+// revealed Npc and didn't pair counts towards MaxSASRuns either way, and a
+// QR run that reached the prompt and didn't pair uses up the QR secret.
 func (s *session) reset() {
 	if s.stopPrompt != nil {
 		s.stopPrompt()
@@ -164,6 +170,10 @@ func (s *session) reset() {
 		}
 	}
 	s.state, s.way, s.phone, s.npc, s.revealed, s.asked, s.answer = stStart, "", PhoneInfo{}, nil, false, false, nil
+	if s.slot {
+		s.l.release()
+		s.slot = false
+	}
 }
 
 // handle processes one frame. It returns the response (nil for none), a
@@ -181,6 +191,8 @@ func (s *session) handle(data []byte) (*protocol.Response, func(), websocket.Sta
 	switch {
 	case errors.Is(rpcErr, errGone):
 		return nil, nil, websocket.StatusGoingAway
+	case errors.Is(rpcErr, errBusy):
+		return nil, nil, websocket.StatusTryAgainLater
 	case rpcErr != nil:
 		var pe *protocol.Error
 		if !errors.As(rpcErr, &pe) {
@@ -221,6 +233,12 @@ func (s *session) dispatch(method string, params json.RawMessage) (any, func(), 
 	}
 	if s.state != st {
 		return nil, nil, protocol.NewError(protocol.CodeOutOfOrder, "%s is not valid at this step of the pairing", method)
+	}
+	if !s.slot {
+		if !s.l.claim(s.remote) {
+			return nil, nil, errBusy
+		}
+		s.slot = true
 	}
 	handler := map[string]func(json.RawMessage) (any, func(), error){
 		MethodQR:         s.pairQR,

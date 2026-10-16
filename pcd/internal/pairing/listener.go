@@ -275,23 +275,33 @@ func (l *Listener) serveWS(w http.ResponseWriter, r *http.Request) {
 		conn.Close(websocket.StatusTryAgainLater, "too many failed pairing attempts, try again in a minute")
 		return
 	}
-	l.mu.Lock()
-	if l.busy {
-		l.mu.Unlock()
-		// Two phones at once may mean someone else is using the QR code.
-		l.logf("refused a second phone from %s while a pairing is in progress", r.RemoteAddr)
-		conn.Close(websocket.StatusTryAgainLater, "another pairing is in progress")
+	if !l.claim(r.RemoteAddr) {
+		conn.Close(websocket.StatusTryAgainLater, reasonBusy)
 		return
 	}
-	l.busy = true
-	l.mu.Unlock()
-	defer func() {
-		l.mu.Lock()
-		l.busy = false
-		l.mu.Unlock()
-	}()
 
 	l.logf("phone connected from %s", r.RemoteAddr)
-	s := &session{l: l, conn: conn, remote: r.RemoteAddr}
+	s := &session{l: l, conn: conn, remote: r.RemoteAddr, slot: true}
 	s.run()
+}
+
+const reasonBusy = "another pairing is in progress"
+
+// claim takes the pairing slot for a phone at remote, if it is free.
+func (l *Listener) claim(remote string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.busy {
+		// Two phones at once may mean someone else is using the QR code.
+		l.logf("refused a second phone from %s while a pairing is in progress", remote)
+		return false
+	}
+	l.busy = true
+	return true
+}
+
+func (l *Listener) release() {
+	l.mu.Lock()
+	l.busy = false
+	l.mu.Unlock()
 }

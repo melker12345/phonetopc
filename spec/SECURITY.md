@@ -75,6 +75,8 @@ Pairing creates trust between one phone and one PC. It runs **once**. Afterwards
 - The phone is the **client** of the pairing listener. Messages are JSON-RPC 2.0 like `PROTOCOL.md` §2, but with
   the methods below, and protocol name `phonetopc-pair/1`.
 - The pairing listener accepts one pairing at a time; a second phone connecting meanwhile is closed with 1013.
+  A failed attempt frees the slot before it is answered, so the phone can start over on a new connection; a
+  connection that starts over while another phone holds the slot is closed with 1013 too.
   So that nobody can hold that slot, the listener SHOULD close a connection with 1001 that hasn't taken its next
   step within 20 seconds of connecting or of its last step. Only while the users compare codes (after
   `pair_sas_nonce` was answered) does it wait as long as the users get (5 minutes). A step is a request that
