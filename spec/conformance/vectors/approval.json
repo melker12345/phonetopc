@@ -1,16 +1,19 @@
 {
-  "description": "Approval test vectors for APPROVAL.md \u00a75. Test-only key; never use it for anything else. ECDSA signatures are randomized, so implementations verify these, they don't reproduce them.",
+  "description": "Approval test vectors for APPROVAL.md §5. Test-only key; never use it for anything else. ECDSA signatures are randomized, so implementations verify these, they don't reproduce them. The last invalid vector is a real signature over the message of phonetopc-approval/1, which verifiers must refuse.",
   "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
   "pin": "sha256/iTLkIw3_BVnZB-gfY05UCdj8f0jvVcl9dmaD7vkcdWw",
-  "message_utf8": "phonetopc-approval/1\n635f3a01db1859bc\n81d7d5f3b885fd1d\nZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM\n5XkfdFNl7cpRGp003eSPS_BRaab0DMUYkvpZuKwhTTY",
-  "message_hex": "70686f6e65746f70632d617070726f76616c2f310a363335663361303164623138353962630a383164376435663362383835666431640a5a47566d5a326870616d7473625735766348467963335231646e6434655870376648312d66344342676f4d0a35586b6664464e6c376370524770303033655350535f425261616230444d55596b76705a754b7768545459",
+  "message_utf8": "phonetopc-approval/2\n635f3a01db1859bc\n81d7d5f3b885fd1d\nZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM\n5XkfdFNl7cpRGp003eSPS_BRaab0DMUYkvpZuKwhTTY\nMIg9HfL8YvWdZiVacNwF9g09TvTTlX5uPjjmL25HG9A\n42\n1760000040000",
+  "message_hex": "70686f6e65746f70632d617070726f76616c2f320a363335663361303164623138353962630a383164376435663362383835666431640a5a47566d5a326870616d7473625735766348467963335231646e6434655870376648312d66344342676f4d0a35586b6664464e6c376370524770303033655350535f425261616230444d55596b76705a754b77685454590a4d49673948664c38597657645a695661634e774639673039547654546c583575506a6a6d4c3235484739410a34320a31373630303030303430303030",
   "valid": {
     "phone_id": "635f3a01db1859bc",
     "pc_id": "81d7d5f3b885fd1d",
     "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
     "reason": "Run deploy.sh on arch-desktop?",
+    "program": "deploy.sh",
+    "match": 42,
+    "expiry": 1760000040000,
     "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-    "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU"
+    "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7"
   },
   "invalid": [
     {
@@ -18,8 +21,11 @@
       "pc_id": "81d7d5f3b885fd1d",
       "nonce": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
       "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
       "name": "wrong nonce"
     },
     {
@@ -27,17 +33,59 @@
       "pc_id": "81d7d5f3b885fd1d",
       "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
       "reason": "Run deploy.sh on arch-desktop!",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
       "name": "wrong reason"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh2",
+      "match": 42,
+      "expiry": 1760000040000,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
+      "name": "wrong program"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 24,
+      "expiry": 1760000040000,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
+      "name": "wrong match"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040001,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
+      "name": "wrong expiry"
     },
     {
       "phone_id": "635f3a01db1859bc",
       "pc_id": "0000000000000000",
       "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
       "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
       "name": "wrong pc id"
     },
     {
@@ -45,8 +93,11 @@
       "pc_id": "81d7d5f3b885fd1d",
       "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
       "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
       "name": "wrong phone id"
     },
     {
@@ -54,8 +105,11 @@
       "pc_id": "81d7d5f3b885fd1d",
       "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
       "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnQ",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq6",
       "name": "corrupted signature"
     },
     {
@@ -63,9 +117,24 @@
       "pc_id": "81d7d5f3b885fd1d",
       "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
       "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
       "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhV-KIH2QyThW0fjd-QvQmAGUl0VmLGWbmDFbGSMdp_xQas0_xUimpM8J3vrdyrDkyT4Su6W1XiFs7jKijSRKQg",
-      "signature": "MEUCIQCncJTBsrVAgKIkW23i928n5TmWPOc2Cs_ZBMBeExjyTgIgCCHmGoodbGzmIXR7ywnEJLK6wcoRLIE5sdeIv8OFxnU",
+      "signature": "MEYCIQDo_gjsoMJxBTWzTLeurwdgaoxoAJthirkCB_sKbA4t_AIhAJAUyESKkYWjpOirHjRRkPSSvAx1J2GU48dVMOz4iDq7",
       "name": "different key"
+    },
+    {
+      "phone_id": "635f3a01db1859bc",
+      "pc_id": "81d7d5f3b885fd1d",
+      "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM",
+      "reason": "Run deploy.sh on arch-desktop?",
+      "program": "deploy.sh",
+      "match": 42,
+      "expiry": 1760000040000,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og",
+      "signature": "MEUCIQCucjLjPhdzuFHH_usWTj5M-soK-5UrT29Q1zyqIXpS5wIgZ_23e8c2OAXtK5WSWeGbwlOlfpUwR_QwIRxaGFpFdMI",
+      "name": "signature over phonetopc-approval/1"
     }
   ]
 }

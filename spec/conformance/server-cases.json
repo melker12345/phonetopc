@@ -666,7 +666,7 @@
     "name": "request_approval_dev_mode",
     "description": "APPROVAL.md §1: approval exists only in secure mode; in dev mode request_approval is an unknown method, even with valid params.",
     "hello": true,
-    "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 30000}},
+    "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 30000}},
     "expect": {"error": -32601, "name": "method_not_found", "id": 1}
   }
 ]

@@ -180,10 +180,13 @@
     },
 
     "requestApprovalParams": {
-      "type": "object", "required": ["reason", "nonce"],
+      "type": "object", "required": ["reason", "program", "nonce", "match", "expiry"],
       "properties": {
         "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "program": { "type": "string", "minLength": 1, "maxLength": 60 },
         "nonce": { "type": "string", "minLength": 43, "maxLength": 43 },
+        "match": { "type": "integer", "minimum": 10, "maximum": 99 },
+        "expiry": { "type": "integer", "minimum": 0 },
         "timeout_ms": { "type": "integer", "minimum": 5000, "maximum": 120000 }
       }
     },
@@ -193,7 +196,7 @@
       "properties": {
         "approved": { "type": "boolean" },
         "signature": { "type": "string" },
-        "why": { "enum": ["denied", "cancelled", "timeout", "busy", "lockout", "unavailable"] }
+        "why": { "enum": ["denied", "cancelled", "mismatch", "timeout", "busy", "cooldown", "lockout", "unavailable"] }
       },
       "if": { "properties": { "approved": { "const": true } } },
       "then": { "required": ["signature"] },
@@ -201,9 +204,11 @@
     },
 
     "decryptParams": {
-      "type": "object", "required": ["reason", "key_pin", "ciphertext"],
+      "type": "object", "required": ["reason", "program", "match", "key_pin", "ciphertext"],
       "properties": {
         "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "program": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "match": { "type": "integer", "minimum": 10, "maximum": 99 },
         "key_pin": { "type": "string" },
         "ciphertext": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
         "timeout_ms": { "type": "integer", "minimum": 5000, "maximum": 120000 }
@@ -215,7 +220,7 @@
       "properties": {
         "decrypted": { "type": "boolean" },
         "plaintext": { "type": "string" },
-        "why": { "enum": ["denied", "cancelled", "timeout", "busy", "lockout", "unavailable", "failed"] }
+        "why": { "enum": ["denied", "cancelled", "mismatch", "timeout", "busy", "cooldown", "lockout", "unavailable", "failed"] }
       },
       "if": { "properties": { "decrypted": { "const": true } } },
       "then": { "required": ["plaintext"] },

@@ -83,14 +83,16 @@ chain with a listed certificate; since that contacts the internet, it SHOULD do 
 
 [`conformance/vectors/attestation.json`](conformance/vectors/attestation.json) holds a chain from a test root
 that a verifier given that root MUST accept, and variants it MUST reject.
-
 ## 4. `request_approval`
 
 ```jsonc
 // PC → phone
 {"jsonrpc":"2.0","id":7,"method":"request_approval","params":{
   "reason":"Run deploy.sh on arch-desktop?",
+  "program":"deploy.sh",
   "nonce":"<32 random bytes, base64url>",
+  "match":42,
+  "expiry":1760000040000,
   "timeout_ms":30000}}
 // phone → PC, after the user acted (or the timeout)
 {"jsonrpc":"2.0","id":7,"result":{"approved":true,"signature":"<base64url DER ECDSA signature>"}}
@@ -100,13 +102,22 @@ that a verifier given that root MUST accept, and variants it MUST reject.
 | Param | Rules |
 |---|---|
 | `reason` | Required. 1–200 Unicode code points; must not start or end with whitespace; must not contain control characters (category Cc) or hidden characters (`PANELS.md` §8), so it can't be made to look like something else. Shown to the user verbatim |
+| `program` | Required. The program on the PC that asks, typically its executable's file name, or `a program` when the PC can't tell. 1–60 code points, otherwise the rules of `reason`. Shown to the user verbatim |
 | `nonce` | Required. Exactly 32 bytes after base64url decoding. Generated fresh by the PC for every request |
+| `match` | Required. An integer 10–99, chosen uniformly at random by the PC for every request and shown to its user on the PC (§4.2) |
+| `expiry` | Required. An integer: when the signature stops being valid, in Unix milliseconds. The PC sets it to its clock + `timeout_ms` + 10 s. The phone refuses one that is more than 5 minutes behind its own clock, or more than `timeout_ms` + 60 s + 5 minutes ahead |
 | `timeout_ms` | Optional, default 30000, allowed 5000–120000 |
 
-Invalid params: `-32602`. The phone never trims or normalizes `reason`: it rejects or accepts it exactly as
-received. Clients SHOULD validate before sending.
+Invalid params: `-32602`. Integers are spelled as JSON integers (`42`, not `42.0` or `"42"`). The phone never
+trims or normalizes `reason` or `program`: it rejects or accepts them exactly as received. Clients SHOULD
+validate before sending.
 Without capability `approval`: result `{"approved": false, "why": "unavailable"}`. A client that sees the
 capability without `hello.approval` (or the reverse) MUST treat approval as unavailable and send nothing.
+
+The 5 minutes of `expiry` allow for the phone's and the PC's clocks to differ. Both normally set themselves
+from the network and differ by far less; 5 minutes is the usual tolerance of Kerberos, and keeps a signature
+valid for at most about 8 minutes after it was made, even at the longest timeout. A phone or PC whose clock is
+further off has to fix it before approvals work, and the phone's error message says so.
 
 - If the client's own wait runs out, that's a client-side error (e.g. a timeout exception), not a `why`.
 - The response is sent only once there's an outcome, which can take up to `timeout_ms` plus a little; clients MUST
@@ -118,6 +129,7 @@ capability without `hello.approval` (or the reverse) MUST treat approval as unav
   answered `timeout` and never shown.
 - If the session closes while an approval is pending, the phone cancels the prompt, or drops the request if it
   is still waiting.
+- A PC in cool-down (§4.3) gets `"why": "cooldown"` at once, before the check for `busy`.
 
 ### 4.1 Outcomes
 
@@ -126,36 +138,59 @@ capability without `hello.approval` (or the reverse) MUST treat approval as unav
 | `true` | — | Biometric succeeded and the phone signed; `signature` is present |
 | `false` | `denied` | The user pressed Deny |
 | `false` | `cancelled` | The user dismissed the prompt or notification |
+| `false` | `mismatch` | The user picked a number other than `match` |
 | `false` | `timeout` | `timeout_ms` passed without an answer |
 | `false` | `busy` | This PC already had a request pending, or 8 other PCs' requests were waiting |
+| `false` | `cooldown` | This PC's requests were refused too often; nothing was shown (§4.3) |
 | `false` | `lockout` | Too many failed fingerprint attempts; Android locked biometrics for now |
 | `false` | `unavailable` | No strong biometric enrolled, or no approval key |
 
 Clients MUST treat `approved: true` as approved **only after** verifying the signature (§5). A `true` with a
 missing or invalid signature is a failure and SHOULD be reported as such, never as approval.
 
-### 4.2 What the user sees (phone)
+### 4.2 What the user sees
 
-- A high-priority notification on its own channel, *Approval requests*: title "<PC name> asks for approval",
-  text = `reason`, with actions *Approve* and *Deny*. *Approve* or tapping the notification opens the biometric
-  prompt; *Deny* answers `denied` without a prompt.
-- The prompt shows the PC name as title, `reason` as subtitle, and a negative button *Deny*.
-- If the app is in the foreground, the prompt MAY open directly.
-- When the request ends for any reason, the notification and prompt go away.
+Number matching makes the user check that the request on the phone is the one they started on the PC, so a
+prompt that malware sends at a moment they expect one isn't approved by habit.
+
+- **On the PC**, before or while sending the request, the program that asks shows `match` to its user ("pick 42
+  on your phone"). A PC MUST NOT send a request whose number its user can't see.
+- **On the phone**, a high-priority notification on its own channel, *Approval requests*: title "<program> on
+  <PC name> asks for approval", text = `reason`, with actions *Approve* and *Deny*. *Approve* or tapping the
+  notification opens the number choice; *Deny* answers `denied` without asking anything.
+- The number choice shows `reason` and three numbers: `match` and two others, all different, drawn uniformly
+  from 10–99, in random order, and a button *Deny*. The notification never shows them. Picking `match` opens
+  the biometric prompt; picking another number answers `mismatch` without a prompt.
+- The prompt shows "<program> on <PC name>" as title, `reason` as subtitle, and a negative button *Deny*.
+- If the app is in the foreground, the number choice MAY open directly.
+- When the request ends for any reason, the notification, number choice and prompt go away.
+
+### 4.3 Cool-down
+
+Per paired PC, the phone counts the requests its user refused: outcomes `denied`, `cancelled` and `mismatch`, of
+approvals and decryptions together. At the third within 10 minutes, the PC is in cool-down for 5 minutes: every
+`request_approval` and `decrypt` from it with valid params is answered `cooldown` at once, without showing
+anything, and isn't counted. When a cool-down starts, the refusals before it are forgotten. Approvals and other
+outcomes neither count nor reset the count. The phone MAY forget the count and the cool-down when the app
+restarts.
 
 ## 5. Signed message and verification
 
 The phone signs these bytes (UTF-8), lines joined by a single `\n`, no trailing newline:
 
 ```
-phonetopc-approval/1
+phonetopc-approval/2
 <phone id>
 <pc id>
 <nonce, base64url as sent>
 <base64url(SHA-256(reason as UTF-8 bytes))>
+<base64url(SHA-256(program as UTF-8 bytes))>
+<match, decimal>
+<expiry, decimal>
 ```
 
-`reason` here is exactly the string sent in the request, with no trimming or normalization on either side.
+`reason` and `program` here are exactly the strings sent in the request, with no trimming or normalization on
+either side; `match` and `expiry` are written in decimal without sign or leading zeros.
 
 - `phone id` and `pc id` are the ids stored at pairing: the PC uses the phone id it stored and its own id, and
   the phone uses its own id and the PC id it stored. In this session `hello.device.id` and `hello.pc.id` MUST
@@ -169,7 +204,11 @@ The PC approves only if **all** of these hold:
 2. `approval.pin` of this session is the pin of `approval.key` (the PC computes it), and equals the stored,
    accepted `approval_key`, whose attestation verified or which the user accepted without (§3).
 3. The signature verifies with `approval.key` over the bytes above, built from **its own** copy of the nonce,
-   reason, phone id and pc id — never from values echoed by the phone.
+   reason, program, match, expiry, phone id and pc id — never from values echoed by the phone. A signature
+   over any other message, such as one labelled `phonetopc-approval/1`, is invalid.
+
+Anyone who checks a signature later, with the values it was made for, MUST also check that `expiry` hasn't
+passed on their own clock.
 
 [`conformance/vectors/approval.json`](conformance/vectors/approval.json) holds a worked example (test key,
 message bytes, signature) that every verifier MUST accept, plus tampered variants it MUST reject.

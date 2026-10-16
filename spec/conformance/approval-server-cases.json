@@ -8,7 +8,8 @@
     ],
     "approval_key": "vectors/approval-key.pem",
     "approval": {"key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmmkcZs1PGKCpuqS0v9QSOE_jlWVD6CqHpgeYpUdpV7SrnNwDZnQ3yaCwG3Lp3YYuOUkuMtP9PY2uRP3kVH65Og", "pin": "sha256/iTLkIw3_BVnZB-gfY05UCdj8f0jvVcl9dmaD7vkcdWw"},
-    "decision": "approve"
+    "decision": "approve",
+    "now_ms": 1760000000000
   },
   "cases": [
     {
@@ -22,63 +23,63 @@
       "name": "request_before_hello",
       "description": "PROTOCOL.md §3: request_approval before hello is -32003 like any other method.",
       "hello": false,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32003, "name": "hello_required", "id": 1}
     },
     {
       "name": "approve",
-      "description": "A valid request; the fixture's user approves, and the signature verifies over the request's own nonce and reason (§5).",
+      "description": "A valid request; the fixture's user approves, and the signature verifies over the request's own params (§5).",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 30000}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 30000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_default_timeout",
       "description": "timeout_ms is optional.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": "a", "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": "a", "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"result": "any", "id": "a", "approval_valid": true}
     },
     {
       "name": "approve_timeout_min",
       "description": "timeout_ms 5000 is the lower bound and allowed.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 5000}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 5000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_timeout_max",
       "description": "timeout_ms 120000 is the upper bound and allowed.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 120000}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 120000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_unicode_reason",
       "description": "The reason is hashed as UTF-8 bytes, exactly as sent.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "D\u00e9ployer l'app \ud83d\ude80 sur \u00ab arch-desktop \u00bb ?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "D\u00e9ployer l'app \ud83d\ude80 sur \u00ab arch-desktop \u00bb ?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_reason_inner_whitespace",
       "description": "Whitespace inside the reason is fine, and kept as is.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run  deploy.sh\u00a0now?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run  deploy.sh\u00a0now?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_reason_200_code_points",
       "description": "200 code points are allowed even when they take 400 UTF-16 units (emoji).",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
       "name": "approve_reason_single_char",
       "description": "One code point is enough.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "x", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "x", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"result": "any", "id": 1, "approval_valid": true}
     },
     {
@@ -99,189 +100,378 @@
       "name": "reason_missing",
       "description": "reason is required.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_not_string",
       "description": "reason must be a string.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": 42, "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": 42, "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_empty",
       "description": "reason must have at least one code point.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_201_code_points",
       "description": "At most 200 code points.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_leading_space",
       "description": "No leading whitespace; the phone never trims.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": " Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": " Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_trailing_space",
       "description": "No trailing whitespace.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop? ", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop? ", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_only_spaces",
       "description": "Only whitespace.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "   ", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "   ", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_trailing_newline",
       "description": "A trailing newline is whitespace and a control character.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?\n", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?\n", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_inner_newline",
       "description": "Control characters (Cc) are not allowed anywhere.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\ndeploy.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\ndeploy.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_inner_control",
       "description": "Cc: U+0007.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u0007deploy.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u0007deploy.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_c1_control",
       "description": "Cc includes C1 controls: U+0085.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\u0085deploy.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\u0085deploy.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_bidi_override",
       "description": "Bidirectional controls are not allowed: U+202E.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u202eexe.hs.yolped", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u202eexe.hs.yolped", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_bidi_isolate",
       "description": "Bidirectional controls: U+2066..U+2069.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u2067deploy\u2069.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run \u2067deploy\u2069.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_zero_width_space",
       "description": "Invisible characters are not allowed: U+200B.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run dep\u200bloy.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run dep\u200bloy.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_line_separator",
       "description": "Line and paragraph separators are not allowed: U+2028.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\u2028Yes, safe", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\u2028Yes, safe", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_tag_character",
       "description": "Invisible characters outside the BMP: tag U+E0041.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\udb40\udc41", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\udb40\udc41", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "reason_bidi_mark",
       "description": "Bidirectional controls: U+200F and U+061C.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\u200f deploy\u061c.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run\u200f deploy\u061c.sh?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_missing",
       "description": "nonce is required.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_not_string",
       "description": "nonce must be a string.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": 12345}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": 12345, "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_31_bytes",
       "description": "The nonce must decode to exactly 32 bytes.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_33_bytes",
       "description": "The nonce must decode to exactly 32 bytes.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_padded",
       "description": "base64url without padding.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM="}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM=", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "nonce_standard_alphabet",
       "description": "base64url, not the standard alphabet (+ and /).",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoM"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoM", "match": 42, "expiry": 1760000040000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "timeout_too_short",
       "description": "timeout_ms below 5000.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 4999}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 4999}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "timeout_too_long",
       "description": "timeout_ms above 120000.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 120001}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 120001}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "timeout_fraction",
       "description": "timeout_ms must be an integer.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": 5000.5}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": 5000.5}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
       "name": "timeout_string",
       "description": "timeout_ms must be a number.",
       "hello": true,
-      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "timeout_ms": "30000"}},
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000, "timeout_ms": "30000"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_missing",
+      "description": "program is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_not_string",
+      "description": "program must be a string.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": 7, "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_empty",
+      "description": "program has at least one code point.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_60_code_points",
+      "description": "60 code points are allowed, and signed as sent.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "program_61_code_points",
+      "description": "At most 60 code points.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_leading_space",
+      "description": "program follows the rules of reason: no leading whitespace.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": " deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_trailing_space",
+      "description": "No trailing whitespace.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh ", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_control",
+      "description": "No control characters.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy\tsh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_bidi_override",
+      "description": "No bidirectional controls, which could make it look like another name.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy\u202ehs.exe", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "program_unicode",
+      "description": "Any other text is allowed, and hashed as UTF-8.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "d\u00e9ploy \ud83d\ude80", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "match_missing",
+      "description": "match is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "match_10",
+      "description": "10 is the smallest number.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 10, "expiry": 1760000040000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "match_99",
+      "description": "99 is the largest number.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 99, "expiry": 1760000040000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "match_9",
+      "description": "Below 10.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 9, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "match_100",
+      "description": "Above 99.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 100, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "match_string",
+      "description": "An integer, not a string.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": "42", "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "match_fraction",
+      "description": "An integer spelled as one.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42.5, "expiry": 1760000040000}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "match_null",
+      "description": "null is not a number.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "expiry": 1760000040000, "match": null}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_missing",
+      "description": "expiry is required.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_string",
+      "description": "An integer, not a string.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": "1760000040000"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_fraction",
+      "description": "An integer spelled as one.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000040000.5}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_oldest",
+      "description": "Up to 5 minutes behind the phone's clock is allowed, for clocks that differ.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1759999700000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "expiry_too_old",
+      "description": "More than 5 minutes behind the phone's clock.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1759999699999}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_latest",
+      "description": "Up to timeout_ms (default 30000) + 60 s + 5 minutes ahead is allowed.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000390000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "expiry_too_late",
+      "description": "Further ahead than timeout_ms + 60 s + 5 minutes.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000390001}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "expiry_latest_long_timeout",
+      "description": "The limit grows with timeout_ms.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000480000, "timeout_ms": 120000}},
+      "expect": {"result": "any", "id": 1, "approval_valid": true}
+    },
+    {
+      "name": "expiry_too_late_short_timeout",
+      "description": "The limit shrinks with timeout_ms.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh on arch-desktop?", "program": "deploy.sh", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM", "match": 42, "expiry": 1760000365001, "timeout_ms": 5000}},
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     }
   ]

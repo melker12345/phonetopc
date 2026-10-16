@@ -53,6 +53,8 @@ Decrypting doesn't need the attestation.
 // PC → phone
 {"jsonrpc":"2.0","id":9,"method":"decrypt","params":{
   "reason":"Decrypt secrets.age",
+  "program":"age",
+  "match":42,
   "key_pin":"sha256/…",
   "ciphertext":"<base64url>",
   "timeout_ms":30000}}
@@ -64,6 +66,8 @@ Decrypting doesn't need the attestation.
 | Param | Rules |
 |---|---|
 | `reason` | Required. Same rules as `request_approval`'s `reason` (`APPROVAL.md` §4). Shown to the user verbatim |
+| `program` | Required. As in `request_approval` (`APPROVAL.md` §4) |
+| `match` | Required. As in `request_approval`: an integer 10–99 the PC shows its user, who picks it on the phone |
 | `key_pin` | Required. The pin of the key the ciphertext was made for |
 | `ciphertext` | Required. base64url; after decoding, exactly as long as the key's modulus (256 or 384 bytes) |
 | `timeout_ms` | Optional, default 30000, allowed 5000–120000 |
@@ -71,14 +75,16 @@ Decrypting doesn't need the attestation.
 Invalid params: `-32602`. Without capability `decrypt`, or when `key_pin` isn't the pin of the phone's current key:
 result `{"decrypted": false, "why": "unavailable"}`, without asking the user.
 
-`why` is one of the outcomes of `APPROVAL.md` §4.1 (`denied`, `cancelled`, `timeout`, `busy`, `lockout`,
-`unavailable`), or `failed`: the user confirmed, but the ciphertext doesn't decrypt with this key (damaged, or made
-for another key).
+`why` is one of the outcomes of `APPROVAL.md` §4.1 (`denied`, `cancelled`, `mismatch`, `timeout`, `busy`,
+`cooldown`, `lockout`, `unavailable`), or `failed`: the user confirmed, but the ciphertext doesn't decrypt with this
+key (damaged, or made for another key).
 
-Timing, waiting, queueing and cancellation are as in `APPROVAL.md` §4. Approvals and decryptions count together: a PC
-with either pending gets `busy` for both, and they wait in the same queue.
+Timing, waiting, queueing, cancellation and the cool-down are as in `APPROVAL.md` §4 and §4.3. Approvals and
+decryptions count together: a PC with either pending gets `busy` for both, they wait in the same queue, and their
+refusals add up to one cool-down.
 
-What the user sees is as in `APPROVAL.md` §4.2, with the notification titled "<PC name> asks to decrypt".
+What the user sees, number matching included, is as in `APPROVAL.md` §4.2, with the notification titled
+"<program> on <PC name> asks to decrypt". Nothing is signed, so `decrypt` has no `expiry`.
 
 The PC can't tell a correct plaintext from a wrong one by itself. Formats built on this MUST authenticate what they
 decrypt with the plaintext, as age does with its header MAC (§5).
@@ -95,7 +101,8 @@ Files are encrypted with [age](https://age-encryption.org) through the plugin `a
   SubjectPublicKeyInfo, and the body is the age file key encrypted as in §3.
 
 To decrypt, the plugin connects to the phone named in the identity as a paired PC and sends `decrypt` for each stanza
-whose tag matches. A plaintext that isn't 16 bytes is an error.
+whose tag matches, with `program` `age-plugin-phonetopc`. It shows `match` through age's `msg` command ("confirm with
+your fingerprint on <phone>; pick 42"). A plaintext that isn't 16 bytes is an error.
 
 ## 6. Recovery
 

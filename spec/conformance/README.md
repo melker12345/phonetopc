@@ -155,9 +155,10 @@ dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_
 - The phone can do approvals with the key `fixture.approval_key` (`vectors/approval-key.pem`, the
   test key of `vectors/approval.json`), so `hello.approval` is `fixture.approval`. On Android this
   needs a test hook that signs with a software key instead of the Keystore one.
-- `fixture.decision` is `"approve"`: a test hook stands in for the user and approves every
-  request at once, without a biometric prompt. Denial, timeouts, `busy` and cancellation depend on
-  timing or a user and are left to each implementation's own tests.
+- `fixture.decision` is `"approve"`: a test hook stands in for the user, picks `match` and approves every
+  request at once, without a biometric prompt. Denial, mismatches, the cool-down, timeouts, `busy` and
+  cancellation depend on timing or a user and are left to each implementation's own tests.
+- The phone's clock reads `fixture.now_ms` while the cases run (a test hook), so that `expiry` can be checked.
 - The cases run one after another, never in parallel: a phone allows one pending approval or decryption per PC.
 
 **`expect`** gains two optional members:
@@ -165,7 +166,7 @@ dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_
 | Member | Meaning |
 |---|---|
 | `"result_capabilities": [...]` | With `"result"`: `result.capabilities` contains each of these |
-| `"approval_valid": true` | With `"result"`: `result.approved` is `true`, and `result.signature` verifies (APPROVAL.md §5) with `fixture.approval.key` over the message built from the runner's own values: `device.id` of the case's hello, `fixture.pcs[0].id`, and the `nonce` and `reason` of `send.params` exactly as sent |
+| `"approval_valid": true` | With `"result"`: `result.approved` is `true`, and `result.signature` verifies (APPROVAL.md §5) with `fixture.approval.key` over the message built from the runner's own values: `device.id` of the case's hello, `fixture.pcs[0].id`, and the `nonce`, `reason`, `program`, `match` and `expiry` of `send.params` exactly as sent |
 
 **Choices the cases make.**
 
@@ -173,8 +174,8 @@ dev-mode rule (no `request_approval` at all, `-32601`) is the `request_approval_
   when the phone couldn't show it.
 - "Whitespace" for the leading/trailing rule is Unicode `White_Space`; the cases only use ASCII
   space, newline and, inside a reason, U+00A0, so they don't depend on the exact set.
-- `timeout_ms` must be a JSON integer: `5000.5` and `"30000"` are `-32602`. The cases don't test
-  spellings like `5000.0` or `5e3`.
+- `timeout_ms`, `match` and `expiry` must be JSON integers: `5000.5` and `"30000"` are `-32602`. The
+  cases don't test spellings like `5000.0` or `5e3`.
 - Code points, not UTF-16 units, count: 200 emoji are allowed, 201 are not.
 
 ## Panel server cases (`panel-server-cases.json`)
