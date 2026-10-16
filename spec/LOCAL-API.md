@@ -70,9 +70,9 @@ has tried to reach the phone, then gets the real answer. The units are in `pcd/s
 | 404 | `unknown_source`, `unknown_panel` | |
 | 405 | `method_not_allowed` | The endpoint exists, with other methods (`Allow` header) |
 | 409 | `source_unavailable`, `no_value`, `too_many_panels` | |
-| 409 | `approval_key_changed` | See §5 |
+| 409 | `approval_key_changed`, `approval_key_unattested` | See §5 |
 | 409 | `approval_unavailable` | The phone is in developer mode, which has no approvals |
-| 409 | `decrypt_key_changed`, `decrypt_unavailable` | See §6 |
+| 409 | `decrypt_key_changed`, `decrypt_key_unattested`, `decrypt_unavailable` | See §6 |
 | 429 | `rate_limited` | Too many notifications |
 | 500 | `internal_error` | A bug in the daemon |
 | 501 | `method_not_found` | The phone app is older than the daemon and lacks the method |
@@ -185,7 +185,10 @@ optional; without it the daemon makes one. The request waits for the user, then 
 decryption pending, or too many PCs are waiting), `lockout`, `unavailable`. `approved` is `true` only after the
 daemon verified the phone's signature over a fresh nonce, the reason and both ids with the trusted approval key.
 Errors: 409 `approval_key_changed` when the phone's approval key changed (typically fingerprints were added or
-removed; accept it with `phonetopc approval-key --accept`; nothing was sent to the phone), and 502 `approval_invalid` for a signature that didn't verify.
+removed; accept it with `phonetopc approval-key --accept`; nothing was sent to the phone), 409
+`approval_key_unattested` when the phone's hardware didn't prove that the key needs a fingerprint for every use
+(`APPROVAL.md` §3.1; the message names the failed check; nothing was sent), and 502 `approval_invalid` for a
+signature that didn't verify.
 
 **Checking it yourself.** `proof` lets a program verify the phone's answer instead of trusting the daemon. Send your
 own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce` is your nonce, `key_pin` is the pin
@@ -197,11 +200,15 @@ of `key` (`SECURITY.md` §2) and equals yours, and `signature` verifies with `ke
 Data that only the phone can decrypt, after a fingerprint each time (`DECRYPT.md`). To encrypt a file, the
 `age-plugin-phonetopc` plugin is usually simpler (`DECRYPT.md` §5).
 
-`GET /v1/decryption-key` answers the phone's public key and its pin:
+`GET /v1/decryption-key` answers the phone's public key, its pin, and what its attestation proved, `tee` or
+`strongbox` (`DECRYPT.md` §3):
 
 ```json
-{"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…"}
+{"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…", "attestation": "strongbox"}
 ```
+
+A key whose attestation is missing or fails is 409 `decrypt_key_unattested`.
+`GET /v1/decryption-key?unattested=true` answers it anyway, with `attestation` `none`.
 
 Encrypt to it yourself, without the phone: RSAES-OAEP with SHA-256, MGF1 with SHA-1 and an empty label (`DECRYPT.md`
 §3), at most 190 bytes. Encrypt a random key that encrypts the data, and keep the `pin`. To decrypt:

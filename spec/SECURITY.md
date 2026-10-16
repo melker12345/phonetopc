@@ -263,14 +263,17 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
       "port": 8765,
       "addresses": ["192.168.1.153"],
       "paired_at": "2026-10-09T16:40:00Z",
-      "approval_key": "sha256/…"
+      "approval_key": "sha256/…",
+      "approval_attestation": "strongbox"
     }
   ]
 }
 ```
 
-- `id`, `name`, `pin` and `token` are required. `port` defaults to 8765, `addresses` to `[]`; `paired_at` and
-  `approval_key` (see `APPROVAL.md` §3) are optional. Readers MUST keep unknown fields when rewriting.
+- `id`, `name`, `pin` and `token` are required. `port` defaults to 8765, `addresses` to `[]`. `paired_at`,
+  `approval_key` and `approval_attestation` (`tee`, `strongbox` or `none`; see `APPROVAL.md` §3), and
+  `decrypt_key` and `decrypt_attestation` (`DECRYPT.md` §3) are optional. Readers MUST keep unknown fields when
+  rewriting.
 - **Writing:** take an exclusive `flock` on the file `.lock` in the same directory, re-read `devices.json`, change
   it, write a temp file in the same directory with mode `0600`, rename it over `devices.json`, release the lock.
   On platforms without `flock`, skip the lock.

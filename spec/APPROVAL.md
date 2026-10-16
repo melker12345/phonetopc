@@ -6,8 +6,8 @@ The key words MUST, SHOULD and MAY are used as in RFC 2119.
 A PC program asks the phone for an **approval**. The user confirms with a strong biometric (fingerprint) on the
 phone, and the phone returns a **signature** from a hardware key that can only sign right after that biometric
 check. The PC verifies the signature itself, so a "yes" can't be forged by anything that lacks that key: not the
-network, not a stolen token. The PC trusts the key the phone app first reports (§3); nothing yet proves to it
-that the key is in secure hardware and needs a fingerprint, so a modified app could report a software key.
+network, not a stolen token. The phone's secure hardware proves to the PC that the key is there and needs a
+fingerprint for every use (§3.1), so a modified app or an emulator can't pass off a software key.
 
 ## 1. Availability
 
@@ -17,10 +17,12 @@ that the key is in secure hardware and needs a fingerprint, so a modified app co
 - The `hello` result then includes `approval`:
 
 ```jsonc
-"approval": {"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…"}
+"approval": {"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…",
+             "attestation": ["<base64url DER certificate>", …]}
 ```
 
-`pin` is computed over `key` exactly as in `SECURITY.md` §2.
+`pin` is computed over `key` exactly as in `SECURITY.md` §2. `attestation` is the key's Android Keystore
+attestation certificate chain, leaf first (§3.1); a phone that has none omits it.
 
 ## 2. The approval key (phone)
 
@@ -29,18 +31,58 @@ that the key is in secure hardware and needs a fingerprint, so a modified app co
   enrollment changes (`setInvalidatedByBiometricEnrollment(true)`). StrongBox SHOULD be used where available.
 - Signing happens through `BiometricPrompt` with a `CryptoObject` wrapping the `Signature`, so the key is unusable
   without a fresh fingerprint.
+- The key is generated with an attestation challenge (`setAttestationChallenge`): the SHA-256 of the phone's TLS
+  SubjectPublicKeyInfo, which is the digest in its pin (`SECURITY.md` §2). That ties the attestation to the phone
+  the PC paired with.
 - If the key was invalidated (enrollment changed), the phone deletes it and creates a new one. The new key has a
   different `pin`; see §3 for what the PC does.
 
 ## 3. Trusting the approval key (PC)
 
 - The `hello` result arrives over TLS that is pinned to the phone (`SECURITY.md` §3), so the PC can trust the
-  `approval.pin` it sees there. The first time, the PC stores it as `approval_key` in `devices.json`.
+  `approval.pin` it sees there. The first time, if the key's attestation verifies (§3.1), the PC stores the pin as
+  `approval_key` in `devices.json`, and the outcome (`tee` or `strongbox`) as `approval_attestation`.
 - If a later `hello` shows a **different** `approval.pin` than the stored one, the PC MUST NOT accept approvals
-  signed by the new key until the user accepts it explicitly on the PC (e.g. `phonetopc approval-key --accept`).
-  Typical cause: fingerprints were added or removed on the phone. Requests made meanwhile fail with a clear
-  message instead of being sent.
-- Re-pairing clears the stored `approval_key`.
+  signed by the new key until the user accepts it explicitly on the PC (e.g. `phonetopc approval-key --accept`),
+  and its attestation verifies. Typical cause: fingerprints were added or removed on the phone. Requests made
+  meanwhile fail with a clear message instead of being sent.
+- A key whose attestation is missing or fails is refused in the same way, with a message that names the failed
+  check. The user MAY accept it anyway, but only explicitly (e.g. `phonetopc approval-key --accept --unattested`);
+  `approval_attestation` is then `none`.
+- A PC MAY let its user require StrongBox, and then refuses keys attested in the TEE.
+- Re-pairing clears the stored `approval_key` and `approval_attestation`.
+
+### 3.1 Key attestation
+
+The PC checks `approval.attestation` once, when it first trusts a key, and stores the outcome. It accepts the
+chain only if all of these hold:
+
+1. **Chain.** Each certificate is issued (by name) and signed by the next. The last one is one of Google's
+   hardware attestation roots, published at <https://android.googleapis.com/attestation/root>, or is issued and
+   signed by one; the PC compares public keys, since a root is re-issued with the same key. Only the leaf has the
+   key description extension (OID `1.3.6.1.4.1.11129.2.1.17`).
+2. **Validity.** The certificates above the leaf are valid at the key's `creationDateTime` (now, if absent).
+   A chain whose certificate just below the root has a serial number in its subject is factory-provisioned; its
+   certificates stay trusted after they expire. The leaf's validity is not checked.
+3. **Key.** The leaf's public key is `approval.key`.
+4. **Challenge.** `attestationChallenge` is the SHA-256 of the SubjectPublicKeyInfo of the phone's TLS key that
+   this connection is pinned to (§2).
+5. **Secure hardware.** `attestationSecurityLevel` and `keyMintSecurityLevel` are both `TrustedEnvironment` (1)
+   or `StrongBox` (2); the lower one is the key's level.
+6. **Fingerprint for every use.** In `hardwareEnforced`, `userAuthType` has the fingerprint bit (2) and not the
+   password bit (1). Neither list has `noAuthRequired` or `authTimeout`.
+7. **Purpose.** `hardwareEnforced.purpose` includes sign (2).
+8. **Verified boot.** `hardwareEnforced.rootOfTrust` has `verifiedBootState` `Verified` (0) and `deviceLocked`
+   true.
+9. **App.** `attestationApplicationId` names exactly one package, `io.github.melker12345.phonetopc`. A PC MAY
+   also require one of the SHA-256 digests of the app's signing certificates; builds signed by others differ.
+
+The key description's ASN.1 is at <https://source.android.com/docs/security/features/keystore/attestation>.
+A PC MAY also check Google's revocation list, <https://android.googleapis.com/attestation/status>, and reject a
+chain with a listed certificate; since that contacts the internet, it SHOULD do so only when its user asks.
+
+[`conformance/vectors/attestation.json`](conformance/vectors/attestation.json) holds a chain from a test root
+that a verifier given that root MUST accept, and variants it MUST reject.
 
 ## 4. `request_approval`
 
@@ -125,7 +167,7 @@ The PC approves only if **all** of these hold:
 1. The response belongs to a request it sent in this session, with the nonce it generated, and arrived before
    its own timeout.
 2. `approval.pin` of this session is the pin of `approval.key` (the PC computes it), and equals the stored,
-   accepted `approval_key` (§3).
+   accepted `approval_key`, whose attestation verified or which the user accepted without (§3).
 3. The signature verifies with `approval.key` over the bytes above, built from **its own** copy of the nonce,
    reason, phone id and pc id — never from values echoed by the phone.
 

@@ -45,8 +45,10 @@ front, the prompt opens directly. On a locked phone the reason is hidden and you
 
 It needs a strong (Class 3) biometric with at least one fingerprint enrolled, and is not available in developer
 mode. **Settings → Approvals** shows whether it is available. Adding or removing a fingerprint replaces the
-approval key; the PC then refuses approvals until you run `phonetopc approval-key --accept` there. Details are in
-[`APPROVAL.md`](../spec/APPROVAL.md).
+approval key; the PC then refuses approvals until you run `phonetopc approval-key --accept` there. The phone's
+secure hardware attests the key, so the PC knows it needs a fingerprint for every use; with an unlocked bootloader
+or a custom OS the PC refuses it unless you accept it with `phonetopc approval-key --accept --unattested`. Details
+are in [`APPROVAL.md`](../spec/APPROVAL.md).
 
 ## Notifications and panels
 

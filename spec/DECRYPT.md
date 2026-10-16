@@ -16,19 +16,20 @@ encrypts a file (§5), so the file can't be read with anything stored on the PC.
 - The `hello` result then includes `decrypt`:
 
 ```jsonc
-"decrypt": {"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…"}
+"decrypt": {"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…",
+            "attestation": ["<base64url DER certificate>", …]}
 ```
 
-`pin` is computed over `key` exactly as in `SECURITY.md` §2.
+`pin` is computed over `key` exactly as in `SECURITY.md` §2, and `attestation` is as in `APPROVAL.md` §1.
 
 ## 2. The decryption key (phone)
 
 - An RSA key in Android Keystore, separate from the TLS and approval keys: 2048 bits in StrongBox where available,
   otherwise 3072 bits. Purpose decrypt only, padding OAEP with digest SHA-256 (MGF1 with SHA-1, the Keystore
   default).
-- It requires user authentication **for every use** with `BIOMETRIC_STRONG` only, and is invalidated when biometric
-  enrollment changes, exactly like the approval key (`APPROVAL.md` §2). Decryption happens through
-  `BiometricPrompt` with a `CryptoObject` wrapping the `Cipher`.
+- It requires user authentication **for every use** with `BIOMETRIC_STRONG` only, is invalidated when biometric
+  enrollment changes, and is attested with the same challenge, exactly like the approval key (`APPROVAL.md` §2).
+  Decryption happens through `BiometricPrompt` with a `CryptoObject` wrapping the `Cipher`.
 - If the key was invalidated, the phone deletes it and creates a new one with a different `pin`. **Everything
   encrypted to the old key can no longer be decrypted by the phone**; §6 is how users keep access.
 
@@ -39,6 +40,12 @@ at most 190 bytes for a 2048-bit key, and SHOULD be a random key that encrypts t
 
 A PC learns `key` from a `hello`, over TLS pinned to the phone (`SECURITY.md` §3). It doesn't need the phone again
 to encrypt.
+
+Data encrypted to the key is only as safe as the key, so before a PC encrypts to it or derives a recipient from it
+(§5), it MUST verify `decrypt.attestation` as in `APPROVAL.md` §3.1, with purpose decrypt (1) in place of sign, or
+have its user accept an unattested key explicitly (e.g. `age-plugin-phonetopc --generate --unattested`). It MAY
+store the outcome as `decrypt_key` and `decrypt_attestation` in `devices.json`, so that each key is checked once.
+Decrypting doesn't need the attestation.
 
 ## 4. `decrypt`
 
