@@ -52,6 +52,8 @@ type HelloResult struct {
 	PC *PCInfo `json:"pc,omitempty"`
 	// Approval is set when the phone can do approvals (APPROVAL.md §1).
 	Approval *ApprovalInfo `json:"approval,omitempty"`
+	// Decrypt is set when the phone can decrypt (DECRYPT.md §1).
+	Decrypt *DecryptInfo `json:"decrypt,omitempty"`
 }
 
 func (h *HelloResult) HasCapability(c string) bool {

@@ -1,0 +1,22 @@
+{
+  "ciphertext": "nyqUn4EjoY_rtzWbH5SA-qot-3jSetYWAFWNwL23EzS14X2hiRW41pY0sHdr5zp1OQU54bLz5tcimLDA35n_ylwY1y00YldhlVyGEpWePXGAljoeWdniwbVeoGJcYKe-sd1dSwpWh2fXKhqlF6eI9f2bcgiSv_Oc1e_0pWrkGng0rzoMnhLkxxi_2gl6ggX-naAN0gx3x-Rh3OgxZFwdAS-E8WFFewkW4r4U5vvUubulLPPyE1veHp24nvDk15ml5IbF3CuRsojcKlNyWRXg2Xi1BloCutLXNvVP3sieG-sndR9DNWVIiTqAN4WDYyIkBgxEmsTLyPDYSkzbNz391g",
+  "description": "DECRYPT.md §3: RSAES-OAEP, SHA-256, MGF1 with SHA-1, empty label. Private key: decrypt-key.pem (a test key; never use it). Decrypting `ciphertext` MUST give `plaintext`; every `reject` ciphertext MUST fail.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAotYkqbNJVQYAKhcU56j5TXiTFMpipHs2nFE6AFVgAA_XKGsemZWMQZkjqhgT2sMDhMBmNCFyx8gr6t7-utZXJNvbiacepOAaezdKfEqH4nhQp7pGbD_f5fJ4wkda3pARUtmkrbk7lpf8IP-b0aP8Zp-b_f2F-mm2BttJRojJZ9ucqyulggsVHZnQGPeMAXtZJTTqeeSBJzXvkovKj4EFmgAvY_i2aAxIC9JPuyqU3e3UstFLeyiVznhx_sXlkP7lNeQtfftyxxXY2tVfhq5zKndQ9iVqe5TwaSgPzI-WEM0opWmALdT6QGG8KT556yiAqPXizjP4f4Im9QSrWcn_YQIDAQAB",
+  "pin": "sha256/tNPYad1XELnUHVUCMTxQAh5qt6pprVTai4DeTH8Sb8c",
+  "plaintext": "cGhvbmV0b3BjIHRlc3QhIQ",
+  "reject": [
+    {
+      "name": "mgf1_sha256",
+      "ciphertext": "ikVDdH4lC1pWPXZ5wDZC3M7mKQnp1USUVBhDkLZkrJMm9gmW2-RHlrnBHrevNAlRQo5vK7EOGlr8I2j6uimgaqC32g2NXgoBGxBuzr1yXeNxG_K5rULt4iXvXacMY26Z-jr-HVdwG7YNOb6mbaXpdRjw4aCueYRt_3rEiRE3HY-UzSjF-0DBYxQmvFgt6la1JctHBgk8VSGRBz58M47c8xDBOWgXvALSLDK5N1DrQ4at4OyX0f6oXtnFE6X72dDMHLwf350rt0pkCfJipyJ9IXFqPtv_LKvDBv4X_h9u_7ly0rttD_bHiI81819fmyOL2Nha3O4bTtcDnAbwEgvNOg"
+    },
+    {
+      "name": "hash_sha1",
+      "ciphertext": "I2pv1hz4u_tBr8QwgYyRid_gMSwaYojxe7m1DP9fWX55LJz_mnMjcASTzt-tpJsvScjkugOJebHRF28ZYr5HzXjooDoReuHt7KnD5Tw_r24pCA8lL0H-NSAyZw5z6OO-cSA0usELSkmBjzrJplA-aJN-OTPWUrqwuQkoGSXUME2jX-XBPnQ-sBuSTvTHzTjDQiSG5guajbtHRFypxRMw4ottDusa-HV2Oi_6arebH_lxvRP6aEdqVLd11SJDFvILu4VU_LFnE2-tebDAcRO1XQ8JjsdW3w_6rfzUmlaNBMmIIsQwvnJNWl5MML2tSfPpKBa2AP3tHEKJ28Csrt0wMA"
+    },
+    {
+      "name": "flipped_bit",
+      "ciphertext": "nyqUn4EjoY_rtzWbH5SA-qot-3jSetYWAFWNwL23EzS14X2hiRW41pY0sHdr5zp1OQU54bLz5tcimLDA35n_ylwY1y00YldhlVyGEpWePXGAljoeWdniwbVeoGJcYKe-sd1dSwtWh2fXKhqlF6eI9f2bcgiSv_Oc1e_0pWrkGng0rzoMnhLkxxi_2gl6ggX-naAN0gx3x-Rh3OgxZFwdAS-E8WFFewkW4r4U5vvUubulLPPyE1veHp24nvDk15ml5IbF3CuRsojcKlNyWRXg2Xi1BloCutLXNvVP3sieG-sndR9DNWVIiTqAN4WDYyIkBgxEmsTLyPDYSkzbNz391g"
+    }
+  ],
+  "tag": "tNPYaQ"
+}

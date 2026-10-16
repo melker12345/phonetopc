@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -49,6 +50,8 @@ type session struct {
 	token     string
 	// approvalKey is the approval key announced in this session's hello.
 	approvalKey *ecdsa.PrivateKey
+	// decryptKey is the decryption key announced in this session's hello.
+	decryptKey *rsa.PrivateKey
 
 	// pendingClose is the close the writer performs when it dequeues the
 	// nil frame queued by closeAfterFlush.
@@ -364,6 +367,17 @@ func (s *session) handle(data []byte) (resp *protocol.Response, after func()) {
 		if async {
 			return nil, nil // answered later, by requestApproval
 		}
+	case protocol.MethodDecrypt:
+		if !s.srv.Secure() {
+			// DECRYPT.md §1: in dev mode the method doesn't exist.
+			rpcErr = protocol.NewError(protocol.CodeMethodNotFound, "method %q not found (decryption needs secure mode)", method)
+			break
+		}
+		var async bool
+		result, async, rpcErr = s.decrypt(id, params)
+		if async {
+			return nil, nil // answered later, by decrypt
+		}
 	case protocol.MethodNotify:
 		result, rpcErr = s.notify(params)
 	case protocol.MethodNotifyCancel:
@@ -430,19 +444,22 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	// A repeated hello is allowed and simply answered again.
 	s.helloed = true
 	s.helloOnce.Do(func() { close(s.helloDone) })
-	var approval *protocol.ApprovalInfo
+	var (
+		approval *protocol.ApprovalInfo
+		decrypt  *protocol.DecryptInfo
+	)
 	if pc != nil {
-		key := s.srv.approvalKey()
-		approval = approvalInfo(key)
+		key, dkey := s.srv.approvalKey(), s.srv.decryptKey()
+		approval, decrypt = approvalInfo(key), decryptInfo(dkey)
 		s.mu.Lock()
-		s.pc, s.token, s.approvalKey = pc, token, key
+		s.pc, s.token, s.approvalKey, s.decryptKey = pc, token, key, dkey
 		s.mu.Unlock()
 		s.srv.logf("mock: %s authenticated as PC %q (%s)", s.remote, pc.Name, pc.ID)
 	}
 	if p.Client != nil && p.Client.Name != "" {
 		s.srv.logf("mock: %s is %s %s", s.remote, p.Client.Name, p.Client.Version)
 	}
-	return s.srv.helloResult(pc, approval), nil
+	return s.srv.helloResult(pc, approval, decrypt), nil
 }
 
 // lookup resolves source and an optional type against the catalog. This is

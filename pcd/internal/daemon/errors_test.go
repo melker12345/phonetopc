@@ -148,7 +148,8 @@ func panelCalls(n int) []call {
 }
 
 // Every row of LOCAL-API.md §2 the daemon can be made to answer. Not
-// here: 409 approval_key_changed (TestApprovals), 500 internal_error (a
+// here: 409 approval_key_changed (TestApprovals), decrypt_key_changed
+// (TestDecryptions), 500 internal_error (a
 // bug) and 504 no_answer (takes the approval timeout plus slack, 10 s).
 func TestErrorTable(t *testing.T) {
 	fiveSecs := `{"reason":"Deploy?","timeout_ms":5000}`
@@ -180,6 +181,7 @@ func TestErrorTable(t *testing.T) {
 		{name: "no value yet", daemon: devDaemon(nil), req: call{"GET", "/v1/sensors/nfc", ""}, status: 409, code: "no_value", rpcCode: protocol.CodeNoValue},
 		{name: "too many panels", daemon: devDaemon(nil), before: panelCalls(protocol.MaxPanels), req: panelCalls(protocol.MaxPanels + 1)[protocol.MaxPanels], status: 409, code: "too_many_panels", rpcCode: protocol.CodeTooManyPanels},
 		{name: "approval in dev mode", daemon: devDaemon(nil), req: call{"POST", "/v1/approvals", fiveSecs}, status: 409, code: "approval_unavailable"},
+		{name: "decryption in dev mode", daemon: devDaemon(nil), req: call{"GET", "/v1/decryption-key", ""}, status: 409, code: "decrypt_unavailable"},
 		{name: "too many notifications", daemon: devDaemon(func(o *mockphone.Options) { o.NotifyPerMinute = 1 }), before: []call{{"POST", "/v1/notifications", `{"title":"a"}`}}, req: call{"POST", "/v1/notifications", `{"title":"b"}`}, status: 429, code: "rate_limited", rpcCode: protocol.CodeRateLimited},
 		{name: "phone lacks the method", daemon: refusingDaemon(map[string]*protocol.Error{protocol.MethodGet: protocol.NewError(protocol.CodeMethodNotFound, "no get")}), req: call{"GET", "/v1/sensors/battery", ""}, status: 501, code: "method_not_found", rpcCode: protocol.CodeMethodNotFound},
 		{name: "forged approval", daemon: secureDaemon(func(o *mockphone.Options) { o.TamperApprovals = true }), req: call{"POST", "/v1/approvals", fiveSecs}, status: 502, code: "approval_invalid"},

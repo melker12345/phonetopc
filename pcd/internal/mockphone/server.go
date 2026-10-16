@@ -9,6 +9,7 @@ package mockphone
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -93,7 +94,10 @@ type Options struct {
 	// secure hello, so a rotated key applies to new sessions. Without it, or
 	// in dev mode, the phone has no capability approval.
 	ApprovalKey func() *ecdsa.PrivateKey
-	// Approve plays the user for approval requests. Default: ApproveAll.
+	// DecryptKey is ApprovalKey for the decryption key (DECRYPT.md §2).
+	DecryptKey func() *rsa.PrivateKey
+	// Approve plays the user for approval and decrypt requests. Default:
+	// ApproveAll.
 	Approve Approver
 	// TamperApprovals corrupts the signature of every approval it gives: a
 	// test hook for clients, which must report an error, not approval.
@@ -339,7 +343,7 @@ func (s *Server) sensor(source string) (protocol.SensorInfo, bool) {
 	return protocol.SensorInfo{}, false
 }
 
-func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInfo) protocol.HelloResult {
+func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInfo, decrypt *protocol.DecryptInfo) protocol.HelloResult {
 	h := protocol.HelloResult{
 		Protocol:     protocol.Version,
 		Server:       protocol.ServerInfo{Name: ServerName, Version: version.Version},
@@ -347,9 +351,13 @@ func (s *Server) helloResult(pc *protocol.PCInfo, approval *protocol.ApprovalInf
 		Capabilities: []string{protocol.CapabilityEvents, protocol.CapabilityGet, protocol.CapabilityNotify, protocol.CapabilityPanels},
 		PC:           pc,
 		Approval:     approval,
+		Decrypt:      decrypt,
 	}
 	if approval != nil {
 		h.Capabilities = append(h.Capabilities, protocol.CapabilityApproval)
+	}
+	if decrypt != nil {
+		h.Capabilities = append(h.Capabilities, protocol.CapabilityDecrypt)
 	}
 	return h
 }

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdsa"
+	crand "crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"io"
 	"log"
@@ -709,6 +711,7 @@ func newSecurePhone(t *testing.T, tweak func(*mockphone.Options)) *securePhone {
 	opts.Device = protocol.DeviceInfo{ID: id.ID, Name: id.Name}
 	opts.Authenticate = st.Authenticate
 	opts.ApprovalKey = func() *ecdsa.PrivateKey { k, _ := st.ApprovalKey(); return k }
+	opts.DecryptKey = func() *rsa.PrivateKey { k, _ := st.DecryptKey(); return k }
 	if tweak != nil {
 		tweak(&opts)
 	}
@@ -800,4 +803,84 @@ func TestApprovals(t *testing.T) {
 	}
 	dr.drop(t, d)
 	wantStatus(t, do(t, "POST", url+"/v1/approvals", `{"reason":"Deploy?"}`), 409, "approval_key_changed")
+}
+
+func TestDecryptions(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		why protocol.Why
+		got []mockphone.ApprovalRequest
+	)
+	sp := newSecurePhone(t, func(o *mockphone.Options) {
+		o.Approve = func(ctx context.Context, req mockphone.ApprovalRequest) protocol.Why {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, req)
+			return why
+		}
+	})
+	dr := &droppable{dial: sp.dial}
+	d, url := startDaemon(t, dr.Dial)
+	if err := d.WaitConnected(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	r := do(t, "GET", url+"/v1/decryption-key", "")
+	var key daemon.DecryptKeyResponse
+	if err := json.Unmarshal([]byte(r.raw), &key); err != nil || r.status != 200 {
+		t.Fatalf("key: %s", r.raw)
+	}
+	pub, _, err := security.ParseDecryptKey(key.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("0123456789abcdef")
+	ct, _ := security.EncryptToPhone(pub, secret)
+	body := func(pin string, ct []byte) string {
+		return `{"reason":"Decrypt notes.age","key_pin":"` + pin + `","ciphertext":"` + security.B64(ct) + `"}`
+	}
+
+	r = do(t, "POST", url+"/v1/decryptions", body(key.Pin, ct))
+	if r.status != 200 || r.body["decrypted"] != true || r.body["plaintext"] != security.B64(secret) {
+		t.Fatalf("decrypt: %s", r.raw)
+	}
+	mu.Lock()
+	if len(got) != 1 || !got[0].Decrypt || got[0].Reason != "Decrypt notes.age" {
+		t.Errorf("the user saw %+v", got)
+	}
+	why = protocol.WhyDenied
+	mu.Unlock()
+	r = do(t, "POST", url+"/v1/decryptions", body(key.Pin, ct))
+	if r.status != 200 || r.body["decrypted"] != false || r.body["why"] != "denied" || r.body["plaintext"] != nil {
+		t.Fatalf("denied: %s", r.raw)
+	}
+	mu.Lock()
+	why = ""
+	mu.Unlock()
+
+	// Encrypted to another key: the user confirms, the phone can't decrypt.
+	other, _ := rsa.GenerateKey(crand.Reader, 2048)
+	wrong, _ := security.EncryptToPhone(&other.PublicKey, secret)
+	r = do(t, "POST", url+"/v1/decryptions", body(key.Pin, wrong))
+	if r.status != 200 || r.body["why"] != "failed" {
+		t.Fatalf("other key: %s", r.raw)
+	}
+	wantStatus(t, do(t, "POST", url+"/v1/decryptions", body("sha256/AAAA", ct)), 409, "decrypt_key_changed")
+	wantStatus(t, do(t, "POST", url+"/v1/decryptions", body(key.Pin, ct[:10])), 400, "invalid_request")
+	wantStatus(t, do(t, "POST", url+"/v1/decryptions", `{"reason":" x","key_pin":"p","ciphertext":"AAAA"}`), 400, "invalid_request")
+
+	// Fingerprints changed: the key is new, and the old ciphertext is refused before anything is sent.
+	if _, err := sp.st.RotateDecryptKey(); err != nil {
+		t.Fatal(err)
+	}
+	dr.drop(t, d)
+	mu.Lock()
+	n := len(got)
+	mu.Unlock()
+	wantStatus(t, do(t, "POST", url+"/v1/decryptions", body(key.Pin, ct)), 409, "decrypt_key_changed")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != n {
+		t.Error("the user was asked about a ciphertext for the old key")
+	}
 }

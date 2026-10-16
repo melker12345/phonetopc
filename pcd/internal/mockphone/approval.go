@@ -18,6 +18,8 @@ import (
 
 // ApprovalRequest is what the phone's user would see.
 type ApprovalRequest struct {
+	// Decrypt is set for a decrypt request (DECRYPT.md §4).
+	Decrypt bool
 	PC      protocol.PCInfo
 	Reason  string
 	Timeout time.Duration
@@ -105,18 +107,9 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 	if n, err := security.DecodeB64(*p.Nonce); err != nil || len(n) != protocol.ApprovalNonceSize {
 		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.nonce must be base64url of %d bytes", protocol.ApprovalNonceSize)
 	}
-	timeout := protocol.DefaultApprovalTimeout
-	if t := bytes.TrimSpace(p.TimeoutMS); len(t) > 0 {
-		// An integer literal only: no fraction, exponent or null.
-		ms, err := strconv.ParseInt(string(t), 10, 64)
-		if err != nil {
-			return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be an integer")
-		}
-		timeout = time.Duration(ms) * time.Millisecond
-		if timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout {
-			return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be %d-%d",
-				protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds())
-		}
+	timeout, rpcErr := parseTimeout(p.TimeoutMS)
+	if rpcErr != nil {
+		return nil, false, rpcErr
 	}
 
 	s.mu.Lock()
@@ -173,6 +166,25 @@ func (s *session) requestApproval(id json.RawMessage, params json.RawMessage) (r
 		s.send(protocol.NewResult(id, res))
 	})
 	return nil, true, nil
+}
+
+// parseTimeout checks timeout_ms of request_approval and decrypt.
+func parseTimeout(raw json.RawMessage) (time.Duration, *protocol.Error) {
+	t := bytes.TrimSpace(raw)
+	if len(t) == 0 {
+		return protocol.DefaultApprovalTimeout, nil
+	}
+	// An integer literal only: no fraction, exponent or null.
+	ms, err := strconv.ParseInt(string(t), 10, 64)
+	if err != nil {
+		return 0, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be an integer")
+	}
+	timeout := time.Duration(ms) * time.Millisecond
+	if timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout {
+		return 0, protocol.NewError(protocol.CodeInvalidParams, "params.timeout_ms must be %d-%d",
+			protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds())
+	}
+	return timeout, nil
 }
 
 // tamper corrupts a base64url signature so that it no longer verifies

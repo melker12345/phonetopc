@@ -50,6 +50,7 @@ var loadSchemasOnce = sync.OnceValues(func() (*schemas, error) {
 	for _, method := range []string{
 		protocol.MethodHello, protocol.MethodListSensors, protocol.MethodSubscribe,
 		protocol.MethodUnsubscribe, protocol.MethodGet, protocol.MethodRequestApproval,
+		protocol.MethodDecrypt,
 		protocol.MethodNotify, protocol.MethodNotifyCancel, protocol.MethodPanelShow,
 		protocol.MethodPanelAttach, protocol.MethodPanelUpdate, protocol.MethodPanelClose,
 		protocol.MethodPanelList, protocol.MethodCanvasClear,

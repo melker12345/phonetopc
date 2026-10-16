@@ -35,6 +35,8 @@ func (d *Daemon) routes() []route {
 		{"POST", "/v1/notifications", d.handleNotify},
 		{"DELETE", "/v1/notifications/{id}", d.handleNotifyCancel},
 		{"POST", "/v1/approvals", d.handleApproval},
+		{"GET", "/v1/decryption-key", d.handleDecryptKey},
+		{"POST", "/v1/decryptions", d.handleDecrypt},
 		{"GET", "/v1/panels", d.handlePanelList},
 		{"PUT", "/v1/panels/{id}", d.handlePanelShow},
 		{"PATCH", "/v1/panels/{id}", d.handlePanelUpdate},
@@ -214,6 +216,11 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadGateway, "approval_invalid", strings.TrimPrefix(err.Error(), "phonetopc: ")+". This is NOT an approval")
 	case errors.Is(err, client.ErrApprovalNoAnswer):
 		writeError(w, http.StatusGatewayTimeout, "no_answer", strings.TrimPrefix(err.Error(), "phonetopc: "))
+	case errors.Is(err, client.ErrDecryptKeyChanged):
+		writeError(w, http.StatusConflict, "decrypt_key_changed", strings.TrimPrefix(err.Error(), "phonetopc: ")+
+			". What was encrypted to the old key needs your recovery key. Nothing was sent")
+	case errors.Is(err, client.ErrDecryptUnavailable):
+		writeError(w, http.StatusConflict, "decrypt_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	case errors.Is(err, client.ErrApprovalNeedsSecureMode):
 		writeError(w, http.StatusConflict, "approval_unavailable", strings.TrimPrefix(err.Error(), "phonetopc: "))
 	default:
@@ -361,6 +368,76 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 			}}, nil
 		}
 		return ApprovalResponse{Why: string(res.Why)}, nil
+	})
+}
+
+// DecryptKeyResponse is the answer to GET /v1/decryption-key.
+type DecryptKeyResponse struct {
+	Key string `json:"key"`
+	Pin string `json:"pin"`
+}
+
+func (d *Daemon) handleDecryptKey(w http.ResponseWriter, r *http.Request) {
+	d.call(w, r, func(cl *client.Client) (any, error) {
+		k, err := cl.DecryptKey()
+		if err != nil {
+			return nil, err
+		}
+		return DecryptKeyResponse{Key: security.B64(k.SPKI), Pin: k.Pin}, nil
+	})
+}
+
+// DecryptRequest is the body of POST /v1/decryptions.
+type DecryptRequest struct {
+	Reason     string `json:"reason"`
+	KeyPin     string `json:"key_pin"`
+	Ciphertext string `json:"ciphertext"`
+	TimeoutMS  int64  `json:"timeout_ms,omitempty"`
+}
+
+// DecryptResponse is the answer to POST /v1/decryptions.
+type DecryptResponse struct {
+	Decrypted bool   `json:"decrypted"`
+	Why       string `json:"why"`
+	Plaintext string `json:"plaintext,omitempty"`
+}
+
+func (d *Daemon) handleDecrypt(w http.ResponseWriter, r *http.Request) {
+	var req DecryptRequest
+	if err := decode(r, &req); err != nil {
+		d.fail(w, err)
+		return
+	}
+	if err := protocol.CheckReason(req.Reason); err != nil {
+		d.fail(w, badRequest{err.Error()})
+		return
+	}
+	ct, err := security.DecodeB64(req.Ciphertext)
+	if err != nil || len(ct) == 0 {
+		d.fail(w, badRequestf("ciphertext must be base64url"))
+		return
+	}
+	if req.KeyPin == "" {
+		d.fail(w, badRequestf("key_pin is required"))
+		return
+	}
+	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
+	if req.TimeoutMS != 0 && (timeout < protocol.MinApprovalTimeout || timeout > protocol.MaxApprovalTimeout) {
+		d.fail(w, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds()))
+		return
+	}
+	d.call(w, r, func(cl *client.Client) (any, error) {
+		if k, err := cl.DecryptKey(); err == nil && k.Pin == req.KeyPin && len(ct) != k.Public.Size() {
+			return nil, badRequestf("ciphertext is %d bytes; this key's are %d", len(ct), k.Public.Size())
+		}
+		res, err := cl.Decrypt(r.Context(), req.Reason, req.KeyPin, ct, timeout)
+		if err != nil {
+			return nil, err
+		}
+		if res.Decrypted() {
+			return DecryptResponse{Decrypted: true, Why: "decrypted", Plaintext: security.B64(res.Plaintext)}, nil
+		}
+		return DecryptResponse{Why: string(res.Why)}, nil
 	})
 }
 

@@ -4,7 +4,7 @@ Use your phone's sensors from programs on your PC.
 
 Install the app on your Android phone and pair it with your PC once. After that, any program on the PC can
 read the phone's gyroscope, battery, location, NFC tags and more, ask you to approve something with your
-fingerprint, post notifications on the phone, or show buttons and sliders there. Programs do this with plain
+fingerprint, decrypt files only after your fingerprint, post notifications on the phone, or show buttons and sliders there. Programs do this with plain
 HTTP requests to a daemon on the PC, so any language works and no phone-specific code is needed.
 
 ```sh
@@ -63,5 +63,5 @@ Then write your program against [`spec/LOCAL-API.md`](spec/LOCAL-API.md).
 
 ## Status
 
-Works: pairing, the sensors, fingerprint approval, notifications and panels, the daemon. Not yet: released
+Works: pairing, the sensors, fingerprint approval, file decryption with age, notifications and panels, the daemon. Not yet: released
 builds of the app and the PC tools.

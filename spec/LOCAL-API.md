@@ -72,6 +72,7 @@ has tried to reach the phone, then gets the real answer. The units are in `pcd/s
 | 409 | `source_unavailable`, `no_value`, `too_many_panels` | |
 | 409 | `approval_key_changed` | See §5 |
 | 409 | `approval_unavailable` | The phone is in developer mode, which has no approvals |
+| 409 | `decrypt_key_changed`, `decrypt_unavailable` | See §6 |
 | 429 | `rate_limited` | Too many notifications |
 | 500 | `internal_error` | A bug in the daemon |
 | 501 | `method_not_found` | The phone app is older than the daemon and lacks the method |
@@ -79,7 +80,7 @@ has tried to reach the phone, then gets the real answer. The units are in `pcd/s
 | 502 | `phone_error` | Any other failure talking to the phone |
 | 503 | `phone_unavailable` | The phone isn't connected right now; `message` says why |
 | 503 | `unauthorized` | The phone revoked this PC (`rpc_code` -32010); pair again with `phonetopc pair` |
-| 504 | `no_answer` | No answer to an approval in time |
+| 504 | `no_answer` | No answer to an approval or decryption in time |
 
 ## 3. Status and sensors
 
@@ -191,7 +192,38 @@ own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce
 of `key` (`SECURITY.md` §2) and equals yours, and `signature` verifies with `key` over the message of `APPROVAL.md`
 §5, built from your nonce, your reason, `phone_id` and `pc_id`.
 
-## 6. Notifications
+## 6. Decryption: `POST /v1/decryptions`
+
+Data that only the phone can decrypt, after a fingerprint each time (`DECRYPT.md`). To encrypt a file, the
+`age-plugin-phonetopc` plugin is usually simpler (`DECRYPT.md` §5).
+
+`GET /v1/decryption-key` answers the phone's public key and its pin:
+
+```json
+{"key": "<base64url DER SubjectPublicKeyInfo>", "pin": "sha256/…"}
+```
+
+Encrypt to it yourself, without the phone: RSAES-OAEP with SHA-256, MGF1 with SHA-1 and an empty label (`DECRYPT.md`
+§3), at most 190 bytes. Encrypt a random key that encrypts the data, and keep the `pin`. To decrypt:
+
+```json
+{"reason": "Decrypt the backup key", "key_pin": "sha256/…", "ciphertext": "<base64url>", "timeout_ms": 30000}
+```
+
+`reason` follows the rules of §5. The request waits for the user, then answers 200:
+
+```json
+{"decrypted": true, "why": "decrypted", "plaintext": "<base64url>"}
+{"decrypted": false, "why": "denied"}
+```
+
+`why` is `decrypted`, one of the outcomes of §5, or `failed`: the user confirmed, but the ciphertext doesn't decrypt
+with this key. The phone can't tell a right plaintext from a wrong one, so check it, for example with an
+authenticated cipher. Errors: 409 `decrypt_key_changed` when `key_pin` isn't the phone's current key (it is replaced
+when fingerprints are added or removed; nothing was sent), and 409 `decrypt_unavailable` when the phone can't
+decrypt.
+
+## 7. Notifications
 
 ### `POST /v1/notifications`
 
@@ -210,7 +242,7 @@ What the user does arrives on `GET /v1/events?source=notification` (open it firs
 
 Removes it. `{}`, also when it's gone already.
 
-## 7. Panels
+## 8. Panels
 
 A panel is a screen of widgets on the phone (`PANELS.md` §4, §5). Its input arrives on
 `GET /v1/events?source=panel`; **open that stream before showing the panel**, since input without a listener is
@@ -237,7 +269,7 @@ shown through the daemon. When the phone connection drops and comes back, the da
 (`panel_attach`), and the phone replays the canvas strokes drawn meanwhile. A panel the user closes, or one
 removed with `DELETE`, is forgotten.
 
-## 8. Examples
+## 9. Examples
 
 These run on Linux as the user who runs `phonetopcd`; elsewhere, add the token (§1).
 

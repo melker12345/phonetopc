@@ -6,6 +6,7 @@ The PC side of phonetopc:
 |---|---|
 | `phonetopcd` | The daemon. Keeps one connection to the paired phone and offers it to programs on this PC as plain HTTP ([`../spec/LOCAL-API.md`](../spec/LOCAL-API.md)) |
 | `phonetopc` | CLI: pair with a phone, then read sensors, ask for fingerprint approval and post notifications |
+| `age-plugin-phonetopc` | Lets [age](https://age-encryption.org) encrypt files that need a fingerprint on the phone to decrypt |
 | `phonetopc-mock` | A fake phone with synthetic sensor data, for trying things without a phone |
 
 Programs on the PC should use `phonetopcd`'s HTTP API, from any language. The Go client library in `client/` talks
@@ -13,7 +14,7 @@ to the phone directly; the CLI and the daemon are built on it.
 
 The protocol is specified in [`../spec/`](../spec/): [`PROTOCOL.md`](../spec/PROTOCOL.md),
 [`SECURITY.md`](../spec/SECURITY.md) (pairing, TLS, tokens, the credential store),
-[`APPROVAL.md`](../spec/APPROVAL.md) and [`PANELS.md`](../spec/PANELS.md).
+[`APPROVAL.md`](../spec/APPROVAL.md), [`DECRYPT.md`](../spec/DECRYPT.md) and [`PANELS.md`](../spec/PANELS.md).
 
 ## Build
 
@@ -21,7 +22,7 @@ You need Go 1.27 or newer. The binaries are static, with no cgo.
 
 ```sh
 cd pcd
-CGO_ENABLED=0 go build -o bin/ ./cmd/...     # bin/phonetopc, bin/phonetopcd, bin/phonetopc-mock
+CGO_ENABLED=0 go build -o bin/ ./cmd/...     # bin/phonetopc, bin/phonetopcd, bin/age-plugin-phonetopc, bin/phonetopc-mock
 ```
 
 ## Pair with a phone
@@ -138,6 +139,21 @@ shown on the phone: 1–200 characters, no leading or trailing whitespace, no co
 
 **Notifications and panels** are off on the phone for every PC until the user allows them there; until then the
 calls fail with `-32030`. Panels need a program that stays connected; use the daemon's `/v1/panels`.
+
+## Encrypt files
+
+With `age-plugin-phonetopc` on your `PATH`, [age](https://age-encryption.org) can encrypt files that only open after a
+fingerprint on the paired phone:
+
+```sh
+bin/age-plugin-phonetopc --generate > phone.txt     # the recipient is in the comment
+age-keygen -o recovery.txt                          # keep this offline
+age -r age1phonetopc1… -r "$(age-keygen -y recovery.txt)" -o secrets.age secrets
+age -d -i phone.txt secrets.age
+```
+
+`phone.txt` holds no secret. The phone's key is replaced when fingerprints are added or removed, and is lost with the
+phone, so always encrypt to a recovery key as well.
 
 ## Troubleshooting
 

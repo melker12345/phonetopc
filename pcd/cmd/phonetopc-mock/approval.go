@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,17 @@ func approvalOptions(opts *mockphone.Options, mode string, delay time.Duration, 
 		k, err := st.ApprovalKey() // reread: `approval-key --rotate` applies to new sessions
 		if err != nil {
 			log.Printf("mock: approval key: %v", err)
+			return nil
+		}
+		return k
+	}
+	if _, err := st.DecryptKey(); err != nil {
+		return err
+	}
+	opts.DecryptKey = func() *rsa.PrivateKey {
+		k, err := st.DecryptKey()
+		if err != nil {
+			log.Printf("mock: decryption key: %v", err)
 			return nil
 		}
 		return k
@@ -90,7 +102,11 @@ func newAsker(in io.Reader, out io.Writer) *asker {
 func (a *asker) ask(ctx context.Context, req mockphone.ApprovalRequest) protocol.Why {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	fmt.Fprintf(a.out, "\n%q asks for approval (%v to answer):\n    %s\nApprove with your fingerprint? [y = approve, n = deny, c = cancel, l = lockout] ", req.PC.Name, req.Timeout, req.Reason)
+	what := "for approval"
+	if req.Decrypt {
+		what = "to decrypt"
+	}
+	fmt.Fprintf(a.out, "\n%q asks %s (%v to answer):\n    %s\nApprove with your fingerprint? [y = approve, n = deny, c = cancel, l = lockout] ", req.PC.Name, what, req.Timeout, req.Reason)
 	for {
 		select {
 		case <-ctx.Done():

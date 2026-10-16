@@ -76,6 +76,8 @@ func (w Why) Describe() string {
 		return "too many failed fingerprint attempts; biometrics are locked for now"
 	case WhyUnavailable:
 		return "the phone can't do approvals (no strong biometric enrolled, or no approval key)"
+	case WhyFailed:
+		return "the ciphertext doesn't decrypt with the phone's key"
 	}
 	return string(w)
 }

@@ -2,8 +2,12 @@ package mockphone
 
 import (
 	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -294,4 +298,59 @@ func (id Identity) PhoneInfo(port int, addrs []string) pairing.PhoneInfo {
 // Record stores the outcome of a pairing made with package pairing.
 func (st *State) Record(p pairing.PairedPC) error {
 	return st.PutPC(PairedPC{ID: p.ID, Name: p.Name, Pin: p.Pin, Token: p.Token})
+}
+
+// decryptKeyFile holds the mock's decryption key: a software stand-in for
+// the phone's biometric-bound Keystore key (DECRYPT.md §2).
+const decryptKeyFile = "decrypt-key.pem"
+
+// DecryptKey loads the mock's decryption key, creating it on first use.
+func (st *State) DecryptKey() (*rsa.PrivateKey, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, err := os.ReadFile(st.path(decryptKeyFile))
+	switch {
+	case err == nil:
+		block, _ := pem.Decode(b)
+		if block == nil {
+			return nil, fmt.Errorf("%s: no PEM block", decryptKeyFile)
+		}
+		k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", decryptKeyFile, err)
+		}
+		r, ok := k.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("%s: not an RSA key", decryptKeyFile)
+		}
+		return r, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return st.newDecryptKey()
+	default:
+		return nil, err
+	}
+}
+
+// RotateDecryptKey replaces the decryption key, as a phone does when
+// biometric enrollment changed (DECRYPT.md §2). What was encrypted to the
+// old key can't be decrypted any more.
+func (st *State) RotateDecryptKey() (*rsa.PrivateKey, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.newDecryptKey()
+}
+
+func (st *State) newDecryptKey() (*rsa.PrivateKey, error) {
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(k)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.WriteFileAtomic(st.path(decryptKeyFile), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
+		return nil, err
+	}
+	return k, nil
 }

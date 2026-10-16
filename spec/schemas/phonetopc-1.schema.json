@@ -18,7 +18,7 @@
         "jsonrpc": { "const": "2.0" },
         "id": { "$ref": "#/$defs/id" },
         "method": { "enum": ["hello", "list_sensors", "subscribe", "unsubscribe", "get", "request_approval",
-                             "notify", "notify_cancel", "panel_show", "panel_attach", "panel_update", "panel_close",
+                             "decrypt", "notify", "notify_cancel", "panel_show", "panel_attach", "panel_update", "panel_close",
                              "panel_list", "canvas_clear"] },
         "params": { "type": ["object", "null"] }
       },
@@ -31,6 +31,8 @@
           "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/unsubscribeParams" } } } },
         { "if": { "properties": { "method": { "const": "request_approval" } } },
           "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/requestApprovalParams" } } } },
+        { "if": { "properties": { "method": { "const": "decrypt" } } },
+          "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/decryptParams" } } } },
         { "if": { "properties": { "method": { "const": "get" } } },
           "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/getParams" } } } },
         { "if": { "properties": { "method": { "const": "notify" } } },
@@ -116,6 +118,10 @@
         "approval": {
           "type": "object", "required": ["key", "pin"],
           "properties": { "key": { "type": "string" }, "pin": { "type": "string" } }
+        },
+        "decrypt": {
+          "type": "object", "required": ["key", "pin"],
+          "properties": { "key": { "type": "string" }, "pin": { "type": "string" } }
         }
       }
     },
@@ -191,6 +197,28 @@
       "else": { "required": ["why"] }
     },
 
+    "decryptParams": {
+      "type": "object", "required": ["reason", "key_pin", "ciphertext"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "key_pin": { "type": "string" },
+        "ciphertext": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+        "timeout_ms": { "type": "integer", "minimum": 5000, "maximum": 120000 }
+      }
+    },
+
+    "decryptResult": {
+      "type": "object", "required": ["decrypted"],
+      "properties": {
+        "decrypted": { "type": "boolean" },
+        "plaintext": { "type": "string" },
+        "why": { "enum": ["denied", "cancelled", "timeout", "busy", "lockout", "unavailable", "failed"] }
+      },
+      "if": { "properties": { "decrypted": { "const": true } } },
+      "then": { "required": ["plaintext"] },
+      "else": { "required": ["why"] }
+    },
+
     "unsubscribeResult": { "type": "object", "maxProperties": 0 },
 
     "resultByMethod": {
@@ -203,6 +231,7 @@
         "unsubscribe": { "$ref": "#/$defs/unsubscribeResult" },
         "get": { "$ref": "#/$defs/reading" },
         "request_approval": { "$ref": "#/$defs/requestApprovalResult" },
+        "decrypt": { "$ref": "#/$defs/decryptResult" },
         "notify": { "$ref": "#/$defs/notifyResult" },
         "notify_cancel": { "$ref": "#/$defs/emptyResult" },
         "panel_show": { "$ref": "#/$defs/panelShowResult" },

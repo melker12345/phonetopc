@@ -50,10 +50,10 @@ const usage = `Usage:
 
 Serving is plaintext dev mode (ws://) unless --state is given, which
 selects secure mode (wss:// with the mock's own key, tokens checked).
-In secure mode the mock offers fingerprint approval; --approval says how
-its "user" answers: auto (approve), deny, cancel, timeout (never answer),
+In secure mode the mock offers fingerprint approval and decryption;
+--approval says how its "user" answers: auto (approve), deny, cancel, timeout (never answer),
 lockout, ask (on this terminal), tamper (approve with a corrupted
-signature, to test clients) or off (no approval capability).
+signature, to test clients) or off (neither capability).
 
 Notifications and panels (spec/PANELS.md) are allowed for every PC. A
 simulated user (--user-every) opens the newest panel, uses one of its

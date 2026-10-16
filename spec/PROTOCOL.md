@@ -3,9 +3,10 @@
 This document is normative. The key words MUST, SHOULD and MAY are used as in RFC 2119.
 
 This document covers sessions, methods, events and sensors. [`SECURITY.md`](SECURITY.md) covers pairing, TLS and
-tokens. [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`).
+tokens. [`APPROVAL.md`](APPROVAL.md) covers fingerprint approval (`request_approval`), and
+[`DECRYPT.md`](DECRYPT.md) decryption with the phone's key (`decrypt`).
 [`PANELS.md`](PANELS.md) covers notifications and panels, PC → phone output (`notify`, `panel_show`, …).
-These four documents are draft 4 of `phonetopc/1`; they share one draft number.
+These documents are draft 4 of `phonetopc/1`; they share one draft number.
 
 This is the protocol between the phone and a client. Programs on the PC usually don't speak it: the PC daemon
 `phonetopcd` speaks it to the phone and offers programs a plain HTTP API instead, [`LOCAL-API.md`](LOCAL-API.md),
@@ -76,7 +77,7 @@ Servers SHOULD send WebSocket pings every 15 s and close sessions that don't ans
 
 - If `protocol` is not supported, the server returns error `-32004` (`unsupported_protocol`) with `data.supported` listing the versions it does support.
 - `device.id` is stable across restarts and reinstalls where the platform allows (a random ID generated on first run and stored).
-- `capabilities` lists optional feature groups. Defined: `events`, `get`, `approval` (`APPROVAL.md`), `notify` and `panels` (`PANELS.md`).
+- `capabilities` lists optional feature groups. Defined: `events`, `get`, `approval` (`APPROVAL.md`), `decrypt` (`DECRYPT.md`), `notify` and `panels` (`PANELS.md`).
 
 ### 4.2 `list_sensors`
 
@@ -238,7 +239,8 @@ Standard JSON-RPC codes apply (`-32700` parse error, `-32600` invalid request, `
 | `-32032` | `too_many_panels` | The PC already has 8 panels (`PANELS.md` §9) |
 | `-32033` | `rate_limited` | Too many notifications (`PANELS.md` §9) |
 
-`request_approval` adds no codes: its user-level outcomes are results (`APPROVAL.md` §4.1, §6).
+`request_approval` and `decrypt` add no codes: their user-level outcomes are results (`APPROVAL.md` §4.1, §6;
+`DECRYPT.md` §4).
 
 Pairing (`SECURITY.md` §4) runs on its own connection, `/v1/pair` on the PC, with protocol `phonetopc-pair/1`. It
 uses the standard codes, `-32004` as above, and these codes, which occur only there:
