@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"slices"
@@ -140,6 +141,9 @@ func decodeAny(raw []byte) (any, error) {
 	var v any
 	if err := d.Decode(&v); err != nil {
 		return nil, err
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, errors.New("has data after the JSON value")
 	}
 	return v, nil
 }

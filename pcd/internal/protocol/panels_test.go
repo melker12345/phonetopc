@@ -103,6 +103,8 @@ func TestParseLayout(t *testing.T) {
 		`{"type":"canvas","id":"c","color":"#fff"}`,
 		`{"type":"button","id":"b","label":"x","tone":"red"}`,
 		`{"type":"text"}`,
+		`{"type":"text","text":"a"} {"type":"text","text":"b"}`,
+		`{"type":"text","text":"a"}]`,
 	} {
 		if _, err := ParseLayout(json.RawMessage(bad)); err == nil {
 			t.Errorf("ParseLayout(%s) accepted", bad)
