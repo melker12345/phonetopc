@@ -17,6 +17,7 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/client"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/store"
 )
 
 type Dialer func(ctx context.Context) (*client.Client, error)
@@ -41,6 +42,12 @@ type Options struct {
 	// FirstConnectWait bounds how long a request waits for the first
 	// connection attempt. Default 20s, longer than a dial.
 	FirstConnectWait time.Duration
+	// Store is the credential store Dial uses. With it, the API also
+	// pairs, lists and removes phones and accepts approval keys
+	// (LOCAL-API.md §9); without it (dev mode) those answer dev_mode.
+	Store *store.Store
+	// Device selects the paired phone in Store, as Dial does.
+	Device string
 }
 
 type Daemon struct {
@@ -55,6 +62,9 @@ type Daemon struct {
 	feeds   map[feedKey]*feed
 	streams map[*stream]struct{}
 	panels  map[string]int64 // panels shown through the daemon, by id: the last pseq seen
+
+	redial  chan struct{} // buffered(1): the pairings changed
+	pairing sync.Mutex    // held while a pairing runs
 }
 
 // It does not connect until Run.
@@ -81,6 +91,22 @@ func New(opts Options) *Daemon {
 		feeds:   make(map[feedKey]*feed),
 		streams: make(map[*stream]struct{}),
 		panels:  make(map[string]int64),
+		redial:  make(chan struct{}, 1),
+	}
+}
+
+// pairingsChanged makes Run connect again, now, if the change concerns the
+// phone it is connected to (id) or it isn't connected.
+func (d *Daemon) pairingsChanged(id string) {
+	d.mu.Lock()
+	cl := d.cl
+	d.mu.Unlock()
+	if cl != nil && cl.Server().Device.ID != id {
+		return
+	}
+	select {
+	case d.redial <- struct{}{}:
+	default:
 	}
 }
 
@@ -109,7 +135,7 @@ func (d *Daemon) Run(ctx context.Context) {
 				d.logf("phone: %s (retrying every %v or less)", msg, d.opts.MaxBackoff)
 				lastLogged = msg
 			}
-			if !sleep(ctx, backoff) {
+			if !sleep(ctx, backoff, d.redial) {
 				break
 			}
 			backoff = min(backoff*2, d.opts.MaxBackoff)
@@ -120,22 +146,27 @@ func (d *Daemon) Run(ctx context.Context) {
 		d.logf("phone: connected to %s (%s)", h.Device.Name, h.Device.ID)
 		d.connected(ctx, cl)
 
+		redial := false
 		select {
 		case <-cl.Done():
 		case <-ctx.Done():
+		case <-d.redial:
+			redial = true
 		}
 		cl.Close()
 		err = cl.Err()
 		if ctx.Err() != nil {
 			break
 		}
-		if err == nil || errors.Is(err, client.ErrClosed) {
+		if redial {
+			err = errors.New("the pairing changed; connecting again")
+		} else if err == nil || errors.Is(err, client.ErrClosed) {
 			err = errors.New("connection lost")
 		}
 		d.logf("phone: %s", d.opts.Explain(err))
 		d.setDisconnected(err)
 		d.broadcastStatus()
-		if !sleep(ctx, d.opts.MinBackoff) {
+		if !redial && !sleep(ctx, d.opts.MinBackoff, d.redial) {
 			break
 		}
 	}
@@ -143,11 +174,14 @@ func (d *Daemon) Run(ctx context.Context) {
 	d.closeAllStreams()
 }
 
-func sleep(ctx context.Context, dur time.Duration) bool {
+// sleep waits for dur, or until wake. It returns false once ctx is done.
+func sleep(ctx context.Context, dur time.Duration, wake <-chan struct{}) bool {
 	t := time.NewTimer(dur)
 	defer t.Stop()
 	select {
 	case <-t.C:
+		return true
+	case <-wake:
 		return true
 	case <-ctx.Done():
 		return false

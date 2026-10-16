@@ -51,7 +51,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	allowed := map[string][]string{}
 	var paths []string
-	for _, rt := range d.routes() {
+	for _, rt := range append(d.routes(), d.adminRoutes()...) {
 		mux.HandleFunc(rt.method+" "+rt.path, rt.h)
 		if allowed[rt.path] == nil {
 			paths = append(paths, rt.path)
@@ -74,13 +74,13 @@ func (d *Daemon) Handler() http.Handler {
 }
 
 // RequireToken guards h for a TCP listener on the loopback address. Programs
-// of this user (see ConnContext) get in without a token, unless the request
-// looks like it comes from a web page; the rest need the token, as
-// "Authorization: Bearer <token>" or, for browsers' EventSource and
-// WebSocket, which can't set headers, as "?token=<token>". Requests whose
-// Host isn't a loopback name are refused, against DNS rebinding. CORS
-// preflights are answered, so a page in a browser can use the API once it
-// has the token.
+// of users that may use the API (see Access.ConnContext) get in without a
+// token, unless the request looks like it comes from a web page; the rest
+// need the token, as "Authorization: Bearer <token>" or, for browsers'
+// EventSource and WebSocket, which can't set headers, as "?token=<token>".
+// An empty token lets nobody else in. Requests whose Host isn't a loopback
+// name are refused, against DNS rebinding. CORS preflights are answered, so
+// a page in a browser can use the API once it has the token.
 func RequireToken(token string, h http.Handler) http.Handler {
 	want := []byte(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +96,13 @@ func RequireToken(token string, h http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if sameUser(r) && !fromBrowser(r) {
+		if peerOf(r).use && !fromBrowser(r) {
 			h.ServeHTTP(w, r)
+			return
+		}
+		if token == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized",
+				"only users allowed to use phonetopcd may, and not from web pages (LOCAL-API.md §1)")
 			return
 		}
 		got := r.URL.Query().Get("token")

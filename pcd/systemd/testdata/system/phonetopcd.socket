@@ -1,0 +1,19 @@
+# Holds the system service's sockets and starts it on the first connection.
+# `sudo phonetopc daemon install --system` installs it; a package would put
+# the units in /usr/lib/systemd/system/ and phonetopc.conf in
+# /usr/lib/sysusers.d/. /run/phonetopc is created by systemd, owned by root,
+# so no user can put a socket of their own there.
+[Unit]
+Description=phonetopc local API
+Documentation=https://github.com/melker12345/phonetopc/blob/main/spec/LOCAL-API.md
+
+[Socket]
+ListenStream=/run/phonetopc/phonetopc.sock
+SocketUser=root
+SocketGroup=phonetopc-users
+SocketMode=0660
+DirectoryMode=0755
+ListenStream=127.0.0.1:8767
+
+[Install]
+WantedBy=sockets.target

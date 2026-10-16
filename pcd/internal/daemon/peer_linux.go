@@ -10,15 +10,73 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
-// peerIsSameUser finds the other end of a loopback TCP connection in
-// /proc/net/tcp{,6}, where the kernel lists every socket with its owner.
-func peerIsSameUser(c net.Conn) bool {
+// connPeer finds who is at the other end of a local connection: for a Unix
+// socket the kernel says (SO_PEERCRED, SO_PEERGROUPS); for loopback TCP,
+// /proc/net/tcp{,6} lists every socket with its owner.
+func connPeer(c net.Conn) (Peer, bool) {
+	if uc, ok := c.(*net.UnixConn); ok {
+		return unixPeer(uc)
+	}
+	uid, ok := tcpPeerUID(c)
+	return Peer{UID: uid}, ok
+}
+
+func unixPeer(c *net.UnixConn) (Peer, bool) {
+	raw, err := c.SyscallConn()
+	if err != nil {
+		return Peer{}, false
+	}
+	var (
+		cred          *unix.Ucred
+		credErr, gErr error
+		groups        []int
+	)
+	if err := raw.Control(func(fd uintptr) {
+		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		groups, gErr = peerGroups(int(fd))
+	}); err != nil || credErr != nil {
+		return Peer{}, false
+	}
+	p := Peer{UID: int(cred.Uid)}
+	if gErr == nil {
+		p.Groups = append(groups, int(cred.Gid))
+	}
+	return p, true
+}
+
+// peerGroups returns the supplementary groups the peer had when it
+// connected (SO_PEERGROUPS, Linux 4.13).
+func peerGroups(fd int) ([]int, error) {
+	buf := make([]uint32, 32)
+	for {
+		size := uint32(len(buf) * 4)
+		_, _, errno := unix.Syscall6(unix.SYS_GETSOCKOPT, uintptr(fd), unix.SOL_SOCKET, unix.SO_PEERGROUPS,
+			uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0)
+		if errno == unix.ERANGE && int(size/4) > len(buf) {
+			buf = make([]uint32, size/4)
+			continue
+		}
+		if errno != 0 {
+			return nil, errno
+		}
+		groups := make([]int, 0, size/4)
+		for _, g := range buf[:size/4] {
+			groups = append(groups, int(g))
+		}
+		return groups, nil
+	}
+}
+
+func tcpPeerUID(c net.Conn) (int, bool) {
 	local, ok1 := c.LocalAddr().(*net.TCPAddr)
 	remote, ok2 := c.RemoteAddr().(*net.TCPAddr)
 	if !ok1 || !ok2 || !remote.IP.IsLoopback() {
-		return false
+		return 0, false
 	}
 	// The peer's socket is the one whose own address is our remote one.
 	peer, us := remote.AddrPort(), local.AddrPort()
@@ -30,10 +88,10 @@ func peerIsSameUser(c net.Conn) bool {
 		uid, found := socketOwner(f, peer, us)
 		f.Close()
 		if found {
-			return uid == os.Getuid()
+			return uid, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 // socketOwner returns the uid of the socket from local to remote in a

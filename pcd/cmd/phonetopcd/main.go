@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,6 +39,13 @@ import (
 
 const DefaultListen = "127.0.0.1:8767"
 
+// Defaults of --system.
+const (
+	SystemStore  = "/var/lib/phonetopc"
+	SystemSocket = "/run/phonetopc/phonetopc.sock"
+	SystemGroup  = "phonetopc-users"
+)
+
 const usage = `Usage: phonetopcd [flags]
 
 Keeps a connection to the paired phone and serves the local API
@@ -46,6 +55,14 @@ Started by systemd socket activation (phonetopc daemon install), it serves
 the sockets systemd passes in, and --socket and --listen are ignored.
 
 Flags:
+  --system             run as the system service (phonetopc daemon install
+                       --system): the pairings in /var/lib/phonetopc, the
+                       socket /run/phonetopc/phonetopc.sock, members of
+                       --group may use the API, root pairs; no token
+  --store DIR          the pairings (default $XDG_CONFIG_HOME/phonetopc; with
+                       --system, $STATE_DIRECTORY or /var/lib/phonetopc)
+  --group G            members of group G (a name or gid) may use the API
+                       (default with --system: phonetopc-users)
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
                        needed only when several are paired
   --addr host:port     connect to this address instead of looking for the phone
@@ -82,6 +99,8 @@ func main() {
 type config struct {
 	device, addr       string
 	dev, noMDNS        bool
+	system             bool
+	storeDir, group    string
 	socket, listen     string
 	tokenFile          string
 	verbose, showVersn bool
@@ -91,7 +110,6 @@ type config struct {
 // it serves on once it does (for tests).
 func run(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string, ready func(socket, tcp string)) int {
 	logger := log.New(stderr, "phonetopcd: ", 0)
-	rt := runtimeDir(getenv)
 	c := config{
 		device: getenv("PHONETOPC_DEVICE"),
 		addr:   getenv("PHONETOPC_ADDR"),
@@ -104,9 +122,12 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 	fs.StringVar(&c.addr, "addr", c.addr, "")
 	fs.BoolVar(&c.dev, "insecure-dev", c.dev, "")
 	fs.BoolVar(&c.noMDNS, "no-mdns", c.noMDNS, "")
-	fs.StringVar(&c.socket, "socket", filepath.Join(rt, "phonetopc.sock"), "")
+	fs.BoolVar(&c.system, "system", false, "")
+	fs.StringVar(&c.storeDir, "store", "", "")
+	fs.StringVar(&c.group, "group", "", "")
+	fs.StringVar(&c.socket, "socket", "", "")
 	fs.StringVar(&c.listen, "listen", DefaultListen, "")
-	fs.StringVar(&c.tokenFile, "token-file", filepath.Join(rt, "phonetopc.token"), "")
+	fs.StringVar(&c.tokenFile, "token-file", "", "")
 	fs.BoolVar(&c.verbose, "v", false, "")
 	fs.BoolVar(&c.showVersn, "version", false, "")
 	if err := fs.Parse(args); err != nil {
@@ -116,6 +137,7 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	c.defaults(getenv)
 	if c.showVersn {
 		fmt.Fprintln(stderr, "phonetopcd", version.Version)
 		return 0
@@ -129,12 +151,27 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 		return 2
 	}
 
-	dial, err := c.dialer(getenv)
+	access := daemon.UserAccess()
+	if c.group != "" {
+		gid, err := lookupGroup(c.group)
+		if err != nil {
+			logger.Print(err)
+			return 1
+		}
+		access.Group = gid
+	}
+	explain := hints.Explain
+	if c.system {
+		explain = func(err error) string {
+			return strings.ReplaceAll(hints.Explain(err), "`phonetopc ", "`sudo phonetopc ")
+		}
+	}
+	dial, st, err := c.dialer(getenv)
 	if err != nil {
-		logger.Print(hints.Explain(err))
+		logger.Print(explain(err))
 		return 1
 	}
-	d := daemon.New(daemon.Options{Dial: dial, Logf: logger.Printf, Explain: hints.Explain, Verbose: c.verbose})
+	d := daemon.New(daemon.Options{Dial: dial, Logf: logger.Printf, Explain: explain, Verbose: c.verbose, Store: st, Device: c.device})
 
 	var (
 		servers         []*http.Server
@@ -145,16 +182,23 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 			Handler:           h,
 			ReadHeaderTimeout: 10 * time.Second,
 			ErrorLog:          log.New(io.Discard, "", 0),
-			ConnContext:       daemon.ConnContext,
+			ConnContext:       access.ConnContext,
 		}
 		servers = append(servers, srv)
 		go srv.Serve(ln)
 	}
+	serveUnix := func(ln net.Listener) {
+		serve(ln, daemon.RequirePeer(d.Handler()))
+		socketAt = ln.Addr().String()
+	}
 	serveTCP := func(ln net.Listener) bool {
-		token, err := loadToken(c.tokenFile)
-		if err != nil {
-			logger.Print(err)
-			return false
+		token := ""
+		if !c.system {
+			var err error
+			if token, err = loadToken(c.tokenFile); err != nil {
+				logger.Print(err)
+				return false
+			}
 		}
 		serve(ln, daemon.RequireToken(token, d.Handler()))
 		tcpAt = ln.Addr().String()
@@ -168,8 +212,7 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 	for _, ln := range inherited {
 		switch ln.Addr().Network() {
 		case "unix":
-			serve(ln, d.Handler())
-			socketAt = ln.Addr().String()
+			serveUnix(ln)
 		case "tcp":
 			if !serveTCP(ln) {
 				return 1
@@ -180,14 +223,13 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 		}
 	}
 	if len(inherited) == 0 && !off(c.socket) {
-		ln, err := listenUnix(c.socket)
+		ln, err := listenUnix(c.socket, access.Group)
 		if err != nil {
 			logger.Print(err)
 			return 1
 		}
 		defer os.Remove(c.socket)
-		serve(ln, d.Handler())
-		socketAt = c.socket
+		serveUnix(ln)
 	}
 	if len(inherited) == 0 && !off(c.listen) {
 		if err := checkLoopback(c.listen); err != nil {
@@ -206,7 +248,10 @@ func run(ctx context.Context, args []string, stderr io.Writer, getenv func(strin
 	if socketAt != "" {
 		logger.Printf("serving on unix:%s", socketAt)
 	}
-	if tcpAt != "" {
+	switch {
+	case tcpAt != "" && c.system:
+		logger.Printf("serving on http://%s", tcpAt)
+	case tcpAt != "":
 		logger.Printf("serving on http://%s (token in %s)", tcpAt, c.tokenFile)
 	}
 	if ready != nil {
@@ -241,8 +286,9 @@ func runtimeDir(getenv func(string) string) string {
 	return dir
 }
 
-// dialer fails early if there is no paired phone to connect to.
-func (c config) dialer(getenv func(string) string) (daemon.Dialer, error) {
+// dialer fails early if there is no paired phone to connect to, except in
+// the system service.
+func (c config) dialer(getenv func(string) string) (daemon.Dialer, *store.Store, error) {
 	info := client.WithClientInfo("phonetopcd", version.Version)
 	if c.dev {
 		addr := c.addr
@@ -253,14 +299,18 @@ func (c config) dialer(getenv func(string) string) (daemon.Dialer, error) {
 			dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			return client.Dial(dctx, client.URL(addr), info)
-		}, nil
+		}, nil, nil
 	}
-	dir, err := store.DefaultDir(getenv)
-	if err != nil {
-		return nil, err
+	dir := c.storeDir
+	if dir == "" {
+		var err error
+		if dir, err = store.DefaultDir(getenv); err != nil {
+			return nil, nil, err
+		}
 	}
-	if _, err := store.Open(dir).Find(c.device); err != nil {
-		return nil, err
+	st := store.Open(dir)
+	if _, err := st.Find(c.device); err != nil && !c.system {
+		return nil, nil, err
 	}
 	opts := []client.Option{info, client.WithConfigDir(dir), client.WithDiscovery(!c.noMDNS, 0)}
 	if c.addr != "" {
@@ -268,20 +318,26 @@ func (c config) dialer(getenv func(string) string) (daemon.Dialer, error) {
 	}
 	aopts, err := client.AttestationOptionsFromEnv(getenv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opts = append(opts, aopts...)
+	if attestationRoots != nil {
+		opts = append(opts, client.WithAttestationRoots(attestationRoots...))
+	}
 	return func(ctx context.Context) (*client.Client, error) {
 		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		return client.DialPaired(dctx, c.device, opts...)
-	}, nil
+	}, st, nil
 }
 
-// listenUnix listens on a Unix socket only this user can use. A socket file
-// left behind by a daemon that died is replaced; one that answers means
-// another daemon is running.
-func listenUnix(path string) (net.Listener, error) {
+// attestationRoots replaces Google's attestation roots; only tests set it.
+var attestationRoots []*x509.Certificate
+
+// listenUnix listens on a Unix socket only this user can use, and members
+// of group gid if it isn't -1. A socket file left behind by a daemon that
+// died is replaced; one that answers means another daemon is running.
+func listenUnix(path string, gid int) (net.Listener, error) {
 	if len(path) > 107 {
 		return nil, fmt.Errorf("socket path %s is too long for a Unix socket (%d bytes, at most 107); pick a shorter one with --socket", path, len(path))
 	}
@@ -297,15 +353,67 @@ func listenUnix(path string) (net.Listener, error) {
 			return nil, err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	perm, dirPerm := os.FileMode(0o600), os.FileMode(0o700)
+	if gid >= 0 {
+		perm, dirPerm = 0o660, 0o755
+	}
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return nil, err
 	}
-	ln, err := listenUnixPrivate(path)
+	ln, err := listenUnixMode(path, perm)
 	if err != nil {
 		return nil, err
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false) // removed by run, after the servers stop
+	if gid >= 0 {
+		if err := os.Chown(path, -1, gid); err != nil {
+			ln.Close()
+			os.Remove(path)
+			return nil, fmt.Errorf("giving the socket to group %d: %w", gid, err)
+		}
+	}
 	return ln, nil
+}
+
+// lookupGroup returns the gid of group, a name or a number.
+func lookupGroup(group string) (int, error) {
+	if gid, err := strconv.Atoi(group); err == nil {
+		return gid, nil
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return 0, fmt.Errorf("--group %s: %w", group, err)
+	}
+	return strconv.Atoi(g.Gid)
+}
+
+// defaults fills in what the flags left out, which depends on --system.
+func (c *config) defaults(getenv func(string) string) {
+	if c.system {
+		if c.storeDir == "" {
+			c.storeDir = SystemStore
+			if dirs := getenv("STATE_DIRECTORY"); dirs != "" {
+				c.storeDir, _, _ = strings.Cut(dirs, ":")
+			}
+		}
+		if c.socket == "" {
+			c.socket = SystemSocket
+		}
+		if c.group == "" {
+			c.group = SystemGroup
+		}
+		return
+	}
+	rt := ""
+	if c.socket == "" || c.tokenFile == "" {
+		rt = runtimeDir(getenv)
+	}
+	if c.socket == "" {
+		c.socket = filepath.Join(rt, "phonetopc.sock")
+	}
+	if c.tokenFile == "" {
+		c.tokenFile = filepath.Join(rt, "phonetopc.token")
+	}
 }
 
 // checkLoopback refuses to serve the API beyond this machine: it controls

@@ -4,13 +4,15 @@ package main
 
 import (
 	"net"
+	"os"
 	"syscall"
 )
 
-// listenUnixPrivate creates the socket under a 0177 umask so it is never
-// reachable by other users, not even between bind and a later chmod.
-func listenUnixPrivate(path string) (net.Listener, error) {
-	old := syscall.Umask(0o177)
+// listenUnixMode creates the socket under a umask that leaves it with mode
+// perm, so it is never reachable by others, not even between bind and a
+// later chmod.
+func listenUnixMode(path string, perm os.FileMode) (net.Listener, error) {
+	old := syscall.Umask(int(0o777 &^ perm))
 	defer syscall.Umask(old)
 	return net.Listen("unix", path)
 }

@@ -1,0 +1,55 @@
+# The system service, started by phonetopcd.socket. It runs as the user
+# phonetopc, which alone can read the pairings in /var/lib/phonetopc, and
+# may reach the LAN (the phone, pairing, mDNS) and little else.
+[Unit]
+Description=phonetopc daemon: shares the paired phone with programs on this PC
+Documentation=https://github.com/melker12345/phonetopc/blob/main/spec/LOCAL-API.md
+Requires=phonetopcd.socket
+After=phonetopcd.socket network.target
+
+[Service]
+ExecStart="/opt/phone topc/phonetopcd" --system
+User=phonetopc
+Group=phonetopc
+StateDirectory=phonetopc
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Phones are on the LAN (or a VPN's private addresses). A phone elsewhere,
+# or PHONETOPC_CHECK_REVOCATION=1 (it fetches Google's list), needs more
+# addresses allowed: systemctl edit phonetopcd.
+IPAddressDeny=any
+IPAddressAllow=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+# No PrivateUsers=: the daemon must see its clients' real users and groups
+# (SO_PEERCRED, /proc/net/tcp) to decide who may use it. No ProtectProc=:
+# it names the program asking for an approval from /proc/<pid>/comm.
+
+[Install]
+Also=phonetopcd.socket

@@ -4,6 +4,6 @@ package daemon
 
 import "net"
 
-// Elsewhere there is no cheap way to find a TCP peer's user, so TCP
-// requests always need the token.
-func peerIsSameUser(net.Conn) bool { return false }
+// Elsewhere the peer isn't looked up: TCP requests always need the token,
+// and the Unix socket's file mode is all that guards it.
+func connPeer(net.Conn) (Peer, bool) { return Peer{}, false }
