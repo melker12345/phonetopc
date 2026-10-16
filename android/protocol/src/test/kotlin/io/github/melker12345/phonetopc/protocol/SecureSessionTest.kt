@@ -69,6 +69,17 @@ class SecureSessionTest {
         assertEquals("9d1c0a", hub.clients.value.single().pc?.id)
     }
 
+    @Test fun revokedDuringHelloIsUnauthorized() {
+        // The PC is revoked right after hello's token check, before the session shows its pc.
+        val hub = BridgeHub(
+            FakeSensorSource(), ServerInfo("phonetopc-android", "0.2.0"), { DeviceInfo("dev1", "Test Phone", platform = "android") },
+            security = SecureAccess(authenticate = { t -> paired.entries.firstOrNull { TokenHash.matches(t, it.key) }?.value.also { paired.clear() } }),
+        )
+        val s = hub.openSession("a")
+        assertUnauthorizedAndClosed(s, s.hello("""{"token":"$token"}"""))
+        assertNull(s.pc)
+    }
+
     @Test fun missingAuthIsUnauthorized() {
         val s = hub.openSession("a")
         assertUnauthorizedAndClosed(s, s.hello(null))

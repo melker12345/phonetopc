@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -129,13 +131,20 @@ class PairedPcRepository(context: Context, scope: CoroutineScope) {
 
     val pcs: Flow<List<PairedPc>> = store.data.map { PairedPcList.decode(it[KEY]) }
 
+    // Only update() changes _loaded after the first load, under this lock: a value from the
+    // DataStore flow can arrive after a newer write, and would bring a revoked PC back.
+    private val mutex = Mutex()
     private val _loaded = MutableStateFlow<List<PairedPc>?>(null)
 
     /** `null` until loaded. */
     val loaded: StateFlow<List<PairedPc>?> = _loaded.asStateFlow()
 
     init {
-        scope.launch { pcs.collect { _loaded.value = it } }
+        scope.launch {
+            mutex.withLock {
+                if (_loaded.value == null) _loaded.value = PairedPcList.decode(store.data.first()[KEY])
+            }
+        }
     }
 
     suspend fun current(): List<PairedPc> = _loaded.filterNotNull().first()
@@ -151,11 +160,11 @@ class PairedPcRepository(context: Context, scope: CoroutineScope) {
 
     suspend fun setAllowed(id: String, feature: Feature, allowed: Boolean) = update { PairedPcList.setAllowed(it, id, feature, allowed) }
 
-    private suspend fun update(transform: (List<PairedPc>) -> List<PairedPc>) {
+    private suspend fun update(transform: (List<PairedPc>) -> List<PairedPc>) = mutex.withLock {
         val saved = store.edit { prefs ->
             prefs[KEY] = PairedPcList.encode(transform(PairedPcList.decode(prefs[KEY])))
         }
-        // Apply right away, so a revoked token stops working before the flow catches up.
+        // Apply right away, so a revoked token stops working at once.
         _loaded.value = PairedPcList.decode(saved[KEY])
     }
 

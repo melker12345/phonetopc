@@ -433,6 +433,14 @@ class Session internal constructor(
         if (auth != null) {
             pc = auth.first
             tokenHash = auth.second
+            // A revocation between authenticate() and here saw no pc on this session, so
+            // disconnectSessions() missed it. Revokers remove the token before they look for
+            // sessions, so checking again after publishing pc catches it.
+            if (params.authToken()?.let(security!!.authenticate) != auth.first) {
+                pc = null
+                tokenHash = null
+                throw RpcException(RpcError.UNAUTHORIZED, "Unknown or revoked token")
+            }
         }
         // APPROVAL.md §1: secure mode only, and only while the phone can do approvals.
         val approval = if (auth != null) hub.approvals?.keyInfo() else null
@@ -461,9 +469,11 @@ class Session internal constructor(
      * SECURITY.md §5. A missing, malformed, unknown or revoked token is -32010, and the caller
      * closes with 1008. Returns the PC and the hash of the token it used.
      */
+    private fun JsonObject.authToken(): String? =
+        ((this["auth"] as? JsonObject)?.get("token") as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     private fun authenticate(security: SecureAccess, params: JsonObject): Pair<PcInfo, String> {
-        val token = ((params["auth"] as? JsonObject)?.get("token") as? JsonPrimitive)
-            ?.takeIf { it.isString }?.content
+        val token = params.authToken()
         val found = token?.takeIf { it.isNotEmpty() }?.let(security.authenticate)
         if (token == null || found == null) {
             security.limiter.recordFailure(remoteHost)
