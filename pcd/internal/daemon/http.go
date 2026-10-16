@@ -479,6 +479,15 @@ func (d *Daemon) handlePanelShow(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequest{err.Error()})
 		return
 	}
+	// Go matches member names case-insensitively, so "Label" was ignored
+	// above but is the label now: check what is sent too.
+	if b, err := json.Marshal(layout); err != nil {
+		d.fail(w, badRequest{err.Error()})
+		return
+	} else if _, err := protocol.ParseLayout(b); err != nil {
+		d.fail(w, badRequest{err.Error()})
+		return
+	}
 	d.call(w, r, func(cl *client.Client) (any, error) {
 		res, err := cl.ShowPanel(r.Context(), id, req.Title, layout, client.PanelOptions{KeepAwake: req.KeepAwake, Orientation: req.Orientation})
 		if err == nil {

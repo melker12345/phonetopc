@@ -572,6 +572,10 @@ func TestPanels(t *testing.T) {
 	wantStatus(t, do(t, "PATCH", url+"/v1/panels/deck", `{"updates":[{"widget":"status","set":{"text":"x"}}]}`), 404, "unknown_panel")
 	wantStatus(t, do(t, "PUT", url+"/v1/panels/x", `{"title":"X","layout":{"type":"nope"}}`), 400, "invalid_request")
 	wantStatus(t, do(t, "PUT", url+"/v1/panels/x", `{"title":"X"}`), 400, "invalid_request")
+	// Members that differ only in case are ignored by the layout check, but
+	// not by Go's decoding.
+	wantStatus(t, do(t, "PUT", url+"/v1/panels/x", `{"title":"X","layout":{"type":"text_input","id":"in","mAX_length":7000}}`), 400, "invalid_request")
+	wantStatus(t, do(t, "PUT", url+"/v1/panels/x", `{"title":"X","layout":{"type":"button","id":"b","label":"Go","LABEL":""}}`), 400, "invalid_request")
 }
 
 func TestPanelReattachedAfterReconnect(t *testing.T) {
