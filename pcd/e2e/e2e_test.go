@@ -376,7 +376,7 @@ func TestDevModeOverSocketAndTCP(t *testing.T) {
 	env, _, _, _, uc := devDaemon(t, "--listen", tcp)
 
 	r := do(t, uc, "GET", "http://phonetopc/v1/status", "", "")
-	if dev, _ := r.body["device"].(map[string]any); r.status != 200 || dev["id"] != "mock-0001" {
+	if dev, _ := r.body["device"].(map[string]any); r.status != 200 || dev["id"] != "6d6f636b00000001" {
 		t.Fatalf("status: %s", r.raw)
 	}
 	r = do(t, uc, "GET", "http://phonetopc/v1/sensors/battery", "", "")

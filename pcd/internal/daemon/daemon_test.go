@@ -274,7 +274,7 @@ func TestStatusSensorsAndGet(t *testing.T) {
 	if r.status != 200 || r.body["connected"] != true {
 		t.Fatalf("status: %s", r.raw)
 	}
-	if dev, _ := r.body["device"].(map[string]any); dev["id"] != "mock-0001" {
+	if dev, _ := r.body["device"].(map[string]any); dev["id"] != "6d6f636b00000001" {
 		t.Fatalf("device: %s", r.raw)
 	}
 
@@ -310,7 +310,7 @@ func TestEventsNDJSON(t *testing.T) {
 	var last float64 = -1
 	for range 3 {
 		ev := ls.next()
-		if ev["source"] != "gyro" || ev["type"] != "rotation" || ev["device"] != "mock-0001" {
+		if ev["source"] != "gyro" || ev["type"] != "rotation" || ev["device"] != "6d6f636b00000001" {
 			t.Fatalf("event: %v", ev)
 		}
 		if _, ok := ev["subscription"]; ok {

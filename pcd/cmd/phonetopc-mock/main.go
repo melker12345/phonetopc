@@ -113,7 +113,7 @@ func serve(ctx context.Context, args []string) error {
 		userEvery   = fs.Duration("user-every", 4*time.Second, "interval of the simulated user, who opens panels, uses their widgets and answers notifications (0 disables)")
 		noNotify    = fs.Bool("no-notify", false, "act as if the user hasn't allowed notifications (notify fails with -32030)")
 		noPanels    = fs.Bool("no-panels", false, "act as if the user hasn't allowed panels (panel methods fail with -32030)")
-		deviceID    = fs.String("device-id", "mock-0001", "device.id (dev mode; in secure mode only when the state is created)")
+		deviceID    = fs.String("device-id", "6d6f636b00000001", "device.id (dev mode; in secure mode only when the state is created)")
 		name        = fs.String("name", "", "device name (default \"phonetopc mock\")")
 		unavailable = fs.String("unavailable", "", "comma-separated sources to report as unavailable (e.g. light,proximity)")
 		seed        = fs.Uint64("seed", 0, "random seed for the simulation (0 = random)")

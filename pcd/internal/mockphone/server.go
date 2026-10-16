@@ -36,7 +36,7 @@ const (
 // Options configures a Server. Zero values select the defaults noted on each
 // field.
 type Options struct {
-	// Device is reported in hello. Default: id "mock-0001", name
+	// Device is reported in hello. Default: id "6d6f636b00000001", name
 	// "phonetopc mock", platform "android".
 	Device protocol.DeviceInfo
 
@@ -128,7 +128,7 @@ type Options struct {
 
 func (o *Options) setDefaults() {
 	if o.Device.ID == "" {
-		o.Device.ID = "mock-0001"
+		o.Device.ID = "6d6f636b00000001"
 	}
 	if o.Device.Name == "" {
 		o.Device.Name = "phonetopc mock"

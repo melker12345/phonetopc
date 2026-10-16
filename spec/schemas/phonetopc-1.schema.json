@@ -83,7 +83,7 @@
         },
         "auth": {
           "type": "object", "required": ["token"],
-          "properties": { "token": { "type": "string", "minLength": 1 } }
+          "properties": { "token": { "type": "string", "description": "32 bytes, base64url without padding (SECURITY.md §2)", "pattern": "^[A-Za-z0-9_-]{43}$" } }
         }
       }
     },
@@ -100,7 +100,7 @@
         "device": {
           "type": "object", "required": ["id", "name", "platform"],
           "properties": {
-            "id": { "type": "string" },
+            "id": { "type": "string", "pattern": "^[0-9a-f]{16,64}$" },
             "name": { "type": "string" },
             "manufacturer": { "type": "string" },
             "model": { "type": "string" },

@@ -51,13 +51,17 @@ The phone server runs in exactly one mode at a time, on the same port (default 8
 
 - TLS 1.3 SHOULD be used; TLS 1.2 with ECDHE and an AEAD cipher MUST be accepted (Android 8–9 lack 1.3).
 - A client connecting in secure mode MUST verify that the server's pin equals the stored pin and MUST NOT fall back
-  to any other check or to plaintext. A pin mismatch is a hard failure that tells the user to re-pair.
+  to any other check or to plaintext. A pin mismatch is a hard failure: the client warns that something may be
+  impersonating the phone, and suggests re-pairing only if the phone app was reset or reinstalled.
+- Clients MUST use dev mode only when told to by an option named for it. Never because of a `ws://` address, an
+  mDNS `dev=1`, or a failed secure connection.
+- The phone MUST show that it is in dev mode for as long as it is, including while the app is in the background.
 - mDNS (`_phonetopc._tcp`) TXT records gain `tls=1` in secure mode; `dev=1` stays for dev mode.
 
 ## 4. Pairing
 
 Pairing creates trust between one phone and one PC. It runs **once**. Afterwards the PC holds
-`{phone id, phone pin, token}` and the phone holds `{PC id, PC name, token}`.
+`{phone id, phone pin, token}` and the phone holds `{PC id, PC name, PC pin, token}`.
 
 ### 4.1 Roles and channel
 

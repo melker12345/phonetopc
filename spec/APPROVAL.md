@@ -6,7 +6,8 @@ The key words MUST, SHOULD and MAY are used as in RFC 2119.
 A PC program asks the phone for an **approval**. The user confirms with a strong biometric (fingerprint) on the
 phone, and the phone returns a **signature** from a hardware key that can only sign right after that biometric
 check. The PC verifies the signature itself, so a "yes" can't be forged by anything that lacks that key: not the
-network, not a stolen token, not a bug elsewhere in the phone app.
+network, not a stolen token. The PC trusts the key the phone app first reports (§3); nothing yet proves to it
+that the key is in secure hardware and needs a fingerprint, so a modified app could report a software key.
 
 ## 1. Availability
 

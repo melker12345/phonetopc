@@ -34,6 +34,8 @@ internal object BridgeNotifications {
             else -> context.resources.getQuantityString(R.plurals.notification_clients, clients, clients)
         }
         val text = buildList {
+            // SECURITY.md §3: dev mode is shown for as long as it runs.
+            if (status.secure == false) add(context.getString(R.string.home_mode_dev))
             if (address != null && status.port != null) add("$address:${status.port}")
             if (status.state == RunState.RUNNING) {
                 status.streaming.entries.sortedBy { it.key }.forEach { (src, d) ->

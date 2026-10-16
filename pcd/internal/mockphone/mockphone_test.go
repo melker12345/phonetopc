@@ -26,7 +26,7 @@ func TestHelloAndListSensors(t *testing.T) {
 	c := dial(t, url)
 
 	h := c.Server()
-	if h.Protocol != protocol.Version || h.Server.Name != mockphone.ServerName || h.Device.ID != "mock-0001" ||
+	if h.Protocol != protocol.Version || h.Server.Name != mockphone.ServerName || h.Device.ID != "6d6f636b00000001" ||
 		h.Device.Platform == "" || !slices.Equal(h.Capabilities, []string{"events", "get", "notify", "panels"}) {
 		t.Errorf("hello result %+v", h)
 	}
@@ -261,7 +261,7 @@ func TestSubscribeGyro(t *testing.T) {
 	for i := range 50 {
 		ev := nextEvent(t, sub)
 		if ev.Seq != uint64(i) || ev.Subscription != sub.ID || ev.Source != "gyro" || ev.Type != "rotation" ||
-			ev.Unit != "rad/s" || ev.Device != "mock-0001" {
+			ev.Unit != "rad/s" || ev.Device != "6d6f636b00000001" {
 			t.Fatalf("event %d: %+v", i, ev)
 		}
 		v, err := ev.Vec3()

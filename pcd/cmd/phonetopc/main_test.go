@@ -54,14 +54,14 @@ func runCLIWith(t *testing.T, ctx context.Context, env map[string]string, stdin 
 func TestInfoAndAddrFromEnv(t *testing.T) {
 	_, addr := startMock(t)
 	code, out, errs := runCLI(t, context.Background(), testEnv(t, map[string]string{"PHONETOPC_ADDR": addr, "PHONETOPC_INSECURE_DEV": "1"}), "info")
-	if code != 0 || !strings.Contains(out, "phonetopc/1") || !strings.Contains(out, "mock-0001") {
+	if code != 0 || !strings.Contains(out, "phonetopc/1") || !strings.Contains(out, "6d6f636b00000001") {
 		t.Errorf("code %d\nstdout %s\nstderr %s", code, out, errs)
 	}
 	// --addr overrides the environment, before or after the command.
 	for _, args := range [][]string{{"--insecure-dev", "--addr", addr, "info", "--json"}, {"info", "--json", "--addr", addr, "--insecure-dev"}} {
 		code, out, errs = runCLI(t, context.Background(), testEnv(t, map[string]string{"PHONETOPC_ADDR": "127.0.0.1:1"}), args...)
 		var h protocol.HelloResult
-		if code != 0 || json.Unmarshal([]byte(out), &h) != nil || h.Device.ID != "mock-0001" {
+		if code != 0 || json.Unmarshal([]byte(out), &h) != nil || h.Device.ID != "6d6f636b00000001" {
 			t.Errorf("%v: code %d\nstdout %s\nstderr %s", args, code, out, errs)
 		}
 	}
