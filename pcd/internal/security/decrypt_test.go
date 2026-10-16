@@ -73,7 +73,15 @@ func TestParseDecryptKeyRejects(t *testing.T) {
 	ecDER, _ := x509.MarshalPKIXPublicKey(&ec.PublicKey)
 	small, _ := rsa.GenerateKey(rand.Reader, 1024)
 	smallDER, _ := x509.MarshalPKIXPublicKey(&small.PublicKey)
-	for name, key := range map[string]string{"ec": B64(ecDER), "1024 bits": B64(smallDER), "junk": "!!", "empty": ""} {
+	big, _ := rsa.GenerateKey(rand.Reader, 2048)
+	bigDER, _ := x509.MarshalPKIXPublicKey(&big.PublicKey)
+	// Two bytes after the exponent, inside the RSAPublicKey: the lengths of
+	// it, the BIT STRING and the SubjectPublicKeyInfo grow by two.
+	trailing := append(append([]byte{}, bigDER...), 0x4d, 0x34)
+	for _, i := range []int{3, 22, 27} {
+		trailing[i] += 2
+	}
+	for name, key := range map[string]string{"ec": B64(ecDER), "1024 bits": B64(smallDER), "junk": "!!", "empty": "", "data after the exponent": B64(trailing)} {
 		if _, _, err := ParseDecryptKey(key); err == nil {
 			t.Errorf("%s accepted", name)
 		}

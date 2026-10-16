@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -38,6 +39,11 @@ func ParseDecryptKeyDER(der []byte) (*rsa.PublicKey, error) {
 	}
 	if bits := r.N.BitLen(); bits < 2048 || bits > 4096 {
 		return nil, fmt.Errorf("decryption key has %d bits, not 2048 to 4096", bits)
+	}
+	// crypto/x509 accepts data after the exponent, which would give one key
+	// several pins and age tags.
+	if canonical, err := x509.MarshalPKIXPublicKey(r); err != nil || !bytes.Equal(canonical, der) {
+		return nil, errors.New("decryption key is not in canonical DER")
 	}
 	return r, nil
 }
