@@ -29,7 +29,7 @@ Each finding was checked against the code; "tested" means the reviewer reproduce
 | L-S3 | Fixed (`a43e7ba`, `65c5337`). |
 | L-S4 | Fixed (`58a812c`). |
 | L-S5 | Fixed (`a370a79`). |
-| L-S6 | Loopback exempt from the failed-`hello` limit (`e8bf2d7`). **Open:** one pending approval per phone, so one stolen token keeps every PC's approvals `busy`. |
+| L-S6 | Fixed (`e8bf2d7`, `c19dafa`). |
 | L-S7 | Fixed (`9de3d93`). |
 | L-S8 | Fixed (`9de3d93`), except `plan.md` §4.3, which still describes the old approval message. |
 
