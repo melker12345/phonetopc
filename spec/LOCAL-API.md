@@ -167,15 +167,16 @@ daemon ends the stream with an `error` event.
 ## 5. Fingerprint approval: `POST /v1/approvals`
 
 ```json
-{"reason": "Deploy to production?", "timeout_ms": 30000}
+{"reason": "Deploy to production?", "timeout_ms": 30000, "nonce": "<32 random bytes, base64url>"}
 ```
 
 `reason` is shown on the phone and signed exactly as given (`APPROVAL.md` §4: 1–200 characters, no leading or
-trailing whitespace, no control characters). `timeout_ms` is optional: default 30000, 5000 to 120000. The
-request waits for the user, then answers 200:
+trailing whitespace, no control characters). `timeout_ms` is optional: default 30000, 5000 to 120000. `nonce` is
+optional; without it the daemon makes one. The request waits for the user, then answers 200:
 
 ```json
-{"approved": true, "why": "approved"}
+{"approved": true, "why": "approved", "proof": {"signature": "…", "key": "…", "key_pin": "sha256/…",
+ "nonce": "…", "phone_id": "…", "pc_id": "…"}}
 {"approved": false, "why": "denied"}
 ```
 
@@ -184,6 +185,11 @@ request waits for the user, then answers 200:
 reason and both ids with the trusted approval key. Errors: 409 `approval_key_changed` when the phone's approval key
 changed (typically fingerprints were added or removed; accept it with `phonetopc approval-key --accept`; nothing
 was sent to the phone), and 502 `approval_invalid` for a signature that didn't verify.
+
+**Checking it yourself.** `proof` lets a program verify the phone's answer instead of trusting the daemon. Send your
+own fresh `nonce`, keep the `key_pin` you trust, and accept only if `proof.nonce` is your nonce, `key_pin` is the pin
+of `key` (`SECURITY.md` §2) and equals yours, and `signature` verifies with `key` over the message of `APPROVAL.md`
+§5, built from your nonce, your reason, `phone_id` and `pc_id`.
 
 ## 6. Notifications
 

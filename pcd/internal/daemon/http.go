@@ -18,6 +18,7 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/client"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
 
 type route struct {
@@ -301,12 +302,24 @@ func (d *Daemon) handleNotifyCancel(w http.ResponseWriter, r *http.Request) {
 type ApprovalRequest struct {
 	Reason    string `json:"reason"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"` // 0: 30 s
+	Nonce     string `json:"nonce,omitempty"`      // "": the daemon makes one
 }
 
 // ApprovalResponse is the answer to POST /v1/approvals.
 type ApprovalResponse struct {
-	Approved bool   `json:"approved"`
-	Why      string `json:"why"`
+	Approved bool           `json:"approved"`
+	Why      string         `json:"why"`
+	Proof    *ApprovalProof `json:"proof,omitempty"`
+}
+
+// ApprovalProof lets a program verify an approval itself (LOCAL-API.md §5).
+type ApprovalProof struct {
+	Signature string `json:"signature"`
+	Key       string `json:"key"`
+	KeyPin    string `json:"key_pin"`
+	Nonce     string `json:"nonce"`
+	PhoneID   string `json:"phone_id"`
+	PCID      string `json:"pc_id"`
 }
 
 func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
@@ -324,13 +337,28 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 		d.fail(w, badRequestf("timeout_ms must be between %d and %d", protocol.MinApprovalTimeout.Milliseconds(), protocol.MaxApprovalTimeout.Milliseconds()))
 		return
 	}
+	if req.Nonce != "" {
+		if n, err := security.DecodeB64(req.Nonce); err != nil || len(n) != protocol.ApprovalNonceSize {
+			d.fail(w, badRequestf("nonce must be base64url of %d bytes", protocol.ApprovalNonceSize))
+			return
+		}
+	}
 	d.call(w, r, func(cl *client.Client) (any, error) {
-		res, err := cl.RequestApproval(r.Context(), req.Reason, timeout)
+		var res client.ApprovalResult
+		var err error
+		if req.Nonce != "" {
+			res, err = cl.RequestApprovalNonce(r.Context(), req.Reason, req.Nonce, timeout)
+		} else {
+			res, err = cl.RequestApproval(r.Context(), req.Reason, timeout)
+		}
 		if err != nil {
 			return nil, err
 		}
 		if res.Approved() {
-			return ApprovalResponse{Approved: true, Why: "approved"}, nil
+			return ApprovalResponse{Approved: true, Why: "approved", Proof: &ApprovalProof{
+				Signature: res.Signature, Key: res.Key, KeyPin: res.KeyPin,
+				Nonce: res.Nonce, PhoneID: res.PhoneID, PCID: res.PCID,
+			}}, nil
 		}
 		return ApprovalResponse{Why: string(res.Why)}, nil
 	})

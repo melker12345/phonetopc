@@ -758,6 +758,32 @@ func TestApprovals(t *testing.T) {
 	if r.status != 200 || r.body["approved"] != true || r.body["why"] != "approved" {
 		t.Fatalf("approved: %s", r.raw)
 	}
+
+	// The program's own nonce: it can check the proof without trusting the daemon.
+	nonce := security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
+	r = do(t, "POST", url+"/v1/approvals", `{"reason":"Deploy?","nonce":"`+nonce+`"}`)
+	var proof struct {
+		Proof daemon.ApprovalProof `json:"proof"`
+	}
+	if err := json.Unmarshal([]byte(r.raw), &proof); err != nil || r.status != 200 {
+		t.Fatalf("with a nonce: %s", r.raw)
+	}
+	p := proof.Proof
+	key, err := security.ParseApprovalKey(p.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin, _ := security.ApprovalKeyPin(p.Key); pin != p.KeyPin || p.Nonce != nonce || p.PCID != sp.pcID {
+		t.Fatalf("proof %+v", p)
+	}
+	if err := security.VerifyApproval(key, p.Signature, security.ApprovalMessage(p.PhoneID, sp.pcID, nonce, "Deploy?")); err != nil {
+		t.Fatalf("proof doesn't verify: %v", err)
+	}
+	if err := security.VerifyApproval(key, p.Signature, security.ApprovalMessage(p.PhoneID, sp.pcID, nonce, "Deploy!")); err == nil {
+		t.Fatal("proof verifies for another reason")
+	}
+	wantStatus(t, do(t, "POST", url+"/v1/approvals", `{"reason":"Deploy?","nonce":"short"}`), 400, "invalid_request")
+
 	mu.Lock()
 	why = protocol.WhyDenied
 	mu.Unlock()

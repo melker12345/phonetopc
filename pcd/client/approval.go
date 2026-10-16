@@ -48,8 +48,11 @@ type ApprovalResult struct {
 	Reason, Nonce string
 	// Signature is the verified signature (base64url DER) when approved.
 	Signature string
-	// KeyPin is the pin of the approval key that signed.
-	KeyPin string
+	// Key is the approval key (base64url DER SubjectPublicKeyInfo) and
+	// KeyPin its pin.
+	Key, KeyPin string
+	// PhoneID and PCID are the ids the signed message names.
+	PhoneID, PCID string
 }
 
 // Approved reports whether the phone's user approved. It is true only if
@@ -220,6 +223,21 @@ func (c *Client) approvalKey() (*ecdsa.PublicKey, string, error) {
 // pairing; and
 // connection problems.
 func (c *Client) RequestApproval(ctx context.Context, reason string, timeout time.Duration) (ApprovalResult, error) {
+	nonce := security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
+	if c.opts.testNonce != "" {
+		nonce = c.opts.testNonce // tests replaying signed vectors only
+	}
+	return c.RequestApprovalNonce(ctx, reason, nonce, timeout)
+}
+
+// RequestApprovalNonce is RequestApproval with a nonce chosen by the
+// caller: base64url of 32 bytes, which it must never reuse. A program
+// that picks the nonce can verify the signature itself, without trusting
+// whoever relayed it.
+func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string, timeout time.Duration) (ApprovalResult, error) {
+	if n, err := security.DecodeB64(nonce); err != nil || len(n) != protocol.ApprovalNonceSize {
+		return ApprovalResult{}, fmt.Errorf("phonetopc: the nonce must be base64url of %d bytes", protocol.ApprovalNonceSize)
+	}
 	// APPROVAL.md §4: the reason is sent and signed exactly as given, never
 	// trimmed; check it before sending, as the phone would.
 	if err := protocol.CheckReason(reason); err != nil {
@@ -248,6 +266,7 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 				c.opts.pairedPhoneID, c.opts.pairedPCID, phoneID, pcID)}
 		}
 	}
+	res.PhoneID, res.PCID = phoneID, pcID
 	key, pin, err := c.approvalKey()
 	switch {
 	case err == errNoApprovalOffered:
@@ -258,12 +277,8 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 	case err != nil:
 		return res, err
 	}
-	res.KeyPin = pin
-
-	res.Nonce = security.B64(security.RandomBytes(protocol.ApprovalNonceSize))
-	if c.opts.testNonce != "" {
-		res.Nonce = c.opts.testNonce // tests replaying signed vectors only
-	}
+	res.Key, res.KeyPin = h.Approval.Key, pin
+	res.Nonce = nonce
 	ms := timeout.Milliseconds()
 	params := protocol.RequestApprovalParams{Reason: reason, Nonce: res.Nonce, TimeoutMS: &ms}
 	// §4: never give up before timeout_ms + 5 s; allow a little more.
