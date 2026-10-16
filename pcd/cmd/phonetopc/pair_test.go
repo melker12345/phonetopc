@@ -462,12 +462,21 @@ func TestPairReplacingAnotherKey(t *testing.T) {
 func pairDirect(t *testing.T, env map[string]string, ph *phone, name string, addrs []string) store.Device {
 	t.Helper()
 	tok := security.NewToken()
-	ph.state.PutPC(mockphone.PairedPC{ID: "pc-" + name, Name: "test PC", Token: tok})
+	ph.state.PutPC(mockphone.PairedPC{ID: storePCID(t, env), Name: "test PC", Token: tok})
 	d := store.Device{ID: ph.id.ID, Name: name, Pin: ph.id.Pin, Token: tok, Port: ph.port, Addresses: addrs, PairedAt: store.Now(time.Now())}
 	if err := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc")).PutDevice(d); err != nil {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func storePCID(t *testing.T, env map[string]string) string {
+	t.Helper()
+	pc, err := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc")).PC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pc.ID
 }
 
 func TestErrorsExplained(t *testing.T) {
@@ -481,7 +490,7 @@ func TestErrorsExplained(t *testing.T) {
 	d := pairDirect(t, env, ph, "phone", []string{"127.0.0.1"})
 
 	// Revoked on the phone.
-	ph.state.RemovePC("pc-phone")
+	ph.state.RemovePC(storePCID(t, env))
 	code, _, errs = runCLI(t, tctx(t), env, "info")
 	if code != 1 || !strings.Contains(errs, "this PC was revoked on the phone — run `phonetopc pair`") {
 		t.Errorf("revoked: %d %s", code, errs)

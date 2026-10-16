@@ -215,7 +215,9 @@ func (c *Client) approvalKey() (*ecdsa.PublicKey, string, error) {
 // approved (denied, cancelled, timeout, busy, lockout, unavailable) is a
 // result, not an error. Errors: invalid arguments; an
 // *ApprovalKeyChangedError, in which case nothing was sent; an
-// *ApprovalInvalidError for an approval that failed verification; and
+// *ApprovalInvalidError for an approval that failed verification, or,
+// with nothing sent, for a phone whose hello ids differ from the stored
+// pairing; and
 // connection problems.
 func (c *Client) RequestApproval(ctx context.Context, reason string, timeout time.Duration) (ApprovalResult, error) {
 	// APPROVAL.md §4: the reason is sent and signed exactly as given, never
@@ -235,6 +237,16 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 	h := c.Server()
 	if h.PC == nil {
 		return res, ErrApprovalNeedsSecureMode
+	}
+	// §5: sign over the ids stored at pairing; a phone reporting others
+	// gets no approvals, so a signature always names this pairing.
+	phoneID, pcID := h.Device.ID, h.PC.ID
+	if c.opts.pairedPhoneID != "" {
+		if phoneID != c.opts.pairedPhoneID || pcID != c.opts.pairedPCID {
+			return res, &ApprovalInvalidError{Problem: fmt.Sprintf(
+				"the phone paired as %s with this PC as %s reports %s and %s; re-pair to use approvals",
+				c.opts.pairedPhoneID, c.opts.pairedPCID, phoneID, pcID)}
+		}
 	}
 	key, pin, err := c.approvalKey()
 	switch {
@@ -283,7 +295,7 @@ func (c *Client) RequestApproval(ctx context.Context, reason string, timeout tim
 		return res, &ApprovalInvalidError{Problem: "the phone said approved without a signature"}
 	}
 	// §5: built from our own nonce, reason and ids, never echoed values.
-	msg := security.ApprovalMessage(h.Device.ID, h.PC.ID, res.Nonce, reason)
+	msg := security.ApprovalMessage(phoneID, pcID, res.Nonce, reason)
 	if err := security.VerifyApproval(key, r.Signature, msg); err != nil {
 		return res, &ApprovalInvalidError{Problem: "the phone said approved, but the signature is invalid", Err: err}
 	}

@@ -124,6 +124,9 @@ type options struct {
 	// approvalTrust decides whether an approval key pin is trusted
 	// (APPROVAL.md §3); see WithApprovalTrust.
 	approvalTrust func(pin string) error
+	// pairedPhoneID and pairedPCID are the ids stored at pairing, which
+	// approvals are signed over (APPROVAL.md §5); DialPaired sets them.
+	pairedPhoneID, pairedPCID string
 	// testNonce replaces the approval nonce; only set by this package's
 	// tests, to replay the signed test vectors.
 	testNonce   string

@@ -114,7 +114,7 @@ func revokedDaemon(t *testing.T) string {
 	if err := d.WaitConnected(testCtx(t)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sp.st.RemovePC("pc-test"); err != nil {
+	if _, err := sp.st.RemovePC(sp.pcID); err != nil {
 		t.Fatal(err)
 	}
 	sp.srv.Recheck()

@@ -138,8 +138,13 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 		return nil, fmt.Errorf("phonetopc: no address known for %q and mDNS found nothing; is the phone on this network?", dev.Name)
 	}
 
+	pc, err := st.PC()
+	if err != nil {
+		return nil, err
+	}
 	// The store decides about approval keys unless the caller does.
-	dialOpts := append(append([]Option{WithApprovalTrust(storeApprovalTrust(st, dev))}, opts...), WithPin(dev.Pin), WithToken(dev.Token))
+	dialOpts := append(append([]Option{WithApprovalTrust(storeApprovalTrust(st, dev))}, opts...), WithPin(dev.Pin), WithToken(dev.Token),
+		func(o *options) { o.pairedPhoneID, o.pairedPCID = dev.ID, pc.ID })
 	var (
 		pinErr  error
 		lastErr error
@@ -157,7 +162,8 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 			}
 			if got := cl.Server().Device.ID; got != dev.ID {
 				// SECURITY.md §6: warn; the pin already proved the key.
-				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s", dev.Name, dev.ID, got))
+				// Approvals are refused (APPROVAL.md §5).
+				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s; approvals are refused until you re-pair", dev.Name, dev.ID, got))
 			}
 			// APPROVAL.md §3: the first sight of the approval key stores it.
 			// A changed key is reported by RequestApproval and

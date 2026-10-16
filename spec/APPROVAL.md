@@ -109,7 +109,9 @@ phonetopc-approval/1
 
 `reason` here is exactly the string sent in the request, with no trimming or normalization on either side.
 
-- `phone id` is `hello.device.id`, `pc id` is `hello.pc.id` of this session.
+- `phone id` and `pc id` are the ids stored at pairing: the PC uses the phone id it stored and its own id, and
+  the phone uses its own id and the PC id it stored. In this session `hello.device.id` and `hello.pc.id` MUST
+  equal them; if either differs, the PC MUST NOT send `request_approval` in this session.
 - Algorithm: ECDSA P-256 with SHA-256 (`SHA256withECDSA`); `signature` is the DER encoding, base64url.
 
 The PC approves only if **all** of these hold:

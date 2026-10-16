@@ -51,6 +51,20 @@ func storedDevice(t *testing.T, env map[string]string) store.Device {
 	return d
 }
 
+// TestApproveIDMismatch: a phone that knows this PC under another id
+// (APPROVAL.md §5) is never asked.
+func TestApproveIDMismatch(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startApprovalPhone(t, mockphone.ApproveAll, false)
+	d := pairDirect(t, env, ph.phone, "phone", []string{"127.0.0.1"})
+	ph.state.RemovePC(storePCID(t, env))
+	ph.state.PutPC(mockphone.PairedPC{ID: "0123456789abcdef", Name: "test PC", Token: d.Token})
+	code, _, errs := runCLI(t, tctx(t), env, "approve", "Deploy?")
+	if code == 0 || !strings.Contains(errs, "re-pair to use approvals") || ph.asked.Load() != 0 {
+		t.Fatalf("approve: %d asked %d %s", code, ph.asked.Load(), errs)
+	}
+}
+
 func TestApproveApproved(t *testing.T) {
 	env := testEnv(t, nil)
 	ph := startApprovalPhone(t, mockphone.ApproveAll, false)

@@ -691,6 +691,7 @@ func TestSlowStreamOnChangeEnds(t *testing.T) {
 type securePhone struct {
 	st   *mockphone.State
 	srv  *mockphone.Server
+	pcID string
 	dial daemon.Dialer
 }
 
@@ -720,12 +721,16 @@ func newSecurePhone(t *testing.T, tweak func(*mockphone.Options)) *securePhone {
 	addr := strings.TrimPrefix(hs.URL, "https://")
 
 	tok := security.NewToken()
-	st.PutPC(mockphone.PairedPC{ID: "pc-test", Name: "test PC", Token: tok})
 	cfg := filepath.Join(t.TempDir(), "phonetopc")
+	pc, err := store.Open(cfg).PC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.PutPC(mockphone.PairedPC{ID: pc.ID, Name: "test PC", Token: tok})
 	if err := store.Open(cfg).PutDevice(store.Device{ID: id.ID, Name: "phone", Pin: id.Pin, Token: tok, PairedAt: store.Now(time.Now())}); err != nil {
 		t.Fatal(err)
 	}
-	return &securePhone{st: st, srv: srv, dial: func(ctx context.Context) (*client.Client, error) {
+	return &securePhone{st: st, srv: srv, pcID: pc.ID, dial: func(ctx context.Context) (*client.Client, error) {
 		return client.DialPaired(ctx, "", client.WithConfigDir(cfg), client.WithAddress(addr))
 	}}
 }
