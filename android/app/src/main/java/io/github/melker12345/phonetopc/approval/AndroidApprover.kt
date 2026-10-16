@@ -43,7 +43,9 @@ class AndroidApprover(context: Context) : io.github.melker12345.phonetopc.protoc
             // first (APPROVAL.md §3). It sees it in its next hello.
             return ApprovalOutcome.Refused(ApprovalWhy.UNAVAILABLE)
         }
-        val prompt = ApprovalPrompts.Prompt(request.id, request.pc.name, request.reason, request.timeoutMillis, decrypt = false)
+        val prompt = ApprovalPrompts.Prompt(
+            request.id, request.pc.name, request.program, request.reason, request.match, request.choices, request.timeoutMillis, decrypt = false,
+        )
         return when (val result = ApprovalPrompts.run(app, prompt, BiometricPrompt.CryptoObject(signature))) {
             is ApprovalPrompts.Result.Refused -> ApprovalOutcome.Refused(result.why)
             is ApprovalPrompts.Result.Authenticated -> try {
@@ -63,7 +65,9 @@ class AndroidApprover(context: Context) : io.github.melker12345.phonetopc.protoc
         } catch (e: BiometricKey.KeyReplacedException) {
             return DecryptOutcome.Refused(ApprovalWhy.UNAVAILABLE)
         }
-        val prompt = ApprovalPrompts.Prompt(request.id, request.pc.name, request.reason, request.timeoutMillis, decrypt = true)
+        val prompt = ApprovalPrompts.Prompt(
+            request.id, request.pc.name, request.program, request.reason, request.match, request.choices, request.timeoutMillis, decrypt = true,
+        )
         return when (val result = ApprovalPrompts.run(app, prompt, BiometricPrompt.CryptoObject(cipher))) {
             is ApprovalPrompts.Result.Refused -> DecryptOutcome.Refused(result.why)
             is ApprovalPrompts.Result.Authenticated -> try {
@@ -93,8 +97,20 @@ class AndroidApprover(context: Context) : io.github.melker12345.phonetopc.protoc
 object ApprovalPrompts {
     private const val TAG = "ApprovalPrompts"
 
-    /** What the user sees. [decrypt] picks the wording. */
-    data class Prompt(val id: Long, val pcName: String, val reason: String, val timeoutMillis: Long, val decrypt: Boolean)
+    /**
+     * What the user sees. The user picks one of [choices] before the biometric prompt; only
+     * [match] opens it (APPROVAL.md §4.2). [decrypt] picks the wording.
+     */
+    data class Prompt(
+        val id: Long,
+        val pcName: String,
+        val program: String,
+        val reason: String,
+        val match: Int,
+        val choices: List<Int>,
+        val timeoutMillis: Long,
+        val decrypt: Boolean,
+    )
 
     sealed interface Result {
         /** The biometric check passed; [crypto] is now authorised for one operation. */
@@ -116,7 +132,7 @@ object ApprovalPrompts {
      * Shows the request and waits for the user. Cancelling (timeout, session closed) removes
      * the notification, and [ApprovalActivity] closes its prompt when [current] changes.
      *
-     * If the app is in the foreground the prompt opens directly (§4.2 MAY). Otherwise a
+     * If the app is in the foreground the number choice opens directly (§4.2 MAY). Otherwise a
      * notification is posted; if notifications are blocked there is no way to reach the user
      * from the background, so the answer is `unavailable` right away.
      */
@@ -137,7 +153,7 @@ object ApprovalPrompts {
         }
     }
 
-    /** From the notification's Deny, its dismissal, or the prompt. Ignored if [id] already ended. */
+    /** From the notification's Deny, its dismissal, the number choice or the prompt. Ignored if [id] already ended. */
     fun finish(id: Long, why: ApprovalWhy) {
         _current.value?.takeIf { it.prompt.id == id }?.result?.complete(Result.Refused(why))
     }

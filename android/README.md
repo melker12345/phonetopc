@@ -40,8 +40,10 @@ Quick Settings tile to send `ui`/`tile_tap` events.
 ## Fingerprint approval
 
 A paired PC can ask you to confirm something (`phonetopc approve`, or `POST /v1/approvals` on the PC). You get a
-notification with the reason and **Approve** / **Deny**; Approve opens the fingerprint prompt. If the app is in
-front, the prompt opens directly. On a locked phone the reason is hidden and you unlock first.
+notification naming the program and the PC, with the reason and **Approve** / **Deny**. Approve shows three numbers:
+pick the one the PC shows, then confirm with your fingerprint. A wrong number refuses the request. If the app is in
+front, the numbers open directly. After three refusals from a PC within 10 minutes, its requests are ignored for 5
+minutes. On a locked phone the reason is hidden and you unlock first.
 
 It needs a strong (Class 3) biometric with at least one fingerprint enrolled, and is not available in developer
 mode. **Settings → Approvals** shows whether it is available. Adding or removing a fingerprint replaces the

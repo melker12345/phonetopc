@@ -20,11 +20,13 @@
     <!-- Fingerprint approval (APPROVAL.md §4.2) -->
     <string name="approval_channel_name">Approval requests</string>
     <string name="approval_channel_description">A paired PC asks you to confirm something with your fingerprint.</string>
-    <string name="approval_notification_title">%1$s asks for approval</string>
+    <string name="approval_notification_title">%1$s on %2$s asks for approval</string>
     <string name="approval_notification_public_title">A PC asks for approval</string>
     <string name="approval_notification_public_text">Unlock your phone to see what it is.</string>
-    <string name="decrypt_notification_title">%1$s asks to decrypt</string>
-    <string name="decrypt_prompt_title">Decrypt for %1$s</string>
+    <string name="decrypt_notification_title">%1$s on %2$s asks to decrypt</string>
+    <string name="approval_prompt_title">%1$s on %2$s</string>
+    <string name="decrypt_prompt_title">Decrypt for %1$s on %2$s</string>
+    <string name="approval_pick_number">Pick the number shown on your PC</string>
     <string name="approval_approve">Approve</string>
     <string name="approval_deny">Deny</string>
 

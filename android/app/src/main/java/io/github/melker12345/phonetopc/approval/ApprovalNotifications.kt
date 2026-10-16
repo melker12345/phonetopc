@@ -10,8 +10,8 @@ import io.github.melker12345.phonetopc.R
 
 /**
  * The heads-up notification of APPROVAL.md §4.2: channel "Approval requests", title
- * "<PC name> asks for approval" (or "asks to decrypt", DECRYPT.md §4), text = reason, actions
- * Approve and Deny.
+ * "<program> on <PC name> asks for approval" (or "asks to decrypt", DECRYPT.md §4), text =
+ * reason, actions Approve and Deny. It never shows the numbers to pick from.
  */
 object ApprovalNotifications {
     const val CHANNEL_ID = "approval"
@@ -54,6 +54,7 @@ object ApprovalNotifications {
         ).build()
         val title = context.getString(
             if (request.decrypt) R.string.decrypt_notification_title else R.string.approval_notification_title,
+            request.program,
             request.pcName,
         )
         // What the lock screen shows unless the user allows sensitive content there.
