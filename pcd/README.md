@@ -25,10 +25,52 @@ cd pcd
 CGO_ENABLED=0 go build -o bin/ ./cmd/...     # bin/phonetopc, bin/phonetopcd, bin/age-plugin-phonetopc, bin/phonetopc-mock
 ```
 
+## Install the daemon
+
+```sh
+sudo bin/phonetopc daemon install --system   # recommended
+curl localhost:8767/v1/status
+curl -N 'localhost:8767/v1/events?source=gyro&rate=20'
+```
+
+`daemon install --system` runs `phonetopcd` as a system service, as its own user `phonetopc`: programs running as
+you can't stop it, take its place or read its keys and tokens. It copies `phonetopcd` to `/usr/local/bin`, installs
+the units of `systemd/system/` in `/etc/systemd/system` and the user and group in `/etc/sysusers.d`, and starts the
+service when a program first connects, the way `ssh.socket` starts sshd. It offers to move your existing pairings
+to `/var/lib/phonetopc` and to add you to the group `phonetopc-users`, whose members may use it (from their next
+login; add others with `sudo usermod -aG phonetopc-users <user>`). `sudo phonetopc daemon uninstall --system`
+removes the service and keeps the pairings. Logs: `journalctl -u phonetopcd`.
+
+Without root, `phonetopc daemon install` runs it as you instead (systemd user units; `phonetopc pair` offers it at
+the end, and `daemon uninstall` removes them). Without systemd, run `bin/phonetopcd` yourself.
+
+Either way it serves on `localhost:8767` and on a Unix socket: `/run/phonetopc/phonetopc.sock`, or
+`$XDG_RUNTIME_DIR/phonetopc.sock` as you. Who may use which is in [`LOCAL-API.md`](../spec/LOCAL-API.md) §1. It
+reconnects by itself when the phone comes back.
+
+| Flag | Meaning |
+|---|---|
+| `--system` | Run as the system service: pairings in `$STATE_DIRECTORY` or `/var/lib/phonetopc`, socket `/run/phonetopc/phonetopc.sock`, no token |
+| `--store DIR` | The pairings (default `~/.config/phonetopc`) |
+| `--group G` | Members of group G may use it (default with `--system`: `phonetopc-users`) |
+| `--device D` | Paired phone to use, by name or id (`$PHONETOPC_DEVICE`); needed only when several are paired |
+| `--addr host:port` | Connect to this address instead of looking for the phone (`$PHONETOPC_ADDR`) |
+| `--insecure-dev` | Plaintext `ws://` to a phone in developer mode, or the mock without `--state` (`$PHONETOPC_INSECURE_DEV=1`) |
+| `--no-mdns` | Don't look for the phone with mDNS (`$PHONETOPC_NO_MDNS=1`) |
+| `--socket PATH` | Unix socket (default `$XDG_RUNTIME_DIR/phonetopc.sock`); `off` turns it off |
+| `--listen ADDR` | Loopback TCP address (default `127.0.0.1:8767`); `off` turns it off |
+| `--token-file PATH` | Where the TCP token is kept (default `$XDG_RUNTIME_DIR/phonetopc.token`) |
+| `-v` | Log every reconnect attempt, not only new errors |
+| `--version` | Print the version |
+
+Started by systemd, it serves the sockets systemd holds, and `--socket` and `--listen` are ignored. The system
+service's options go in a drop-in: `sudo systemctl edit phonetopcd`.
+
 ## Pair with a phone
 
 ```sh
-bin/phonetopc pair
+sudo bin/phonetopc pair     # with the system service
+bin/phonetopc pair          # without it
 ```
 
 This prints a QR code and also advertises the PC on the network. On the phone, open phonetopc → *Pair a PC*, then
@@ -46,39 +88,11 @@ details are in [`SECURITY.md`](../spec/SECURITY.md) §4.
 | `--listen ADDR` | Listen address (default `:8766`; a random port if 8766 is busy) |
 | `--host H[,H...]` | Addresses to put in the QR code (default: all LAN addresses) |
 
-Pairings are stored in `~/.config/phonetopc/` (`$XDG_CONFIG_HOME`), as described in `SECURITY.md` §6. The token in
-`devices.json` is a credential, like an SSH key.
-
-## Run the daemon
-
-```sh
-bin/phonetopc daemon install     # start phonetopcd whenever a program connects to it
-curl localhost:8767/v1/status
-curl -N 'localhost:8767/v1/events?source=gyro&rate=20'
-```
-
-`daemon install` writes systemd user units (from `systemd/`) that hold the daemon's sockets and start it on the
-first connection, the way `ssh.socket` starts sshd; `phonetopc pair` offers it at the end. `phonetopc daemon
-uninstall` removes them. Without systemd, run `bin/phonetopcd` yourself, e.g. from your desktop's autostart. Logs:
-`journalctl --user -u phonetopcd`.
-
-It serves on `localhost:8767` and on a Unix socket, `$XDG_RUNTIME_DIR/phonetopc.sock`. On Linux your own programs
-need no token; web pages and other users need the one in `$XDG_RUNTIME_DIR/phonetopc.token`
-([`LOCAL-API.md`](../spec/LOCAL-API.md) §1). It reconnects by itself when the phone comes back.
-
-| Flag | Meaning |
-|---|---|
-| `--device D` | Paired phone to use, by name or id (`$PHONETOPC_DEVICE`); needed only when several are paired |
-| `--addr host:port` | Connect to this address instead of looking for the phone (`$PHONETOPC_ADDR`) |
-| `--insecure-dev` | Plaintext `ws://` to a phone in developer mode, or the mock without `--state` (`$PHONETOPC_INSECURE_DEV=1`) |
-| `--no-mdns` | Don't look for the phone with mDNS (`$PHONETOPC_NO_MDNS=1`) |
-| `--socket PATH` | Unix socket (default `$XDG_RUNTIME_DIR/phonetopc.sock`); `off` turns it off |
-| `--listen ADDR` | Loopback TCP address (default `127.0.0.1:8767`); `off` turns it off |
-| `--token-file PATH` | Where the TCP token is kept (default `$XDG_RUNTIME_DIR/phonetopc.token`) |
-| `-v` | Log every reconnect attempt, not only new errors |
-| `--version` | Print the version |
-
-Started by systemd, it serves the sockets systemd holds, and `--socket` and `--listen` are ignored.
+With the system service, the pairing happens in the daemon and is stored in `/var/lib/phonetopc`; the commands
+below ask the daemon, and `pair`, `unpair` and `approval-key --accept` need `sudo`. They use the service whenever
+`/run/phonetopc/phonetopc.sock` exists; `PHONETOPC_MODE=user` or `system` picks one. Without it, pairings are
+stored in `~/.config/phonetopc/` (`$XDG_CONFIG_HOME`), as described in `SECURITY.md` §6; the token in
+`devices.json` is then a credential readable by every program you run, like an SSH key.
 
 ## Use the CLI
 
@@ -109,8 +123,9 @@ bin/phonetopc pc                            # this PC's id, name and pin
 | `approve "reason"` | Ask for approval with a fingerprint on the phone |
 | `approval-key` | Show the phone's accepted and current approval key, and what its hardware proved about it |
 | `notify "title"` | Post a notification on the phone and print its id |
-| `daemon install` | Start `phonetopcd` whenever a program connects to it (systemd user units) |
-| `daemon uninstall` | Undo `daemon install` |
+| `daemon install --system` | Run `phonetopcd` as a system service, as its own user (with `sudo`) |
+| `daemon install` | Start `phonetopcd` as you whenever a program connects to it (systemd user units) |
+| `daemon uninstall [--system]` | Undo `daemon install` |
 
 | Flag | Meaning |
 |---|---|

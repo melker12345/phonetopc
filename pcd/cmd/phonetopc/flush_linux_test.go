@@ -50,7 +50,7 @@ func TestPrompterFlushesUnfinishedLine(t *testing.T) {
 
 	got := make(chan bool, 1)
 	go func() {
-		ok, _ := p.ConfirmQR(context.Background(), pairing.PhoneInfo{ID: "635f3a01db1859bc", Name: "Pixel"})
+		ok, _ := p.ConfirmQR(context.Background(), pairing.PhoneInfo{ID: "635f3a01db1859bc", Name: "Pixel"}, nil)
 		got <- ok
 	}()
 	waitFor(t, &out, "[y/N]")

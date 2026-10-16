@@ -29,6 +29,7 @@ func testEnv(t *testing.T, extra map[string]string) map[string]string {
 		"XDG_CONFIG_HOME":   t.TempDir(),
 		"HOME":              "/nonexistent",
 		"PHONETOPC_NO_MDNS": "1",
+		"PHONETOPC_MODE":    "user",
 	}
 	for k, v := range extra {
 		env[k] = v

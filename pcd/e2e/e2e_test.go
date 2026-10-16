@@ -104,6 +104,7 @@ func newEnv(t *testing.T) testEnv {
 		"XDG_CONFIG_HOME=" + t.TempDir(),
 		"TMPDIR=" + t.TempDir(),
 		"PHONETOPC_NO_MDNS=1",
+		"PHONETOPC_MODE=user",
 	}}
 }
 

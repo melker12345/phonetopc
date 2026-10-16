@@ -52,6 +52,12 @@ func (c *cli) notify(ctx context.Context, args []string) error {
 	if err := protocol.CheckNotify(protocol.NotifyParams{Title: pos[0], Body: opts.Body, ID: opts.ID, Actions: opts.Actions}); err != nil {
 		return usageErr{fmt.Errorf("notify: %w", err)}
 	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.notifyViaDaemon(ctx, api, protocol.NotifyParams{Title: pos[0], Body: opts.Body, ID: opts.ID, Actions: opts.Actions, Priority: priority(opts.High)}, *wait)
+	}
 	cl, err := c.dial(ctx)
 	if err != nil {
 		return err

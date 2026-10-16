@@ -115,6 +115,7 @@ func newPhoneAttested(t *testing.T, attested bool) *phone {
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
 	t.Setenv("PHONETOPC_ADDR", strings.TrimPrefix(hs.URL, "https://"))
 	t.Setenv("PHONETOPC_NO_MDNS", "1")
+	t.Setenv("PHONETOPC_MODE", "user")
 	t.Setenv("PHONETOPC_DEVICE", "")
 
 	bin := t.TempDir()

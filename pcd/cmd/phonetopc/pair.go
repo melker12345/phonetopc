@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -16,15 +15,12 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/internal/discovery"
 	"github.com/melker12345/phonetopc/pcd/internal/pairing"
-	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/pairrun"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 	"github.com/melker12345/phonetopc/pcd/internal/store"
 )
 
-// defaultPairListen is replaced in tests.
 const defaultPairPort = pairing.DefaultPort
-
-var defaultPairListen = fmt.Sprintf(":%d", defaultPairPort)
 
 func (c *cli) storeDir() (string, error) { return store.DefaultDir(c.getenv) }
 
@@ -49,141 +45,66 @@ func (h *hostList) Set(s string) error {
 	return nil
 }
 
+type pairFlags struct {
+	yes     bool
+	png     string
+	timeout time.Duration
+	listen  string
+	hosts   []string
+}
+
 func (c *cli) pair(ctx context.Context, args []string) error {
 	fs := c.flagSet("pair")
-	yes := fs.Bool("yes", false, "")
-	png := fs.String("png", "", "")
-	timeout := fs.Duration("timeout", 5*time.Minute, "")
-	listen := fs.String("listen", "", "")
+	var f pairFlags
+	fs.BoolVar(&f.yes, "yes", false, "")
+	fs.StringVar(&f.png, "png", "", "")
+	fs.DurationVar(&f.timeout, "timeout", 5*time.Minute, "")
+	fs.StringVar(&f.listen, "listen", "", "")
 	var hosts hostList
 	fs.Var(&hosts, "host", "")
 	if _, err := parse(fs, args, 0, ""); err != nil {
 		return err
 	}
-	if *timeout <= 0 {
+	f.hosts = hosts
+	if f.timeout <= 0 {
 		return usageErr{errors.New("--timeout must be positive")}
+	}
+	api, err := c.system()
+	if err != nil {
+		return err
+	}
+	if api != nil {
+		return c.pairViaDaemon(ctx, api, f)
 	}
 	st, err := c.store()
 	if err != nil {
 		return err
 	}
-	pc, err := st.PC()
-	if err != nil {
-		return fmt.Errorf("loading this PC's identity: %w", err)
-	}
-
-	ln, randomPort, err := listenPair(*listen)
-	if err != nil {
-		return err
-	}
-	defer ln.Close()
-	port := ln.Addr().(*net.TCPAddr).Port
-	if randomPort {
-		fmt.Fprintf(c.stderr, "phonetopc: port %d is busy; listening on random port %d instead\n", defaultPairPort, port)
-	}
-	if len(hosts) == 0 {
-		hosts = qrHosts(ln.Addr().(*net.TCPAddr).IP)
-	}
-	if len(hosts) == 0 {
-		fmt.Fprintln(c.stderr, "phonetopc: warning: no LAN address found; the QR code only works on this machine")
-		hosts = []string{"127.0.0.1"}
-	}
-
-	showQR := func(secret string) error {
-		uri := pairing.URI{ID: pc.ID, Name: pc.Name, Hosts: hosts, Port: port, Pin: pc.Pin, Secret: secret}.String()
-		if err := writeQR(c.rawStdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stdout, "\n    %s\n\n", uri)
-		if *png != "" {
-			if err := writePNG(*png, uri); err != nil {
-				return err
-			}
-			fmt.Fprintf(c.stdout, "    (also written to %s)\n\n", *png)
-		}
-		return nil
-	}
-
-	prompt := newTermPrompter(c.stdin, c.stdout, *yes, isTerminal(c.stdin))
-	prompt.stored = func(phone pairing.PhoneInfo) (store.Device, bool) { return stored(st, phone) }
-	l, err := pairing.New(pairing.Options{
-		PC:     protocol.PCInfo{ID: pc.ID, Name: pc.Name},
-		Cert:   pc.Cert,
-		Prompt: prompt,
-		NewSecret: func(secret string) {
-			fmt.Fprintf(c.stdout, "\nThe QR code changed (the last one was used without pairing, maybe from a photo). Scan this one:\n\n")
-			if err := showQR(secret); err != nil {
-				fmt.Fprintf(c.stderr, "phonetopc: %v\n", err)
-			}
-		},
-		// --yes can't compare codes, so Find on network is off (SECURITY.md §4.3).
-		NoSAS:  *yes,
-		Expiry: *timeout,
-		Logf:   func(format string, a ...any) { fmt.Fprintf(c.stderr, "phonetopc: "+format+"\n", a...) },
-		Save: func(p pairing.Paired) error {
-			addrs := slices.Clone(p.Phone.Addresses)
-			if p.RemoteHost != "" && !slices.Contains(addrs, p.RemoteHost) {
-				addrs = append(addrs, p.RemoteHost)
-			}
-			oldPin, ok := prompt.shown(p.Phone)
-			if !ok {
-				return errors.New("the pairing was not confirmed")
-			}
-			err := st.PutDeviceIf(store.Device{
-				ID: p.Phone.ID, Name: p.Phone.Name, Pin: p.Phone.Pin, Token: p.Token,
-				Port: p.Phone.Port, Addresses: addrs, PairedAt: store.Now(time.Now()),
-			}, oldPin)
-			if errors.Is(err, store.ErrDeviceChanged) {
-				fmt.Fprintf(c.stderr, "phonetopc: not saved: another phonetopc changed the pairing with %q (id %s) "+
-					"while you were asked; the phone may try again\n", p.Phone.Name, p.Phone.ID)
-			}
-			return err
-		},
+	prompt := newTermPrompter(c.stdin, c.stdout, f.yes, isTerminal(c.stdin))
+	s, err := pairrun.Start(pairrun.Options{
+		Store: st, Ask: prompt, Yes: f.yes, Listen: f.listen, Hosts: f.hosts, NoMDNS: c.noMDNS, Expiry: f.timeout,
+		NewQR: func(uri string) { c.showNewQR(uri, f.png) },
+		Logf:  func(format string, a ...any) { fmt.Fprintf(c.stderr, "phonetopc: "+format+"\n", a...) },
 	})
 	if err != nil {
 		return err
 	}
-
-	fmt.Fprintf(c.stdout, "Pairing %q. On the phone, open phonetopc → Pair a PC, then either:\n\n", pc.Name)
-	fmt.Fprintln(c.stdout, "  • Scan QR code:")
-	fmt.Fprintln(c.stdout)
-	if err := showQR(l.Secret()); err != nil {
+	if s.MDNSErr != nil {
+		fmt.Fprintf(c.stderr, "phonetopc: mDNS unavailable (%v); use the QR code\n", s.MDNSErr)
+	}
+	err = c.showPairing(pairShown{
+		pcName: s.PC.Name, pcPin: s.PC.Pin, uri: s.URI(), port: s.Port, randomPort: s.RandomPort,
+		noLAN: len(s.Hosts) == 0, advertised: s.Advertised,
+	}, f)
+	if err != nil {
+		s.Close()
 		return err
 	}
-
-	var adv *discovery.Advertiser
-	if *yes {
-		fmt.Fprintln(c.stdout, "  (--yes: only the QR code works; \"Find on network\" needs you to compare codes.)")
-		fmt.Fprintln(c.stdout)
-	} else if !c.noMDNS {
-		adv, err = discovery.Advertise(pc.Name, discovery.ServicePair, port, map[string]string{"id": pc.ID, "n": pc.Name, "v": "1"})
-		if err != nil {
-			fmt.Fprintf(c.stderr, "phonetopc: mDNS unavailable (%v); use the QR code\n", err)
-		}
-	}
-	if adv != nil {
-		defer adv.Stop()
-		fmt.Fprintf(c.stdout, "  • Or tap Find on network → %q, and compare the 6-digit codes.\n\n", pc.Name)
-	}
-	writeFirewallHint(c.stdout, detectFirewalls(), port, discovery.LANPrefixes(), randomPort)
-	fmt.Fprintf(c.stdout, "This PC's pin: %s\nWaiting for the phone (listening on port %d, for %v; Ctrl-C to cancel)…\n", pc.Pin, port, *timeout)
-
-	res, err := l.Serve(ctx, ln)
-	switch {
-	case errors.Is(err, pairing.ErrExpired):
-		return fmt.Errorf("no phone paired within %v; run `phonetopc pair` again", *timeout)
-	case errors.Is(err, pairing.ErrSASLimit):
-		return errors.New("pairing stopped: too many code comparisons failed or were abandoned " +
-			"(someone may be trying to pair in your phone's place); run `phonetopc pair` again, or scan the QR code")
-	case err != nil:
+	res, err := s.Serve(ctx)
+	if err := c.pairDone(err, string(res.Way), res.Phone.Name, res.Phone.ID, f.timeout); err != nil {
 		return err
 	}
-	how := "QR code"
-	if res.Way == pairing.WaySAS {
-		how = "code comparison"
-	}
-	fmt.Fprintf(c.stdout, "\nPaired with %q (id %s) by %s.\nTry: phonetopc info\n", res.Phone.Name, res.Phone.ID, how)
-	if !*yes && isTerminal(c.stdin) && !c.daemonInstalled() {
+	if !f.yes && isTerminal(c.stdin) && !c.daemonInstalled() {
 		fmt.Fprintln(c.stdout)
 		if ok, _ := prompt.ask(ctx, "Start phonetopcd automatically when a program uses it? [Y/n]", true); ok {
 			return c.installDaemon(ctx)
@@ -192,72 +113,98 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	return nil
 }
 
-// stored returns the stored device with phone's id.
-func stored(st *store.Store, phone pairing.PhoneInfo) (store.Device, bool) {
-	devs, err := st.Devices()
-	if err != nil {
-		return store.Device{}, false // Save reports a broken store
-	}
-	i := slices.IndexFunc(devs, func(d store.Device) bool { return d.ID == phone.ID })
-	if i < 0 {
-		return store.Device{}, false
-	}
-	return devs[i], true
+// pairShown is what `phonetopc pair` shows once it listens.
+type pairShown struct {
+	pcName, pcPin, uri string
+	port               int
+	randomPort, noLAN  bool
+	advertised         bool
 }
 
-// listenPair opens the pairing listener's socket: on addr if given,
-// otherwise on the default port 8766, falling back to a random port if that
-// is busy (randomPort true).
-func listenPair(addr string) (ln net.Listener, randomPort bool, err error) {
-	if addr != "" {
-		ln, err = net.Listen("tcp", addr)
-		return ln, false, err
+func (c *cli) showPairing(p pairShown, f pairFlags) error {
+	if p.randomPort {
+		fmt.Fprintf(c.stderr, "phonetopc: port %d is busy; listening on random port %d instead\n", defaultPairPort, p.port)
 	}
-	if ln, err = net.Listen("tcp", defaultPairListen); err == nil {
-		return ln, false, nil
+	if p.noLAN {
+		fmt.Fprintln(c.stderr, "phonetopc: warning: no LAN address found; the QR code only works on this machine")
 	}
-	host, _, _ := net.SplitHostPort(defaultPairListen)
-	ln, err2 := net.Listen("tcp", net.JoinHostPort(host, "0"))
-	if err2 != nil {
-		return nil, false, err
+	fmt.Fprintf(c.stdout, "Pairing %q. On the phone, open phonetopc → Pair a PC, then either:\n\n", p.pcName)
+	fmt.Fprintln(c.stdout, "  • Scan QR code:")
+	fmt.Fprintln(c.stdout)
+	if err := c.showQR(p.uri, f.png); err != nil {
+		return err
 	}
-	return ln, true, nil
+	if f.yes {
+		fmt.Fprintln(c.stdout, "  (--yes: only the QR code works; \"Find on network\" needs you to compare codes.)")
+		fmt.Fprintln(c.stdout)
+	} else if p.advertised {
+		fmt.Fprintf(c.stdout, "  • Or tap Find on network → %q, and compare the 6-digit codes.\n\n", p.pcName)
+	}
+	writeFirewallHint(c.stdout, detectFirewalls(), p.port, discovery.LANPrefixes(), p.randomPort)
+	fmt.Fprintf(c.stdout, "This PC's pin: %s\nWaiting for the phone (listening on port %d, for %v; Ctrl-C to cancel)…\n", p.pcPin, p.port, f.timeout)
+	return nil
 }
 
-// qrHosts picks the addresses to put in the QR code for a listener on ip.
-func qrHosts(ip net.IP) []string {
-	if ip != nil && !ip.IsUnspecified() {
-		return []string{ip.String()}
+func (c *cli) showQR(uri, png string) error {
+	if err := writeQR(c.rawStdout, uri, c.getenv("NO_COLOR") == ""); err != nil {
+		return err
 	}
-	return discovery.LANAddresses()
+	fmt.Fprintf(c.stdout, "\n    %s\n\n", uri)
+	if png != "" {
+		if err := writePNG(png, uri); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "    (also written to %s)\n\n", png)
+	}
+	return nil
 }
 
-func (c *cli) devices(args []string) error {
+func (c *cli) showNewQR(uri, png string) {
+	fmt.Fprintf(c.stdout, "\nThe QR code changed (the last one was used without pairing, maybe from a photo). Scan this one:\n\n")
+	if err := c.showQR(uri, png); err != nil {
+		fmt.Fprintf(c.stderr, "phonetopc: %v\n", err)
+	}
+}
+
+// pairDone reports how the pairing ended.
+func (c *cli) pairDone(err error, way, name, id string, timeout time.Duration) error {
+	switch {
+	case errors.Is(err, pairing.ErrExpired):
+		return fmt.Errorf("no phone paired within %v; run `phonetopc pair` again", timeout)
+	case errors.Is(err, pairing.ErrSASLimit):
+		return errors.New("pairing stopped: too many code comparisons failed or were abandoned " +
+			"(someone may be trying to pair in your phone's place); run `phonetopc pair` again, or scan the QR code")
+	case err != nil:
+		return err
+	}
+	how := "QR code"
+	if way == string(pairing.WaySAS) {
+		how = "code comparison"
+	}
+	fmt.Fprintf(c.stdout, "\nPaired with %q (id %s) by %s.\nTry: phonetopc info\n", name, id, how)
+	return nil
+}
+
+// listedDevice is a devices.json entry without the token.
+type listedDevice struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Pin       string   `json:"pin"`
+	Port      int      `json:"port"`
+	Addresses []string `json:"addresses"`
+	PairedAt  string   `json:"paired_at"`
+}
+
+func (c *cli) devices(ctx context.Context, args []string) error {
 	if _, err := parse(c.flagSet("devices"), args, 0, ""); err != nil {
 		return err
 	}
-	st, err := c.store()
+	devs, err := c.listDevices(ctx)
 	if err != nil {
 		return err
-	}
-	devs, err := st.Devices()
-	if err != nil {
-		return err
-	}
-	type pub struct { // devices.json without the token
-		ID        string   `json:"id"`
-		Name      string   `json:"name"`
-		Pin       string   `json:"pin"`
-		Port      int      `json:"port"`
-		Addresses []string `json:"addresses"`
-		PairedAt  string   `json:"paired_at"`
 	}
 	if c.json {
-		out := make([]pub, len(devs))
-		for i, d := range devs {
-			out[i] = pub{d.ID, d.Name, d.Pin, d.Port, d.Addresses, d.PairedAt}
-		}
-		return c.printJSON(map[string]any{"devices": out})
+		return c.printJSON(map[string]any{"devices": devs})
 	}
 	if len(devs) == 0 {
 		fmt.Fprintln(c.stdout, "No paired phones. Run `phonetopc pair`.")
@@ -275,40 +222,88 @@ func (c *cli) devices(args []string) error {
 	return tw.Flush()
 }
 
-func (c *cli) unpair(args []string) error {
+func (c *cli) listDevices(ctx context.Context) ([]listedDevice, error) {
+	api, err := c.system()
+	if err != nil {
+		return nil, err
+	}
+	if api != nil {
+		return devicesViaDaemon(ctx, api)
+	}
+	st, err := c.store()
+	if err != nil {
+		return nil, err
+	}
+	devs, err := st.Devices()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]listedDevice, len(devs))
+	for i, d := range devs {
+		out[i] = listedDevice{d.ID, d.Name, d.Pin, d.Port, d.Addresses, d.PairedAt}
+	}
+	return out, nil
+}
+
+func (c *cli) unpair(ctx context.Context, args []string) error {
 	pos, err := parse(c.flagSet("unpair"), args, 1, "device")
 	if err != nil {
 		return err
 	}
-	st, err := c.store()
+	api, err := c.system()
 	if err != nil {
 		return err
 	}
-	d, err := st.RemoveDevice(pos[0])
-	if err != nil {
-		return err
+	var id, name string
+	if api != nil {
+		if id, name, err = unpairViaDaemon(ctx, api, pos[0]); err != nil {
+			return err
+		}
+	} else {
+		st, err := c.store()
+		if err != nil {
+			return err
+		}
+		d, err := st.RemoveDevice(pos[0])
+		if err != nil {
+			return err
+		}
+		id, name = d.ID, d.Name
 	}
-	fmt.Fprintf(c.stdout, "Forgot %q (id %s).\nAlso revoke this PC on the phone (Paired devices), so its token stops working there.\n", d.Name, d.ID)
+	fmt.Fprintf(c.stdout, "Forgot %q (id %s).\nAlso revoke this PC on the phone (Paired devices), so its token stops working there.\n", name, id)
 	return nil
 }
 
-func (c *cli) pc(args []string) error {
+func (c *cli) pc(ctx context.Context, args []string) error {
 	if _, err := parse(c.flagSet("pc"), args, 0, ""); err != nil {
 		return err
 	}
-	st, err := c.store()
+	api, err := c.system()
 	if err != nil {
 		return err
 	}
-	pc, err := st.PC()
-	if err != nil {
-		return err
+	var id, name, pin, dir string
+	if api != nil {
+		if id, name, pin, err = pcViaDaemon(ctx, api); err != nil {
+			return err
+		}
+		dir = "phonetopcd at " + api.Socket()
+	} else {
+		st, err := c.store()
+		if err != nil {
+			return err
+		}
+		pc, err := st.PC()
+		if err != nil {
+			return err
+		}
+		id, name, pin, dir = pc.ID, pc.Name, pc.Pin, st.Dir()
 	}
 	if c.json {
-		return c.printJSON(map[string]string{"id": pc.ID, "name": pc.Name, "pin": pc.Pin, "dir": st.Dir()})
+		return c.printJSON(map[string]string{"id": id, "name": name, "pin": pin, "dir": dir})
 	}
 	tw := tabwriter.NewWriter(c.stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "id\t%s\nname\t%s\npin\t%s\nstore\t%s\n", pc.ID, pc.Name, pc.Pin, st.Dir())
+	fmt.Fprintf(tw, "id\t%s\nname\t%s\npin\t%s\nstore\t%s\n", id, name, pin, dir)
 	return tw.Flush()
 }
 
@@ -322,17 +317,11 @@ type termPrompter struct {
 	// fresh drops lines typed while no question is waiting (stdin is a
 	// terminal): a stray Enter pressed while waiting for the phone must not
 	// answer a later question. Piped answers are kept for the next one.
-	fresh  bool
-	stored func(pairing.PhoneInfo) (store.Device, bool)
+	fresh bool
 
 	once sync.Once
 	ch   chan string // closed at EOF
 	mu   sync.Mutex  // one prompt at a time
-
-	shownMu sync.Mutex
-	// shownPins holds, per phone id and pin, the pin stored for that id when
-	// the user was asked ("" for none): Save replaces only that entry.
-	shownPins map[[2]string]string
 }
 
 func newTermPrompter(in io.Reader, out io.Writer, yes, fresh bool) *termPrompter {
@@ -407,41 +396,19 @@ func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool
 	}
 }
 
-func (p *termPrompter) shown(phone pairing.PhoneInfo) (oldPin string, ok bool) {
-	p.shownMu.Lock()
-	defer p.shownMu.Unlock()
-	oldPin, ok = p.shownPins[[2]string{phone.ID, phone.Pin}]
-	return oldPin, ok
-}
-
-// replacing looks up the device phone would replace, remembers it for Save,
-// and warns if its key differs: the phone was reset or reinstalled, or
-// someone else claims its id.
-func (p *termPrompter) replacing(phone pairing.PhoneInfo) bool {
-	var old store.Device
-	var ok bool
-	if p.stored != nil {
-		old, ok = p.stored(phone)
-	}
-	p.shownMu.Lock()
-	if p.shownPins == nil {
-		p.shownPins = map[[2]string]string{}
-	}
-	p.shownPins[[2]string{phone.ID, phone.Pin}] = old.Pin
-	p.shownMu.Unlock()
-	if !ok || old.Pin == phone.Pin {
-		return false
-	}
+// warnReplacing warns that a pairing replaces old, whose key differs: the
+// phone was reset or reinstalled, or someone else claims its id.
+func (p *termPrompter) warnReplacing(old *store.Device) {
 	fmt.Fprintf(p.out, "\nWarning: %q (id %s) is already paired, with a different key.\n"+
 		"Pairing replaces it, and this PC then trusts the new key, also for `phonetopc approve`.\n"+
 		"Accept only if phonetopc was reset or reinstalled on that phone.\n", old.Name, old.ID)
-	return true
 }
 
-func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo) (bool, error) {
+func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo, replaces *store.Device) (bool, error) {
 	// No default: whoever photographed the QR code may be the one asking.
 	question := fmt.Sprintf("\nPair with %q? [y/N]", phone.Name)
-	if p.replacing(phone) {
+	if replaces != nil {
+		p.warnReplacing(replaces)
 		if p.yes {
 			fmt.Fprintln(p.out, "Refused: --yes never replaces a phone paired with a different key; pair without --yes.")
 			return false, nil
@@ -457,12 +424,14 @@ func (p *termPrompter) ConfirmQR(ctx context.Context, phone pairing.PhoneInfo) (
 	return p.ask(ctx, question, false)
 }
 
-func (p *termPrompter) ConfirmSAS(ctx context.Context, phone pairing.PhoneInfo, code string) (bool, error) {
+func (p *termPrompter) ConfirmSAS(ctx context.Context, phone pairing.PhoneInfo, replaces *store.Device, code string) (bool, error) {
 	if p.yes { // the listener refuses SAS under --yes already
 		fmt.Fprintf(p.out, "\nRefused a code comparison with %q: --yes can't compare codes.\n", phone.Name)
 		return false, nil
 	}
-	p.replacing(phone)
+	if replaces != nil {
+		p.warnReplacing(replaces)
+	}
 	fmt.Fprintf(p.out, "\n%q wants to pair. Pairing code:  %s\n", phone.Name, security.FormatCode(code))
 	return p.ask(ctx, fmt.Sprintf("Does the phone show %s? [y/N]", security.FormatCode(code)), false)
 }

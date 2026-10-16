@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"io/fs"
-	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -60,44 +59,6 @@ func TestFirewallHint(t *testing.T) {
 	writeFirewallHint(&b, []firewall{fwFirewalld}, 40000, nil, true)
 	if !strings.Contains(b.String(), "--add-port=40000/tcp") || !strings.Contains(b.String(), "8766 was busy") {
 		t.Errorf("firewalld hint:\n%s", b.String())
-	}
-}
-
-func TestPairDefaultPortFallback(t *testing.T) {
-	busy, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer busy.Close()
-	old := defaultPairListen
-	defaultPairListen = busy.Addr().String()
-	defer func() { defaultPairListen = old }()
-
-	ln, random, err := listenPair("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	if !random || ln.Addr().String() == busy.Addr().String() {
-		t.Errorf("want a random port, got %v (random %v)", ln.Addr(), random)
-	}
-	ln.Close()
-
-	// The default port itself when it is free.
-	port := busy.Addr().(*net.TCPAddr).Port
-	busy.Close()
-	ln, random, err = listenPair("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	if random || ln.Addr().(*net.TCPAddr).Port != port {
-		t.Errorf("want port %d, got %v (random %v)", port, ln.Addr(), random)
-	}
-
-	// An explicit --listen that fails is an error, without fallback.
-	if _, _, err := listenPair(ln.Addr().String()); err == nil {
-		t.Error("explicit busy --listen succeeded")
 	}
 }
 

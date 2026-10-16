@@ -19,6 +19,7 @@ import (
 
 	"github.com/melker12345/phonetopc/pcd/client"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
+	"github.com/melker12345/phonetopc/pcd/internal/security"
 	"github.com/melker12345/phonetopc/pcd/internal/version"
 )
 
@@ -93,6 +94,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func generate(ctx context.Context, device string, unattested bool, out io.Writer) error {
+	api, err := systemAPI()
+	if err != nil {
+		return err
+	}
+	if api != nil {
+		id, name, k, err := generateViaDaemon(ctx, api, device, unattested)
+		if err != nil {
+			return err
+		}
+		spki, err := security.DecodeB64(k.Key)
+		if err != nil {
+			return fmt.Errorf("phonetopcd sent a key that isn't base64url: %w", err)
+		}
+		return writeIdentity(out, id, name, k.Attestation, spki)
+	}
 	var opts []client.Option
 	if unattested {
 		opts = append(opts, client.WithUnattestedDecryptKey())
@@ -110,14 +126,21 @@ func generate(ctx context.Context, device string, unattested bool, out io.Writer
 		return err
 	}
 	dev := cl.Server().Device
-	data, err := encodeIdentity(dev.ID, k.SPKI)
+	return writeIdentity(out, dev.ID, dev.Name, k.Attestation, k.SPKI)
+}
+
+func writeIdentity(out io.Writer, id, phone, attestation string, spki []byte) error {
+	if _, err := parseRecipient(spki); err != nil {
+		return err
+	}
+	data, err := encodeIdentity(id, spki)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "# phone: %q (%s)\n", dev.Name, dev.ID)
+	fmt.Fprintf(out, "# phone: %q (%s)\n", phone, id)
 	fmt.Fprintf(out, "# created: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(out, "# attestation: %s\n", k.Attestation)
-	fmt.Fprintf(out, "# recipient: %s\n", plugin.EncodeRecipient(name, k.SPKI))
+	fmt.Fprintf(out, "# attestation: %s\n", attestation)
+	fmt.Fprintf(out, "# recipient: %s\n", plugin.EncodeRecipient(name, spki))
 	fmt.Fprintln(out, plugin.EncodeIdentity(name, data))
 	return nil
 }
@@ -151,6 +174,17 @@ var attestationRoots []*x509.Certificate
 // age to look at it.
 func askWith(p *plugin.Plugin) askPhone {
 	return func(ctx context.Context, deviceID, keyPin string, ciphertext []byte) ([]byte, error) {
+		api, err := systemAPI()
+		if err != nil {
+			return nil, err
+		}
+		if api != nil {
+			return decryptViaDaemon(ctx, api, deviceID, keyPin, ciphertext, func(msg string) {
+				if p == nil || p.DisplayMessage(msg) != nil {
+					fmt.Fprintln(os.Stderr, "age-plugin-phonetopc:", msg)
+				}
+			})
+		}
 		cl, err := dial(ctx, deviceID)
 		if err != nil {
 			return nil, err

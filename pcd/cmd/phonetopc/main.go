@@ -66,7 +66,15 @@ Commands:
                        answers to notifications)
   daemon install       start phonetopcd whenever a program connects to it
                        (installs and enables systemd user units)
-  daemon uninstall     undo daemon install
+  daemon install --system
+                       better: run phonetopcd as a system service, as its own
+                       user (run with sudo; offers to move your pairings)
+  daemon uninstall [--system]
+                       undo daemon install
+
+With the system service running (/run/phonetopc/phonetopc.sock), the commands
+use it instead of your own pairings, and pair, unpair and approval-key --accept
+need sudo. $PHONETOPC_MODE=user or system picks one way.
 
 Flags (accepted before or after the command):
   --device D           paired phone to use, by name or id ($PHONETOPC_DEVICE);
@@ -173,11 +181,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "pair":
 		err = c.pair(ctx, rest)
 	case "devices":
-		err = c.devices(rest)
+		err = c.devices(ctx, rest)
 	case "unpair":
-		err = c.unpair(rest)
+		err = c.unpair(ctx, rest)
 	case "pc":
-		err = c.pc(rest)
+		err = c.pc(ctx, rest)
 	case "approve":
 		err = c.approve(ctx, rest)
 	case "approval-key":
@@ -318,6 +326,12 @@ func (c *cli) info(ctx context.Context, args []string) error {
 	if _, err := parse(c.flagSet("info"), args, 0, ""); err != nil {
 		return err
 	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.infoViaDaemon(ctx, api)
+	}
 	cl, err := c.dial(ctx)
 	if err != nil {
 		return err
@@ -353,6 +367,12 @@ func (c *cli) list(ctx context.Context, args []string) error {
 	if _, err := parse(c.flagSet("list"), args, 0, ""); err != nil {
 		return err
 	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.listViaDaemon(ctx, api)
+	}
 	cl, err := c.dial(ctx)
 	if err != nil {
 		return err
@@ -362,6 +382,10 @@ func (c *cli) list(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	return c.printSensors(sensors)
+}
+
+func (c *cli) printSensors(sensors []client.SensorInfo) error {
 	if c.json {
 		return c.printJSON(protocol.ListSensorsResult{Sensors: sensors})
 	}
@@ -390,6 +414,12 @@ func (c *cli) get(ctx context.Context, args []string) error {
 	pos, err := parse(c.flagSet("get"), args, 1, "source")
 	if err != nil {
 		return err
+	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.getViaDaemon(ctx, api, pos[0])
 	}
 	cl, err := c.dial(ctx)
 	if err != nil {
@@ -420,6 +450,12 @@ func (c *cli) tail(ctx context.Context, args []string) error {
 	}
 	if opts.RateHz < 0 || opts.MinDelta < 0 {
 		return usageErr{errors.New("--rate and --min-delta must not be negative")}
+	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.tailViaDaemon(ctx, api, pos[0], opts, *count)
 	}
 	cl, err := c.dial(ctx)
 	if err != nil {

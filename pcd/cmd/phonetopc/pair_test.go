@@ -286,7 +286,7 @@ func TestPrompterDropsEarlyInput(t *testing.T) {
 	ask := func() <-chan answer {
 		ch := make(chan answer, 1)
 		go func() {
-			ok, err := p.ConfirmQR(context.Background(), phone)
+			ok, err := p.ConfirmQR(context.Background(), phone, nil)
 			ch <- answer{ok, err}
 		}()
 		return ch
@@ -315,7 +315,7 @@ func TestPrompterDropsEarlyInput(t *testing.T) {
 func TestPrompterQRNeedsExplicitYes(t *testing.T) {
 	var out syncBuffer
 	p := newTermPrompter(strings.NewReader("\n"), &out, false, false)
-	if ok, err := p.ConfirmQR(context.Background(), pairing.PhoneInfo{Name: "Pixel"}); ok || err != nil {
+	if ok, err := p.ConfirmQR(context.Background(), pairing.PhoneInfo{Name: "Pixel"}, nil); ok || err != nil {
 		t.Errorf("empty answer: %v %v", ok, err)
 	}
 	if !strings.Contains(out.String(), `Pair with "Pixel"? [y/N]`) {

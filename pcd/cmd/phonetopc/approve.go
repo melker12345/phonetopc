@@ -50,6 +50,12 @@ func (c *cli) approve(ctx context.Context, args []string) error {
 		}
 		return exitError{2, err}
 	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return fail(err)
+		}
+		return c.approveViaDaemon(ctx, api, pos[0], *timeout)
+	}
 	cl, err := c.dial(ctx)
 	if err != nil {
 		return fail(err)
@@ -95,6 +101,12 @@ func (c *cli) approvalKey(ctx context.Context, args []string) error {
 	}
 	if c.dev {
 		return errors.New("approval keys belong to paired phones; approvals don't exist in dev mode")
+	}
+	if api, err := c.system(); err != nil || api != nil {
+		if err != nil {
+			return err
+		}
+		return c.approvalKeyViaDaemon(ctx, api, *accept, *unattested)
 	}
 	st, err := c.store()
 	if err != nil {

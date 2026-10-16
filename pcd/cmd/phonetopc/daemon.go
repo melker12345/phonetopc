@@ -49,14 +49,19 @@ var findDaemon = func() (string, error) {
 
 func (c *cli) daemon(ctx context.Context, args []string) error {
 	fs := c.flagSet("daemon")
+	system := fs.Bool("system", false, "")
 	rest, err := parse(fs, args, 1, "of install or uninstall")
 	if err != nil {
 		return err
 	}
-	switch rest[0] {
-	case "install":
+	switch {
+	case rest[0] == "install" && *system:
+		return c.installSystem(ctx)
+	case rest[0] == "uninstall" && *system:
+		return c.uninstallSystem(ctx)
+	case rest[0] == "install":
 		return c.installDaemon(ctx)
-	case "uninstall":
+	case rest[0] == "uninstall":
 		return c.uninstallDaemon(ctx)
 	}
 	return usageErr{fmt.Errorf("unknown daemon command %q (want install or uninstall)", rest[0])}
@@ -80,6 +85,9 @@ func (c *cli) installDaemon(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if api, err := c.system(); err == nil && api != nil {
+		return fmt.Errorf("the phonetopcd system service is installed (%s); a user service would only get in its way", api.Socket())
+	}
 	if err := systemctl(ctx, "show-environment"); err != nil {
 		fmt.Fprintf(c.stderr, "phonetopc: no systemd user manager here (%v).\n"+
 			"Start %s yourself instead, e.g. from your session's autostart.\n", err, exe)
@@ -101,7 +109,9 @@ func (c *cli) installDaemon(ctx context.Context) error {
 		return fmt.Errorf("%w\n(a phonetopcd you started yourself holds the socket: stop it, then run `phonetopc daemon install` again)", err)
 	}
 	fmt.Fprintf(c.stdout, "Installed %s and %s in %s.\n"+
-		"phonetopcd now starts when a program connects, e.g.: curl localhost:8767/v1/status\n", systemd.Socket, systemd.Service, dir)
+		"phonetopcd now starts when a program connects, e.g.: curl localhost:8767/v1/status\n"+
+		"Safer: `sudo phonetopc daemon install --system` runs it as its own user, so other programs\n"+
+		"running as you can't stop it, take its place or read its keys.\n", systemd.Socket, systemd.Service, dir)
 	return nil
 }
 
