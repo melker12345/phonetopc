@@ -7,6 +7,8 @@ Fingerprint approval is in [`APPROVAL.md`](APPROVAL.md).
 
 ## 1. Goals and threat model
 
+The full threat model, attacker by attacker, is in [`THREAT-MODEL.md`](THREAT-MODEL.md).
+
 - **Attacker:** anyone on the same network, including one who can see, drop, change and inject traffic
   (café Wi-Fi, a compromised router). They may also glimpse the PC screen.
 - **Must hold:** after pairing, an attacker can neither read the sensor stream, nor connect to the phone as a
