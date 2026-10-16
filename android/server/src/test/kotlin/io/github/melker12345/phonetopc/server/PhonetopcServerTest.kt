@@ -29,8 +29,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 class PhonetopcServerTest {
@@ -148,12 +151,42 @@ class PhonetopcServerTest {
         return hub.clients.value.isEmpty()
     }
 
-    @Test fun clientThatOnlySendsIsClosedAfterHello() {
-        // Over the response limit. Without the TLS frontend the socket itself may linger (see
-        // SecureServerTest), but the session must end and stop queueing.
+    @Test fun clientThatOnlySendsIsDroppedAfterHello() {
+        // Over the response limit: the session ends, and the socket that couldn't take the
+        // close frame is dropped too.
         Flood(Socket("127.0.0.1", port), port, first = Flood.HELLO, request = Flood.LIST_SENSORS).use {
-            Thread.sleep(200)
-            assertTrue("session still open", awaitNoClients(10_000))
+            assertTrue("not dropped", it.awaitDropped(10_000))
+        }
+        assertTrue("session still open", awaitNoClients(2_000))
+    }
+
+    @Test fun silentClientIsClosedAfterHelloTimeout() {
+        val quick = PhonetopcServer(hub, port = 0, host = "127.0.0.1", helloTimeout = 300.milliseconds)
+        quick.start()
+        try {
+            val port = runBlocking { quick.boundPort() }
+            Socket("127.0.0.1", port).use { socket ->
+                socket.getOutputStream().write(
+                    ("GET $WS_PATH HTTP/1.1\r\nHost: 127.0.0.1:$port\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").toByteArray(),
+                )
+                // Read nothing until the server should have given up on it.
+                Thread.sleep(2_000)
+                socket.soTimeout = 3_000
+                val input = socket.getInputStream()
+                val closed = try {
+                    while (input.read() >= 0) Unit
+                    true
+                } catch (_: SocketTimeoutException) {
+                    false
+                } catch (_: IOException) {
+                    true
+                }
+                assertTrue("still open", closed)
+            }
+            assertTrue("session still open", awaitNoClients(2_000))
+        } finally {
+            quick.stop()
         }
     }
 

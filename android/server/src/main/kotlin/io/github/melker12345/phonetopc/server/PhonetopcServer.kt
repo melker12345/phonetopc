@@ -44,10 +44,12 @@ fun isPortInUse(e: Throwable): Boolean = generateSequence(e) { it.cause }.any { 
  * [io.github.melker12345.phonetopc.protocol.Session] per connection; any number of clients.
  *
  * - **Dev mode** ([tls] `null`): `ws://<host>:<port>`, no authentication (draft 1).
- * - **Secure mode**: `wss://<host>:<port>` (SECURITY.md §3). CIO can't serve TLS, so it listens
- *   on a loopback port behind a [TlsFrontend] on the public one. Give the [BridgeHub] a
+ * - **Secure mode**: `wss://<host>:<port>` (SECURITY.md §3). Give the [BridgeHub] a
  *   [io.github.melker12345.phonetopc.protocol.SecureAccess] so `hello` needs a token.
- *   Connections without a successful `hello` within [helloTimeout] are closed with 1008.
+ *
+ * CIO can't serve TLS, so it listens on a loopback port behind a [TlsFrontend] on the public
+ * one, in dev mode too (relaying plain TCP), so that a client that stops reading can be
+ * dropped. Connections without a successful `hello` within [helloTimeout] are closed with 1008.
  */
 class PhonetopcServer(
     private val hub: BridgeHub,
@@ -66,12 +68,6 @@ class PhonetopcServer(
     /** Blocking; call off the main thread. Throws if the port is taken. */
     fun start() {
         check(server == null) { "already started" }
-        if (tls == null) {
-            server = embeddedServer(CIO, port = port, host = host) {
-                phonetopcModule(hub, pingPeriod, pingTimeout)
-            }.start(wait = false)
-            return
-        }
         var front: TlsFrontend? = null
         val backend = embeddedServer(CIO, port = 0, host = LOOPBACK) {
             phonetopcModule(
@@ -119,9 +115,8 @@ class PhonetopcServer(
 }
 
 /**
- * @param helloTimeout secure mode: close connections that haven't completed `hello` in time.
- * @param relays secure mode: the [TlsFrontend] in front. Loopback connections it doesn't know
- *   are refused.
+ * @param helloTimeout close connections that haven't completed `hello` in time.
+ * @param relays the [TlsFrontend] in front. Loopback connections it doesn't know are refused.
  */
 fun Application.phonetopcModule(
     hub: BridgeHub,
@@ -167,8 +162,8 @@ private suspend fun DefaultWebSocketServerSession.serve(
         loopback
     } else {
         relays.peerFor(loopback) ?: run {
-            // A loopback connection that didn't come through the TLS frontend.
-            close(CloseReason(CloseCodes.POLICY_VIOLATION, "use wss://"))
+            // A loopback connection that didn't come through the frontend.
+            close(CloseReason(CloseCodes.POLICY_VIOLATION, if (hub.security == null) "use the server's port" else "use wss://"))
             return
         }
     }
@@ -185,9 +180,7 @@ private suspend fun DefaultWebSocketServerSession.serve(
                 val request = session.closeRequest.await()
                 // A client that doesn't read can't take the close frame, let alone answer it,
                 // and would hold its unsent frames forever: give it a moment, then drop it.
-                // If it does answer, the connection ends and this is cancelled first. Without
-                // the TLS frontend (dev mode) Ktor may keep such a socket open after the
-                // session has ended, but no longer queues anything for it.
+                // If it does answer, the connection ends and this is cancelled first.
                 withTimeoutOrNull(CLOSE_GRACE) {
                     close(CloseReason(request.code, request.reason))
                     awaitCancellation()
@@ -209,8 +202,9 @@ private suspend fun DefaultWebSocketServerSession.serve(
                     when (frame) {
                         is Frame.Text -> {
                             session.handleText(frame.readText())
-                            // Paired PCs don't count against their address's limit.
-                            if (!authenticated && session.pc != null) {
+                            // Paired PCs (in dev mode: any client past hello) don't count
+                            // against their address's limit.
+                            if (!authenticated && (session.pc != null || (hub.security == null && session.helloDone))) {
                                 authenticated = true
                                 relays?.authenticated(loopback)
                             }

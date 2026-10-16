@@ -238,7 +238,7 @@ In secure mode, `hello` gains an `auth` member:
 - A failed `hello` after a successful one also closes the connection with 1008.
 - The `hello` result gains `pc: {"id", "name"}`: which pairing the server recognised.
 - Revoking a PC on the phone closes its open sessions immediately with code 1008.
-- In dev mode, `auth` is ignored.
+- In dev mode, `auth` is ignored. The `hello` timeout and the limits on connections still apply.
 
 ## 6. Credential store on the PC
 

@@ -87,9 +87,10 @@ interface Relays {
  *
  * Ktor's CIO engine can't serve TLS, so the phone runs it on a loopback port and puts this in
  * front: an [SSLServerSocket] on the public port that relays each decrypted connection to
- * the loopback server. [peerFor] maps the loopback connection back to the real client, which
- * the server needs for rate limiting and must have: a loopback connection that didn't come
- * through here (another app on the phone) is closed before it can say anything.
+ * the loopback server. With no [identity] (dev mode) it relays plain TCP, for the same limits
+ * and so that [drop] works. [peerFor] maps the loopback connection back to the real client,
+ * which the server needs for rate limiting and must have: a loopback connection that didn't
+ * come through here (another app on the phone) is closed before it can say anything.
  *
  * TLS 1.3 and 1.2 are enabled (SECURITY.md §3); with an EC key every 1.2 suite on offer is
  * ECDHE_ECDSA, and only AEAD suites are allowed. Blocking IO, two threads per connection;
@@ -103,7 +104,7 @@ interface Relays {
  * default: every `adb forward` client comes from 127.0.0.1.
  */
 class TlsFrontend(
-    private val identity: TlsIdentity,
+    private val identity: TlsIdentity?,
     private val host: String,
     private val port: Int,
     private val backendPort: Int,
@@ -122,11 +123,11 @@ class TlsFrontend(
     private val onError: (String, Throwable) -> Unit = { msg, e -> System.err.println("phonetopc tls: $msg: $e") },
 ) : Relays {
     /** One relayed connection; [host] is `null` for an address without a limit. */
-    private class Client(val socket: SSLSocket, val host: String?) {
+    private class Client(val socket: Socket, val host: String?) {
         val unauthenticated = AtomicBoolean(true)
     }
 
-    private var server: SSLServerSocket? = null
+    private var server: ServerSocket? = null
     private val peers = ConcurrentHashMap<Peer, Peer>()
     private val clients = ConcurrentHashMap<Peer, Client>()
     private val open = ConcurrentHashMap.newKeySet<Socket>()
@@ -156,14 +157,15 @@ class TlsFrontend(
 
     /** Binds; throws if the port is taken. */
     fun start() {
-        val context = identity.serverContext()
-        val socket = context.serverSocketFactory.createServerSocket() as SSLServerSocket
+        val socket = identity?.serverContext()?.serverSocketFactory?.createServerSocket() ?: ServerSocket()
         try {
             socket.reuseAddress = true
             socket.bind(InetSocketAddress(InetAddress.getByName(host), port))
-            socket.enabledProtocols = PROTOCOLS.filter { it in socket.supportedProtocols }.toTypedArray()
-            socket.enabledCipherSuites = socket.supportedCipherSuites.filter(::isAllowedSuite).toTypedArray()
-            socket.needClientAuth = false
+            if (socket is SSLServerSocket) {
+                socket.enabledProtocols = PROTOCOLS.filter { it in socket.supportedProtocols }.toTypedArray()
+                socket.enabledCipherSuites = socket.supportedCipherSuites.filter(::isAllowedSuite).toTypedArray()
+                socket.needClientAuth = false
+            }
         } catch (e: Exception) {
             socket.close()
             throw e
@@ -180,10 +182,10 @@ class TlsFrontend(
         deadlines.shutdownNow()
     }
 
-    private fun acceptLoop(server: SSLServerSocket) {
+    private fun acceptLoop(server: ServerSocket) {
         while (!server.isClosed) {
             val client = try {
-                server.accept() as SSLSocket
+                server.accept()
             } catch (e: SocketException) {
                 break // closed
             } catch (e: IOException) {
@@ -247,7 +249,7 @@ class TlsFrontend(
         try {
             client.tcpNoDelay = true
             client.soTimeout = handshakeTimeoutMillis
-            client.startHandshake()
+            (client as? SSLSocket)?.startHandshake()
             client.soTimeout = 0 // the WebSocket layer pings and times out idle clients
 
             val b = Socket()
