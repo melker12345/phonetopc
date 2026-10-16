@@ -78,14 +78,14 @@ type Options struct {
 	// address, stop the listener with ErrSASLimit: each one is a fresh
 	// 1-in-a-million guess for a man in the middle (default 3, §4.3).
 	MaxSASRuns int
-	// StartTimeout closes a pairing connection with 1001 that hasn't begun
-	// a pairing (pair_qr with the right secret, or pair_sas_begin) this long
-	// after connecting or after a refusal (default 20 seconds, §4.1), so a
-	// stray client can't hold the one pairing slot.
+	// StartTimeout closes a pairing connection with 1001 that hasn't taken
+	// its next step this long after connecting or after its last step
+	// (default 20 seconds, §4.1), so a stray client can't hold the one
+	// pairing slot.
 	StartTimeout time.Duration
-	// IdleTimeout closes a pairing connection whose pairing hasn't advanced
-	// for this long with 1001 (default 5 minutes, the time §4.1 gives users
-	// to answer). Only requests that advance the pairing restart it.
+	// IdleTimeout replaces StartTimeout while the users compare codes
+	// (default 5 minutes, the time §4.1 gives users to answer). Only
+	// requests that advance the pairing restart the timer.
 	IdleTimeout time.Duration
 
 	// Logf, if set, receives progress messages meant for the user.

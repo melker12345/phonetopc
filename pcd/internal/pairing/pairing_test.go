@@ -647,12 +647,20 @@ func TestStartTimeout(t *testing.T) {
 		t.Fatalf("want close 1001 after ~300ms, got %v after %v", err, time.Since(start))
 	}
 
-	// Each step restarts the timer with the long IdleTimeout.
+	// pair_sas_begin alone gets no more time: the next step is software's.
 	r = dialRaw(t, h)
 	if m := r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: testPhone(t)}); m.Error != nil {
 		t.Fatal(m.Error)
 	}
-	time.Sleep(600 * time.Millisecond)
+	if _, _, err := r.ws.Read(ctx(t)); websocket.CloseStatus(err) != websocket.StatusGoingAway {
+		t.Fatalf("want close 1001 after pair_sas_begin alone, got %v", err)
+	}
+
+	// Comparing codes gets the long IdleTimeout.
+	r = dialRaw(t, h)
+	if m := r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: testPhone(t)}); m.Error != nil {
+		t.Fatal(m.Error)
+	}
 	if m := r.call(MethodSASNonce, NonceMessage{Nonce: security.B64(security.RandomBytes(32))}); m.Error != nil {
 		t.Fatal(m.Error)
 	}
@@ -669,6 +677,33 @@ func TestStartTimeout(t *testing.T) {
 	if _, err := h.wait(t); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestNoSASRefusalKeepsNoSlot: under NoSAS, repeating pair_sas_begin is
+// refused and doesn't restart the start timer.
+func TestNoSASRefusalKeepsNoSlot(t *testing.T) {
+	h := startListener(t, yes(), func(o *Options) {
+		o.NoSAS = true
+		o.StartTimeout = 300 * time.Millisecond
+		o.MaxFailures = 1000 // isolate the timer from the rate limit
+	})
+	r := dialRaw(t, h)
+	start := time.Now()
+	for time.Since(start) < 2*time.Second {
+		b, _ := json.Marshal(protocol.NewRequest(protocol.IntID(1), MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: testPhone(t)}))
+		err := r.ws.Write(ctx(t), websocket.MessageText, b)
+		if err == nil {
+			_, _, err = r.ws.Read(ctx(t))
+		}
+		if err != nil {
+			if websocket.CloseStatus(err) != websocket.StatusGoingAway || time.Since(start) > time.Second {
+				t.Fatalf("want close 1001 after ~300ms, got %v after %v", err, time.Since(start))
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("refused pair_sas_begin kept the slot")
 }
 
 func TestNoSAS(t *testing.T) {

@@ -104,10 +104,13 @@ func (s *session) run() {
 			steps := s.steps
 			resp, after, closeCode := s.handle(data)
 			if s.steps != steps {
-				if s.state == stStart { // after a refusal: start over
-					idle.Reset(s.l.opts.StartTimeout)
-				} else {
+				// Only comparing codes waits for people; every other step
+				// is answered by software, so pair_sas_begin alone can't
+				// hold the slot for IdleTimeout (and costs no SAS run).
+				if s.state == stCoded {
 					idle.Reset(s.l.opts.IdleTimeout)
+				} else {
+					idle.Reset(s.l.opts.StartTimeout)
 				}
 			}
 			if resp != nil && !s.write(resp) {
@@ -228,8 +231,10 @@ func (s *session) dispatch(method string, params json.RawMessage) (any, func(), 
 	}[method]
 	result, after, err := handler(params)
 	// A step counts if it succeeded or a user said no; malformed requests,
-	// wrong secrets and the like don't.
-	if code, _ := protocol.ErrorCodeOf(err); err == nil || code == protocol.CodeRejected || code == protocol.CodeSASMismatch {
+	// wrong secrets, the NoSAS refusal and the like don't.
+	code, _ := protocol.ErrorCodeOf(err)
+	userSaidNo := (code == protocol.CodeRejected && method != MethodSASBegin) || code == protocol.CodeSASMismatch
+	if err == nil || userSaidNo {
 		s.steps++
 	}
 	return result, after, err

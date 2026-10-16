@@ -65,10 +65,12 @@ Pairing creates trust between one phone and one PC. It runs **once**. Afterwards
 - The phone is the **client** of the pairing listener. Messages are JSON-RPC 2.0 like `PROTOCOL.md` §2, but with
   the methods below, and protocol name `phonetopc-pair/1`.
 - The pairing listener accepts one pairing at a time; a second phone connecting meanwhile is closed with 1013.
-  So that nobody can hold that slot, the listener SHOULD close a connection with 1001 that hasn't begun a pairing
-  (`pair_qr` with the right secret, or `pair_sas_begin`) within 20 seconds of connecting or of a refusal, and
-  restart its idle timer only on requests that advance the pairing (or reach a user who says no), never on
-  malformed, out-of-order or wrong-secret ones. Phones send their first pairing request right after connecting.
+  So that nobody can hold that slot, the listener SHOULD close a connection with 1001 that hasn't taken its next
+  step within 20 seconds of connecting or of its last step. Only while the users compare codes (after
+  `pair_sas_nonce` was answered) does it wait as long as the users get (5 minutes). A step is a request that
+  advances the pairing or reaches a user who says no; malformed, out-of-order and wrong-secret requests, and a
+  `pair_sas_begin` refused with `-32021` because the PC doesn't offer Way B, are not steps. Phones send each
+  request right after the previous answer.
   It SHOULD rate-limit failed attempts to 5 per minute per address; once over the limit, connections are closed
   with 1013, and after an error response that exceeds it, with 1008.
 - After `-32020`, `-32021` or `-32023` the listener stays open for another attempt; all three count as failures.
