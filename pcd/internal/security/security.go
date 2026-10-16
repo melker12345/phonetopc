@@ -65,6 +65,16 @@ func ValidPin(s string) bool {
 	return err == nil && len(b) == sha256.Size
 }
 
+// PinDigest returns the SHA-256 digest a pin encodes, or nil if s is not a
+// pin.
+func PinDigest(s string) []byte {
+	if !ValidPin(s) {
+		return nil
+	}
+	b, _ := DecodeB64(strings.TrimPrefix(s, PinPrefix))
+	return b
+}
+
 // Commitment returns base64url(SHA-256(npc)), the PC's commitment to its SAS
 // nonce (§4.3 step 2).
 func Commitment(npc []byte) string {

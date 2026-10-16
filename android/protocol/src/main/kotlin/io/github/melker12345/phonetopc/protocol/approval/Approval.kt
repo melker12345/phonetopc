@@ -21,13 +21,28 @@ import java.security.spec.X509EncodedKeySpec
 
 /**
  * The approval public key as `hello.approval` reports it (APPROVAL.md §1): [key] is base64url
- * of the DER SubjectPublicKeyInfo, [pin] the SPKI pin over it (SECURITY.md §2).
+ * of the DER SubjectPublicKeyInfo, [pin] the SPKI pin over it (SECURITY.md §2), and
+ * [attestation] its Keystore attestation chain (§3.1), base64url DER, leaf first; omitted
+ * when there is none.
  */
 @Serializable
-data class ApprovalKeyInfo(val key: String, val pin: String) {
+data class ApprovalKeyInfo(val key: String, val pin: String, val attestation: List<String>? = null) {
     companion object {
-        fun of(spkiDer: ByteArray) = ApprovalKeyInfo(Base64Url.encode(spkiDer), Pins.ofSpki(spkiDer))
+        fun of(spkiDer: ByteArray, chain: List<ByteArray> = emptyList()) = ApprovalKeyInfo(
+            Base64Url.encode(spkiDer),
+            Pins.ofSpki(spkiDer),
+            chain.map { Base64Url.encode(it) }.ifEmpty { null },
+        )
     }
+}
+
+/** Key attestation (APPROVAL.md §3.1). */
+object KeyAttestation {
+    /**
+     * The attestation challenge of the phone's approval and decryption keys: SHA-256 of its TLS
+     * SubjectPublicKeyInfo, which ties them to the key that PCs pin.
+     */
+    fun challenge(tlsSpkiDer: ByteArray): ByteArray = sha256(tlsSpkiDer)
 }
 
 /** `why` of a refused approval (APPROVAL.md §4.1). */

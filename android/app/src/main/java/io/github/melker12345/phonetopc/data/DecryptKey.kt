@@ -13,7 +13,7 @@ import javax.crypto.Cipher
  * The decryption key (DECRYPT.md §2): RSA with OAEP, separate from the TLS and approval keys.
  * 2048 bits in StrongBox, which need not support more; 3072 in the TEE.
  */
-object DecryptKey : BiometricKey("phonetopc-decrypt-v1", "DecryptKey") {
+object DecryptKey : BiometricKey("phonetopc-decrypt-v2", listOf("phonetopc-decrypt-v1"), "DecryptKey") {
     override val algorithm = KeyProperties.KEY_ALGORITHM_RSA
 
     override fun spec(alias: String, strongBox: Boolean): KeyGenParameterSpec.Builder =

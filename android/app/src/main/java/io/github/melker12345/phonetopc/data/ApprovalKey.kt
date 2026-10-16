@@ -9,7 +9,7 @@ import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
 /** The approval key (APPROVAL.md §2): ECDSA P-256, separate from the TLS key. */
-object ApprovalKey : BiometricKey("phonetopc-approval-v1", "ApprovalKey") {
+object ApprovalKey : BiometricKey("phonetopc-approval-v2", listOf("phonetopc-approval-v1"), "ApprovalKey") {
     override val algorithm = KeyProperties.KEY_ALGORITHM_EC
 
     override fun spec(alias: String, strongBox: Boolean): KeyGenParameterSpec.Builder =

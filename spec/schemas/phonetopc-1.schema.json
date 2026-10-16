@@ -115,14 +115,17 @@
           "type": "object", "required": ["id", "name"],
           "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
         },
-        "approval": {
-          "type": "object", "required": ["key", "pin"],
-          "properties": { "key": { "type": "string" }, "pin": { "type": "string" } }
-        },
-        "decrypt": {
-          "type": "object", "required": ["key", "pin"],
-          "properties": { "key": { "type": "string" }, "pin": { "type": "string" } }
-        }
+        "approval": { "$ref": "#/$defs/phoneKey" },
+        "decrypt": { "$ref": "#/$defs/phoneKey" }
+      }
+    },
+
+    "phoneKey": {
+      "type": "object", "required": ["key", "pin"],
+      "properties": {
+        "key": { "type": "string" },
+        "pin": { "type": "string" },
+        "attestation": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
       }
     },
 

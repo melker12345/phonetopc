@@ -19,8 +19,8 @@ prose wins and the case is a bug.
   ([`../PANELS.md`](../PANELS.md)) in dev mode: every params rule, the limits, and `-32030` without
   permission. See [Panel server cases](#panel-server-cases-panel-server-casesjson).
 - [`vectors/`](vectors/): test vectors for pins, base64url, the SAS commitment and the SAS code
-  (`vectors.json`), and for approval signatures (`approval.json`), with the test certificates and
-  keys they refer to.
+  (`vectors.json`), for approval signatures (`approval.json`), decryption (`decrypt.json`) and key
+  attestation (`attestation.json`), with the test certificates and keys they refer to.
 - `*.jsonl` **transcripts**: recorded sessions with the mock phone (`pcd/cmd/phonetopc-mock`),
   for checking a client or server against concrete wire traffic.
 

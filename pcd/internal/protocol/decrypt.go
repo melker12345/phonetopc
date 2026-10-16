@@ -9,10 +9,12 @@ const MethodDecrypt = "decrypt"
 const CapabilityDecrypt = "decrypt"
 
 // DecryptInfo is the decrypt member of the hello result (§1): the
-// decryption key as base64url DER SubjectPublicKeyInfo, and its pin.
+// decryption key as base64url DER SubjectPublicKeyInfo, its pin, and its
+// attestation chain, as in ApprovalInfo.
 type DecryptInfo struct {
-	Key string `json:"key"`
-	Pin string `json:"pin"`
+	Key         string   `json:"key"`
+	Pin         string   `json:"pin"`
+	Attestation []string `json:"attestation,omitempty"`
 }
 
 // §4.

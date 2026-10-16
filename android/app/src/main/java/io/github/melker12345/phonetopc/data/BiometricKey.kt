@@ -14,6 +14,7 @@ import androidx.annotation.RequiresApi
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import io.github.melker12345.phonetopc.protocol.approval.ApprovalKeyInfo
+import io.github.melker12345.phonetopc.protocol.approval.KeyAttestation
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -24,8 +25,11 @@ import java.security.PrivateKey
  * check, once per check, and that Android invalidates when fingerprints are added or removed.
  * StrongBox where the phone has it. Used through `BiometricPrompt` with a `CryptoObject` around
  * the operation [forPrompt] initialises; nothing else can use the key.
+ *
+ * Keystore attests it (APPROVAL.md §3.1) with a challenge that ties it to the phone's TLS key.
+ * Keys under [oldAliases] were made without attestation; they are deleted.
  */
-abstract class BiometricKey(private val alias: String, private val tag: String) {
+abstract class BiometricKey(private val alias: String, private val oldAliases: List<String>, private val tag: String) {
     /** The algorithm for `KeyPairGenerator` and `KeyFactory`. */
     protected abstract val algorithm: String
 
@@ -84,12 +88,16 @@ abstract class BiometricKey(private val alias: String, private val tag: String) 
         }
         return try {
             val ks = keyStore()
+            for (old in oldAliases) if (ks.containsAlias(old)) ks.deleteEntry(old)
             val key = validKey(ks) ?: run {
                 generate(context)
                 ks.getKey(alias, null) as PrivateKey
             }
-            val spki = ks.getCertificate(alias).publicKey.encoded
-            Status.Available(ApprovalKeyInfo.of(spki), isStrongBox(key))
+            val chain = ks.getCertificateChain(alias)
+            val spki = chain.first().publicKey.encoded
+            // A chain of one is the self-signed certificate of a key without attestation.
+            val attestation = if (chain.size > 1) chain.map { it.encoded } else emptyList()
+            Status.Available(ApprovalKeyInfo.of(spki, attestation), isStrongBox(key))
         } catch (e: Exception) {
             Log.w(tag, "key unavailable", e)
             Status.Unavailable(Problem.OTHER)
@@ -133,19 +141,20 @@ abstract class BiometricKey(private val alias: String, private val tag: String) 
     }
 
     private fun generate(context: Context) {
+        val challenge = KeyAttestation.challenge(PhoneKey.identity().certificate.publicKey.encoded)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE) &&
-            generateInStrongBox()
+            generateInStrongBox(challenge)
         ) {
             return
         }
-        generate(strongBox = false)
+        generate(strongBox = false, challenge)
     }
 
     /** `false` if StrongBox refused (e.g. it's busy or lacks the algorithm): use the TEE then. */
     @RequiresApi(Build.VERSION_CODES.P)
-    private fun generateInStrongBox(): Boolean = try {
-        generate(strongBox = true)
+    private fun generateInStrongBox(challenge: ByteArray): Boolean = try {
+        generate(strongBox = true, challenge)
         true
     } catch (e: StrongBoxUnavailableException) {
         Log.i(tag, "StrongBox unavailable; using the TEE", e)
@@ -153,10 +162,11 @@ abstract class BiometricKey(private val alias: String, private val tag: String) 
     }
 
     @Suppress("DEPRECATION") // setUserAuthenticationValidityDurationSeconds: the API 26-29 way
-    private fun generate(strongBox: Boolean) {
+    private fun generate(strongBox: Boolean, challenge: ByteArray) {
         val spec = spec(alias, strongBox)
             .setUserAuthenticationRequired(true)
             .setInvalidatedByBiometricEnrollment(true)
+            .setAttestationChallenge(challenge)
             .apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     // Every use needs its own strong biometric check; no PIN/pattern fallback.

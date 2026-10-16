@@ -16,10 +16,12 @@ const MethodRequestApproval = "request_approval"
 const CapabilityApproval = "approval"
 
 // ApprovalInfo is the approval member of the hello result (§1): the
-// approval key as base64url DER SubjectPublicKeyInfo, and its pin.
+// approval key as base64url DER SubjectPublicKeyInfo, its pin, and its
+// attestation chain (§3.1), base64url DER certificates, leaf first.
 type ApprovalInfo struct {
-	Key string `json:"key"`
-	Pin string `json:"pin"`
+	Key         string   `json:"key"`
+	Pin         string   `json:"pin"`
+	Attestation []string `json:"attestation,omitempty"`
 }
 
 // §4.
