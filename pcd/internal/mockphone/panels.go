@@ -60,6 +60,8 @@ type panel struct {
 	orient    string
 
 	owner    *session // nil while detached
+	holding  bool     // the owner's events wait in held until its response is queued
+	held     []protocol.Reading
 	expiry   *time.Timer
 	nextPseq int64
 	canvases map[string]*canvas
@@ -164,8 +166,12 @@ func (h *panelHub) emit(p *panel, typ string, ev protocol.PanelEvent) {
 		c.kept = append(c.kept, ev)
 		c.points += len(ev.Points)
 	}
-	if p.owner != nil {
-		p.owner.deliver(h.srv.eventReading(protocol.SourcePanel, typ, ev))
+	switch r := h.srv.eventReading(protocol.SourcePanel, typ, ev); {
+	case p.owner == nil:
+	case p.holding:
+		p.held = append(p.held, r)
+	default:
+		p.owner.deliver(r)
 	}
 }
 
@@ -212,7 +218,7 @@ func (h *panelHub) sessionClosed(s *session) {
 	for _, pc := range h.pcs {
 		for _, p := range pc.panels {
 			if p.owner == s {
-				p.owner = nil
+				p.owner, p.holding, p.held = nil, false, nil
 				h.startExpiry(p)
 			}
 		}
@@ -235,17 +241,27 @@ func (h *panelHub) startExpiry(p *panel) {
 	})
 }
 
-// own makes s the owner of p, if p is still live. h.mu must be held.
-func (h *panelHub) own(p *panel, s *session) bool {
-	if !h.live(p) {
-		return false
-	}
+// own makes s the owner of p, holding its events until release, so that
+// the response to show or attach precedes them. h.mu must be held.
+func (h *panelHub) own(p *panel, s *session) {
 	if p.expiry != nil {
 		p.expiry.Stop()
 		p.expiry = nil
 	}
-	p.owner = s
-	return true
+	p.owner, p.holding, p.held = s, true, nil
+}
+
+// release sends s the events held since it took p, and reports whether s
+// still owns p and p is live. h.mu must be held.
+func (h *panelHub) release(p *panel, s *session) bool {
+	if p.owner != s || !p.holding {
+		return false
+	}
+	for _, r := range p.held {
+		s.deliver(r)
+	}
+	p.holding, p.held = false, nil
+	return h.live(p)
 }
 
 // -- permissions
@@ -438,13 +454,12 @@ func (s *session) panelShow(params json.RawMessage) (any, func(), *protocol.Erro
 		s.srv.logf("mock: notification: %s wants to show %q", pc.name, np.title)
 	}
 	s.srv.logf("mock: %s shows panel %q %q (%d widgets)", pc.name, np.id, np.title, layout.Count)
+	h.own(np, s)
 	res := protocol.PanelShowResult{Panel: np.id, Visible: toScreen}
-	// Ownership (and with it the events) starts after the response, so the
-	// response precedes every event of the new panel.
 	after := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if h.own(np, s) && toScreen && (h.screen == nil || h.screen.pc == pc) {
+		if h.release(np, s) && toScreen && (h.screen == nil || h.screen.pc == pc) {
 			h.setScreen(np)
 		}
 	}
@@ -484,22 +499,23 @@ func (s *session) panelAttach(params json.RawMessage) (any, func(), *protocol.Er
 	res := protocol.PanelAttachResult{
 		Panel: pn.id, Title: pn.title, Visible: h.screen == pn, LastPseq: pn.nextPseq - 1, Values: values,
 	}
+	// Replay in pseq order: merge the canvases' kept events.
+	var evs []protocol.PanelEvent
+	for _, c := range pn.canvases {
+		for _, ev := range c.kept {
+			if ev.Pseq > after {
+				evs = append(evs, ev)
+			}
+		}
+	}
+	slices.SortFunc(evs, func(a, b protocol.PanelEvent) int { return int(a.Pseq - b.Pseq) })
+	h.own(pn, s)
 	replay := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if !h.own(pn, s) {
+		if pn.owner != s || !pn.holding {
 			return
 		}
-		// Replay in pseq order: merge the canvases' kept events.
-		var evs []protocol.PanelEvent
-		for _, c := range pn.canvases {
-			for _, ev := range c.kept {
-				if ev.Pseq > after {
-					evs = append(evs, ev)
-				}
-			}
-		}
-		slices.SortFunc(evs, func(a, b protocol.PanelEvent) int { return int(a.Pseq - b.Pseq) })
 		for _, ev := range evs {
 			ev.Replayed = true
 			s.deliver(s.srv.eventReading(protocol.SourcePanel, protocol.TypeStroke, ev))
@@ -507,6 +523,7 @@ func (s *session) panelAttach(params json.RawMessage) (any, func(), *protocol.Er
 		if len(evs) > 0 {
 			s.srv.logf("mock: replayed %d stroke event(s) of panel %q", len(evs), pn.id)
 		}
+		h.release(pn, s)
 	}
 	return res, replay, nil
 }
