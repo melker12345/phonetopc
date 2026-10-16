@@ -28,8 +28,7 @@ func CheckID(id string) error {
 }
 
 // CheckText checks display text: min to max code points, no control
-// characters (except newline when newlines is true) and no bidirectional
-// controls.
+// characters (except newline when newlines is true) and nothing IsHidden.
 func CheckText(s string, minLen, maxLen int, newlines bool) error {
 	if !utf8.ValidString(s) {
 		return errors.New("is not valid UTF-8")
@@ -48,8 +47,8 @@ func CheckText(s string, minLen, maxLen int, newlines bool) error {
 		if unicode.Is(unicode.Cc, r) {
 			return fmt.Errorf("must not contain control characters (%U)", r)
 		}
-		if isBidiControl(r) {
-			return fmt.Errorf("must not contain bidirectional controls (%U)", r)
+		if IsHidden(r) {
+			return fmt.Errorf("must not contain bidirectional controls, invisible characters or line separators (%U)", r)
 		}
 	}
 	return nil

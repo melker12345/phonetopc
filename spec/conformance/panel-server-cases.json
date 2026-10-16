@@ -116,6 +116,13 @@
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
+      "name": "notify_title_invisible",
+      "description": "\u00a78: no invisible characters.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "notify", "params": {"title": "pay\u00adpal"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
       "name": "notify_body_1001",
       "description": "\u00a73.1: body is at most 1000 code points.",
       "hello": true,

@@ -56,7 +56,7 @@ network, not a stolen token, not a bug elsewhere in the phone app.
 
 | Param | Rules |
 |---|---|
-| `reason` | Required. 1–200 Unicode code points; must not start or end with whitespace; must not contain control characters (category Cc) or bidirectional controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069), so it can't be made to look like something else. Shown to the user verbatim |
+| `reason` | Required. 1–200 Unicode code points; must not start or end with whitespace; must not contain control characters (category Cc) or hidden characters (`PANELS.md` §8), so it can't be made to look like something else. Shown to the user verbatim |
 | `nonce` | Required. Exactly 32 bytes after base64url decoding. Generated fresh by the PC for every request |
 | `timeout_ms` | Optional, default 30000, allowed 5000–120000 |
 

@@ -1,6 +1,7 @@
 package io.github.melker12345.phonetopc.protocol.panels
 
 import io.github.melker12345.phonetopc.protocol.invalidParams
+import io.github.melker12345.phonetopc.protocol.isHidden
 import io.github.melker12345.phonetopc.protocol.string
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -10,15 +11,11 @@ object Rules {
     private val ID = Regex("^[A-Za-z0-9_.-]{1,64}$")
     private val COLOR = Regex("^#[0-9A-Fa-f]{6}$")
 
-    /** U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069. */
-    private fun isBidiControl(cp: Int) =
-        cp == 0x061C || cp == 0x200E || cp == 0x200F || cp in 0x202A..0x202E || cp in 0x2066..0x2069
-
     fun isId(s: String) = ID.matches(s)
 
     /**
      * Display text: [min]–[max] code points, no control characters (except a newline when
-     * [newlines]), no bidirectional controls.
+     * [newlines]), nothing [isHidden].
      */
     fun isDisplayText(s: String, min: Int, max: Int, newlines: Boolean): Boolean {
         val count = s.codePointCount(0, s.length)
@@ -27,7 +24,7 @@ object Rules {
         while (i < s.length) {
             val cp = s.codePointAt(i)
             if (Character.getType(cp) == Character.CONTROL.toInt() && !(newlines && cp == '\n'.code)) return false
-            if (isBidiControl(cp)) return false
+            if (isHidden(cp)) return false
             i += Character.charCount(cp)
         }
         return true

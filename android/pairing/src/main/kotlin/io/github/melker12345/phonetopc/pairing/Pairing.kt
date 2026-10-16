@@ -1,6 +1,7 @@
 package io.github.melker12345.phonetopc.pairing
 
 import io.github.melker12345.phonetopc.protocol.lenientObj
+import io.github.melker12345.phonetopc.protocol.isName
 import io.github.melker12345.phonetopc.protocol.lenientString
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pins
@@ -164,7 +165,7 @@ class PairingClient(
                     },
                     userTimeout,
                 )
-                val pcName = result.lenientObj("pc")?.lenientString("name") ?: qr.pcName
+                val pcName = result.lenientObj("pc")?.lenientString("name")?.takeIf(::isName) ?: qr.pcName
                 finish(ch, pin = qr.pin, fallbackId = qr.pcId, fallbackName = pcName)
             }
         }
@@ -192,7 +193,7 @@ class PairingClient(
                     throw e
                 }
                 val pcInfo = begin.lenientObj("pc")
-                val pcName = pcInfo?.lenientString("name") ?: pc.name
+                val pcName = pcInfo?.lenientString("name")?.takeIf(::isName) ?: pc.name
                 val pcId = pcInfo?.lenientString("id") ?: pc.id
                 val commitment = begin.lenientString("commitment") ?: throw ProtocolError("pair_sas_begin result has no commitment")
 
@@ -231,7 +232,7 @@ class PairingClient(
         val pc = result.lenientObj("pc")
         val id = pc?.lenientString("id")?.takeIf { it.isNotEmpty() } ?: fallbackId
             ?: throw ProtocolError("pair_finish result has no pc.id")
-        val name = pc?.lenientString("name")?.takeIf { it.isNotBlank() } ?: fallbackName
+        val name = pc?.lenientString("name")?.takeIf(::isName) ?: fallbackName
         store(NewPairing(id, name, pin, token))
         _state.value = PairingState.Paired(id, name)
     }

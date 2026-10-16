@@ -22,6 +22,9 @@ func TestCheckText(t *testing.T) {
 		{"a\nb", 1, 100, true, true},
 		{"a\tb", 1, 100, true, false},
 		{"a\u202Eb", 1, 100, true, false},
+		{"a\u2028b", 1, 100, true, false},
+		{"a\u200Bb", 1, 100, true, false},
+		{"a\u200Db", 1, 100, true, true},
 		{"\xff", 0, 100, true, false},
 	} {
 		if err := CheckText(c.s, c.min, c.max, c.newlines); (err == nil) != c.ok {

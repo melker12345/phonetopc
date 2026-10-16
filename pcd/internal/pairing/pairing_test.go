@@ -542,6 +542,16 @@ func TestPhoneIDFormat(t *testing.T) {
 	}
 }
 
+func TestPhoneNameIsDisplayText(t *testing.T) {
+	h := startListener(t, yes(), nil)
+	r := dialRaw(t, h)
+	for _, name := range []string{"esc\x1b[2J", "rlo\u202Ex", "zw\u200Bsp", "line\nbreak", strings.Repeat("a", 101)} {
+		bad := testPhone(t)
+		bad.Name = name
+		wantErr(t, r.call(MethodSASBegin, SASBeginParams{Protocol: Protocol, Phone: bad}), protocol.CodeInvalidParams)
+	}
+}
+
 // idle waits until no session holds the pairing slot and n failed SAS runs
 // have been counted.
 func (h *harness) idle(t *testing.T, n int) {

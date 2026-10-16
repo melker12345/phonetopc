@@ -330,8 +330,16 @@ canvas content is made of them anyway. They're what `panel_attach` replays (§4.
 
 - **Id**: a string matching `^[A-Za-z0-9_.-]{1,64}$`.
 - **Display text**: counted in Unicode code points (not UTF-16 units). It MUST NOT contain control characters
-  (category Cc), except U+000A (newline) where a field allows newlines, nor bidirectional controls (U+061C,
-  U+200E, U+200F, U+202A–U+202E, U+2066–U+2069). The phone shows it as given, without trimming.
+  (category Cc), except U+000A (newline) where a field allows newlines, nor **hidden characters**, which reorder,
+  hide or move what is shown:
+  - bidirectional controls: U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069;
+  - invisible characters: U+00AD, U+180E, U+200B, U+2060–U+2064, U+206A–U+206F, U+FEFF, U+FFF9–U+FFFB,
+    U+E0000–U+E007F;
+  - line and paragraph separators: U+2028, U+2029.
+
+  The list is fixed, not a Unicode category, so implementations agree whatever their Unicode version. ZWNJ and
+  ZWJ (U+200C, U+200D) are allowed: scripts and emoji need them. The phone shows display text as given, without
+  trimming.
 - **Color**: a string `#rrggbb` (hex digits, either case).
 - Numbers are JSON numbers; where the table says integer, `5.5` and `"5"` are `-32602`.
 

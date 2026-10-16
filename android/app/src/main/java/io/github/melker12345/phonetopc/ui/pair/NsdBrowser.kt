@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import io.github.melker12345.phonetopc.pairing.NetworkPc
+import io.github.melker12345.phonetopc.protocol.isName
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -112,7 +113,7 @@ class NsdBrowser(context: Context) {
             .mapNotNull { it.hostAddress }
             .distinct()
         if (hosts.isEmpty() || info.port <= 0) return
-        val pc = NetworkPc(name = txt("n") ?: info.serviceName, hosts = hosts, port = info.port, id = txt("id"))
+        val pc = NetworkPc(name = txt("n")?.takeIf(::isName) ?: info.serviceName, hosts = hosts, port = info.port, id = txt("id"))
         synchronized(this) {
             if (discovery == null) return
             _found.update { list ->

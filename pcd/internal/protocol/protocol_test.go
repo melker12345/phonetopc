@@ -9,7 +9,7 @@ import (
 )
 
 func TestCheckReason(t *testing.T) {
-	for _, ok := range []string{"Deploy?", "x", "Run deploy.sh on arch-desktop?", "inner  spaces ok", strings.Repeat("ä", 200), "😀" + strings.Repeat("x", 199)} {
+	for _, ok := range []string{"Deploy?", "x", "Run deploy.sh on arch-desktop?", "می\u200Cخواهم", "👨\u200D👩\u200D👧", "inner  spaces ok", strings.Repeat("ä", 200), "😀" + strings.Repeat("x", 199)} {
 		if err := CheckReason(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
@@ -18,6 +18,7 @@ func TestCheckReason(t *testing.T) {
 		"", " ", "   ", " padded", "padded ", "nbsp ", "　ideographic", "x ",
 		strings.Repeat("x", 201), "line\nbreak", "tab\there", "bell\a", "del\u007f", "c1\u0085x", "\xff",
 		"rlo\u202Etxt.exe", "lrm\u200E", "alm\u061C", "isolate\u2066x\u2069", "x\u202Ay",
+		"zw\u200Bsp", "soft\u00ADhyphen", "word\u2060joiner", "bom\uFEFF", "tag\U000E0041", "ls\u2028x", "ps\u2029x",
 	} {
 		if err := CheckReason(bad); err == nil {
 			t.Errorf("%q accepted", bad)

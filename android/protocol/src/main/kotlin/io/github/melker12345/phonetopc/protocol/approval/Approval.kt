@@ -3,6 +3,7 @@ package io.github.melker12345.phonetopc.protocol.approval
 import io.github.melker12345.phonetopc.protocol.PcInfo
 import io.github.melker12345.phonetopc.protocol.RpcException
 import io.github.melker12345.phonetopc.protocol.invalidParams
+import io.github.melker12345.phonetopc.protocol.isHidden
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.protocol.security.sha256
@@ -140,7 +141,7 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
             // PC hashes the string it sent.
             val reason = params.string("reason") ?: invalidParams("reason is required")
             if (!isDisplayable(reason)) {
-                invalidParams("reason must not contain control characters, bidirectional controls or unpaired surrogates")
+                invalidParams("reason must not contain control characters, bidirectional controls, invisible characters, line separators or unpaired surrogates")
             }
             val length = reason.codePointCount(0, reason.length)
             if (length < 1) invalidParams("reason must not be empty")
@@ -163,29 +164,22 @@ data class ApprovalParams(val reason: String, val nonce: String, val timeoutMill
         }
 
         /**
-         * No control characters (Unicode Cc: C0, DEL, C1, so no newlines or tabs either), no
-         * bidirectional controls, which could make a reason look like another one, and no
-         * unpaired surrogates, which have no UTF-8 encoding and so no well-defined signed hash.
+         * No control characters (Unicode Cc: C0, DEL, C1, so no newlines or tabs either), nothing
+         * [isHidden], which could make a reason look like another one, and no unpaired
+         * surrogates, which have no UTF-8 encoding and so no well-defined signed hash.
          */
         fun isDisplayable(text: String): Boolean {
             var i = 0
             while (i < text.length) {
                 val c = text[i]
-                if (Character.isHighSurrogate(c)) {
-                    if (i + 1 >= text.length || !Character.isLowSurrogate(text[i + 1])) return false
-                    i += 2
-                    continue
-                }
-                if (Character.isLowSurrogate(c) || Character.getType(c) == Character.CONTROL.toInt()) return false
-                if (isBidiControl(c.code)) return false
-                i++
+                if (Character.isLowSurrogate(c)) return false
+                if (Character.isHighSurrogate(c) && (i + 1 >= text.length || !Character.isLowSurrogate(text[i + 1]))) return false
+                val cp = text.codePointAt(i)
+                if (Character.getType(cp) == Character.CONTROL.toInt() || isHidden(cp)) return false
+                i += Character.charCount(cp)
             }
             return true
         }
-
-        /** U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069 (APPROVAL.md §4). */
-        fun isBidiControl(cp: Int): Boolean =
-            cp == 0x061C || cp == 0x200E || cp == 0x200F || cp in 0x202A..0x202E || cp in 0x2066..0x2069
 
         /**
          * Unicode White_Space: Java's whitespace plus the no-break spaces (U+00A0, U+2007,

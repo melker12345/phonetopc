@@ -55,6 +55,13 @@ class PairingQrTest {
         assertEquals("x", qr.pcName) // n missing: fall back to the id
     }
 
+    @Test fun nameThatIsNotDisplayTextFallsBackToTheId() {
+        for (n in listOf("evil%1B%5B2J", "a%E2%80%AEb", "a%E2%80%8Bb", "%20")) {
+            val qr = PairingQr.parse("phonetopc://pair?v=1&id=x&n=$n&h=10.0.0.1&p=1&pin=$pin&s=$secret")
+            assertEquals(n, "x", qr.pcName)
+        }
+    }
+
     @Test fun secretIsNotInToString() {
         val qr = PairingQr.parse("phonetopc://pair?v=1&id=x&h=1.2.3.4&p=1&pin=$pin&s=$secret")
         assertFalse(qr.toString().contains(secret))

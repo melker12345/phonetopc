@@ -46,7 +46,7 @@ type PhoneInfo struct {
 
 // Limits on what a phone may send, so a hostile one can't bloat the store.
 const (
-	maxNameLen    = 256
+	maxNameLen    = 100 // code points
 	maxAddresses  = 16
 	maxAddressLen = 255
 )
@@ -61,11 +61,12 @@ func ValidID(id string) bool { return idRE.MatchString(id) }
 // validate also fills defaults. The error becomes the message of an
 // invalid_params error.
 func (p *PhoneInfo) validate() error {
+	if err := protocol.CheckText(p.Name, 0, maxNameLen, false); err != nil {
+		return fmt.Errorf("params.phone.name %w", err)
+	}
 	switch {
 	case !ValidID(p.ID):
 		return fmt.Errorf("params.phone.id must be 16 to 64 lowercase hex digits")
-	case len(p.Name) > maxNameLen:
-		return fmt.Errorf("params.phone.name is too long")
 	case !security.ValidPin(p.Pin):
 		return fmt.Errorf("params.phone.pin must be sha256/<base64url of 32 bytes>")
 	case p.Port < 0 || p.Port > 65535:

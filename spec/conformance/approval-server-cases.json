@@ -187,6 +187,27 @@
       "expect": {"error": -32602, "name": "invalid_params", "id": 1}
     },
     {
+      "name": "reason_zero_width_space",
+      "description": "Invisible characters are not allowed: U+200B.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run dep\u200bloy.sh?", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "reason_line_separator",
+      "description": "Line and paragraph separators are not allowed: U+2028.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\u2028Yes, safe", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
+      "name": "reason_tag_character",
+      "description": "Invisible characters outside the BMP: tag U+E0041.",
+      "hello": true,
+      "send": {"jsonrpc": "2.0", "id": 1, "method": "request_approval", "params": {"reason": "Run deploy.sh?\udb40\udc41", "nonce": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"}},
+      "expect": {"error": -32602, "name": "invalid_params", "id": 1}
+    },
+    {
       "name": "reason_bidi_mark",
       "description": "Bidirectional controls: U+200F and U+061C.",
       "hello": true,

@@ -33,6 +33,10 @@ Fingerprint approval is in [`APPROVAL.md`](APPROVAL.md).
 - **Device ids** (`device.id` from `hello`, and a PC id) are random, at least 64 bits, stable, and not secret.
   A phone id is 16 to 64 lowercase hex digits (`^[0-9a-f]{16,64}$`); a PC refuses any other `phone.id` in
   pairing with `-32602`. PC ids SHOULD have the same form.
+- **Names** (`phone.name`, `pc.name`, the `n` of a pairing code, `device.name`) are display text without
+  newlines (`PANELS.md` §8), at most 100 code points. A PC refuses any other `phone.name` in pairing with
+  `-32602`. A name that breaks these rules elsewhere is treated as missing: the id is shown instead. Names are
+  only labels; trust comes only from pins.
 - The phone SHOULD keep its private key in Android Keystore, hardware-backed where available. Tokens are
   stored only as received/issued; the phone MAY store a hash of each token instead of the token.
 

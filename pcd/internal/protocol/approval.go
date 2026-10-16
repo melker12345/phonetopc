@@ -92,7 +92,7 @@ const (
 
 // CheckReason checks a reason exactly as received, as §4 requires: 1–200
 // Unicode code points, no leading or trailing whitespace (Unicode
-// White_Space), no control characters (Cc) and no bidirectional controls.
+// White_Space), no control characters (Cc) and no hidden characters.
 // Nobody trims or normalizes a reason: it is shown, sent and signed as is.
 func CheckReason(reason string) error {
 	if !utf8.ValidString(reason) {
@@ -114,14 +114,28 @@ func CheckReason(reason string) error {
 		if unicode.Is(unicode.Cc, r) {
 			return fmt.Errorf("reason must not contain control characters (%U)", r)
 		}
-		if isBidiControl(r) {
-			return fmt.Errorf("reason must not contain bidirectional controls (%U)", r)
+		if IsHidden(r) {
+			return fmt.Errorf("reason must not contain bidirectional controls, invisible characters or line separators (%U)", r)
 		}
 	}
 	return nil
 }
 
-// isBidiControl reports the bidirectional controls §4 forbids in a reason.
-func isBidiControl(r rune) bool {
-	return r == 0x061C || r == 0x200E || r == 0x200F || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069)
+// IsHidden reports the characters APPROVAL.md §4 and PANELS.md §8 forbid in
+// display text besides Cc: bidirectional controls, which reorder what is
+// shown, and invisible characters and line separators, which hide or move
+// parts of it. A fixed list rather than a Unicode category, so every
+// implementation agrees whatever its Unicode version. ZWNJ and ZWJ
+// (U+200C, U+200D) stay allowed: scripts and emoji need them.
+func IsHidden(r rune) bool {
+	switch {
+	case r == 0x061C, r == 0x200E, r == 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069: // bidi
+		return true
+	case r == 0x00AD, r == 0x180E, r == 0x200B, r >= 0x2060 && r <= 0x2064, r >= 0x206A && r <= 0x206F,
+		r == 0xFEFF, r >= 0xFFF9 && r <= 0xFFFB, r >= 0xE0000 && r <= 0xE007F: // invisible
+		return true
+	case r == 0x2028, r == 0x2029: // line and paragraph separators
+		return true
+	}
+	return false
 }

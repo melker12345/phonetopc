@@ -1,5 +1,6 @@
 package io.github.melker12345.phonetopc.pairing
 
+import io.github.melker12345.phonetopc.protocol.isName
 import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import java.net.URLDecoder
@@ -49,7 +50,7 @@ data class PairingQr(
 
             if (need("v") != "1") throw Invalid(Problem.UNSUPPORTED_VERSION, "unsupported pairing code version ${params["v"]}")
             val id = need("id")
-            val name = params["n"]?.takeIf { it.isNotBlank() } ?: id
+            val name = params["n"]?.takeIf(::isName) ?: id
             val hosts = need("h").split(',').map { it.trim().removePrefix("[").removeSuffix("]") }.filter { it.isNotEmpty() }
             if (hosts.isEmpty()) throw Invalid(Problem.MALFORMED, "no hosts")
             val port = need("p").toIntOrNull()?.takeIf { it in 1..65535 } ?: throw Invalid(Problem.MALFORMED, "bad port")
