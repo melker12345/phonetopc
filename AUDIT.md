@@ -7,10 +7,10 @@ Each finding was checked against the code; "tested" means the reviewer reproduce
 
 | Finding | Status |
 |---|---|
-| H1 | Fixed (`a43e7ba`). Leftover: `store.PutDevice` doesn't re-check the old pin between the prompt and the save. |
+| H1 | Fixed (`a43e7ba`, `98f6e39`). |
 | H2 | Fixed (`58a812c`). |
-| H3 | Fixed (`82be0a3`). Leftover: in dev mode Ktor may keep a dropped socket open; nothing is queued for it. |
-| M1 | Fixed (`1223f32`). Leftover: tty input isn't flushed right before each prompt. |
+| H3 | Fixed (`82be0a3`, `306c845`). |
+| M1 | Fixed (`1223f32`, `7359a20`). |
 | M2 | Fixed (`66329e8`); the optional check code on both screens wasn't built. |
 | M3 | Fixed (`50e483f`, `5aec614`). |
 | M4 | Fixed (`a80d69e`). |
