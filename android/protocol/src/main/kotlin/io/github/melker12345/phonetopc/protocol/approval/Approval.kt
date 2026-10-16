@@ -49,13 +49,19 @@ object KeyAttestation {
 enum class ApprovalWhy(val wire: String) {
     DENIED("denied"),
     CANCELLED("cancelled"),
+    MISMATCH("mismatch"),
     TIMEOUT("timeout"),
     BUSY("busy"),
+    COOLDOWN("cooldown"),
     LOCKOUT("lockout"),
     UNAVAILABLE("unavailable"),
 
     /** `decrypt` only: the user confirmed, but the ciphertext doesn't decrypt (DECRYPT.md §4). */
     FAILED("failed"),
+    ;
+
+    /** The user's refusals, which count towards a cool-down (APPROVAL.md §4.3). */
+    val refusal: Boolean get() = this == DENIED || this == CANCELLED || this == MISMATCH
 }
 
 sealed interface ApprovalOutcome {
@@ -79,14 +85,19 @@ sealed interface ApprovalOutcome {
 }
 
 /**
- * One approval as the UI sees it. [reason] is shown verbatim; [message] are the exact bytes
- * the approval key must sign (APPROVAL.md §5).
+ * One approval as the UI sees it. [program] and [reason] are shown verbatim. The user picks one
+ * of [choices]; only [match] may open the biometric prompt, any other is
+ * [ApprovalWhy.MISMATCH] (APPROVAL.md §4.2). [message] are the exact bytes the approval key must
+ * sign (§5).
  */
 class ApprovalRequest(
     val id: Long,
     val pc: PcInfo,
+    val program: String,
     val reason: String,
     val nonce: String,
+    val match: Int,
+    val choices: List<Int>,
     val timeoutMillis: Long,
     val message: ByteArray,
 )
@@ -122,16 +133,20 @@ interface Approver {
 
 /** The signed message of APPROVAL.md §5, and its verification. */
 object ApprovalMessage {
-    const val LABEL = "phonetopc-approval/1"
+    const val LABEL = "phonetopc-approval/2"
 
     /**
-     * `phonetopc-approval/1 \n phone id \n pc id \n nonce \n base64url(SHA-256(reason))`, UTF-8,
-     * no trailing newline. [nonce] is the base64url text exactly as the PC sent it.
+     * The label, phone id, pc id, nonce, base64url(SHA-256(reason)), base64url(SHA-256(program)),
+     * match and expiry, joined by `\n`, UTF-8, no trailing newline. [nonce] is the base64url text
+     * exactly as the PC sent it.
      */
-    fun build(phoneId: String, pcId: String, nonce: String, reason: String): ByteArray =
-        listOf(LABEL, phoneId, pcId, nonce, Base64Url.encode(sha256(reason.toByteArray(Charsets.UTF_8))))
-            .joinToString("\n")
-            .toByteArray(Charsets.UTF_8)
+    fun build(phoneId: String, pcId: String, nonce: String, reason: String, program: String, match: Int, expiry: Long): ByteArray =
+        listOf(
+            LABEL, phoneId, pcId, nonce,
+            Base64Url.encode(sha256(reason.toByteArray(Charsets.UTF_8))),
+            Base64Url.encode(sha256(program.toByteArray(Charsets.UTF_8))),
+            match.toString(), expiry.toString(),
+        ).joinToString("\n").toByteArray(Charsets.UTF_8)
 
     /** [key] (SPKI) and [signature] are base64url DER; anything malformed is `false`. */
     fun verify(key: String, message: ByteArray, signature: String): Boolean {
@@ -153,38 +168,79 @@ object ApprovalMessage {
     const val ALGORITHM = "SHA256withECDSA"
 }
 
-/** Validated `request_approval` params (APPROVAL.md §4). */
-data class ApprovalParams(val reason: String, val nonce: String, val timeoutMillis: Long) {
+/** Validated `request_approval` params (APPROVAL.md §4). [expiry] is in Unix milliseconds. */
+data class ApprovalParams(
+    val reason: String,
+    val program: String,
+    val nonce: String,
+    val match: Int,
+    val expiry: Long,
+    val timeoutMillis: Long,
+) {
     companion object {
         const val DEFAULT_TIMEOUT_MS = 30_000L
         const val MIN_TIMEOUT_MS = 5_000L
         const val MAX_TIMEOUT_MS = 120_000L
         const val MAX_REASON = 200
+        const val MAX_PROGRAM = 60
+        const val MIN_MATCH = 10
+        const val MAX_MATCH = 99
         const val NONCE_BYTES = 32
 
-        /** @throws RpcException `-32602` for anything that breaks the rules of §4. */
-        fun parse(params: JsonObject): ApprovalParams {
+        /** How far `expiry` may be beyond `timeout_ms` from now. */
+        const val MAX_EXPIRY_AFTER_TIMEOUT_MS = 60_000L
+
+        /** How much the phone's and the PC's clocks may differ, either way. */
+        const val CLOCK_TOLERANCE_MS = 300_000L
+
+        /**
+         * @param nowMillis the phone's clock, which `expiry` is checked against.
+         * @throws RpcException `-32602` for anything that breaks the rules of §4.
+         */
+        fun parse(params: JsonObject, nowMillis: Long): ApprovalParams {
             val reason = parseReason(params)
+            val program = parseProgram(params)
             val nonce = params.string("nonce") ?: invalidParams("nonce is required")
             if (Base64Url.decode(nonce)?.size != NONCE_BYTES) invalidParams("nonce must be $NONCE_BYTES bytes, base64url")
-            return ApprovalParams(reason, nonce, parseTimeout(params))
+            val match = parseMatch(params)
+            val timeout = parseTimeout(params)
+            val expiry = params["expiry"]?.let(::integer) ?: invalidParams("expiry is required, an integer")
+            if (expiry < nowMillis - CLOCK_TOLERANCE_MS) {
+                invalidParams("expiry is ${(nowMillis - expiry) / 1000} s behind the phone's clock; check that the PC's and the phone's clocks are right")
+            }
+            if (expiry > nowMillis + timeout + MAX_EXPIRY_AFTER_TIMEOUT_MS + CLOCK_TOLERANCE_MS) {
+                invalidParams("expiry is ${(expiry - nowMillis) / 1000} s ahead of the phone's clock, more than timeout_ms + 60 s; check that the PC's and the phone's clocks are right")
+            }
+            return ApprovalParams(reason, program, nonce, match, expiry, timeout)
         }
 
         /** `reason` of `request_approval` and `decrypt`. */
-        internal fun parseReason(params: JsonObject): String {
+        internal fun parseReason(params: JsonObject): String = parseShown(params, "reason", MAX_REASON)
+
+        /** `program` of `request_approval` and `decrypt`. */
+        internal fun parseProgram(params: JsonObject): String = parseShown(params, "program", MAX_PROGRAM)
+
+        private fun parseShown(params: JsonObject, name: String, max: Int): String {
             // Accepted or rejected exactly as received: never trimmed or normalized, because the
             // PC hashes the string it sent.
-            val reason = params.string("reason") ?: invalidParams("reason is required")
-            if (!isDisplayable(reason)) {
-                invalidParams("reason must not contain control characters, bidirectional controls, invisible characters, line separators or unpaired surrogates")
+            val text = params.string(name) ?: invalidParams("$name is required")
+            if (!isDisplayable(text)) {
+                invalidParams("$name must not contain control characters, bidirectional controls, invisible characters, line separators or unpaired surrogates")
             }
-            val length = reason.codePointCount(0, reason.length)
-            if (length < 1) invalidParams("reason must not be empty")
-            if (length > MAX_REASON) invalidParams("reason must be at most $MAX_REASON code points")
-            if (isSpace(reason.codePointAt(0)) || isSpace(reason.codePointBefore(reason.length))) {
-                invalidParams("reason must not start or end with whitespace")
+            val length = text.codePointCount(0, text.length)
+            if (length < 1) invalidParams("$name must not be empty")
+            if (length > max) invalidParams("$name must be at most $max code points")
+            if (isSpace(text.codePointAt(0)) || isSpace(text.codePointBefore(text.length))) {
+                invalidParams("$name must not start or end with whitespace")
             }
-            return reason
+            return text
+        }
+
+        /** `match` of `request_approval` and `decrypt`. */
+        internal fun parseMatch(params: JsonObject): Int {
+            val match = params["match"]?.let(::integer)
+            if (match == null || match !in MIN_MATCH..MAX_MATCH) invalidParams("match is required, an integer $MIN_MATCH-$MAX_MATCH")
+            return match.toInt()
         }
 
         /** `timeout_ms` of `request_approval` and `decrypt`. */

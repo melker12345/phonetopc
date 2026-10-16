@@ -148,7 +148,7 @@ class DecryptTest {
     private val pin get() = ApprovalKeyInfo.of(approver.keyPair.public.encoded).pin
 
     private fun request(id: Int = 9, ciphertext: ByteArray = approver.encrypt(secret), keyPin: String = pin, extra: String = "") =
-        """{"jsonrpc":"2.0","id":$id,"method":"decrypt","params":{"reason":"Decrypt a.age","key_pin":"$keyPin",""" +
+        """{"jsonrpc":"2.0","id":$id,"method":"decrypt","params":{"reason":"Decrypt a.age","program":"age","match":42,"key_pin":"$keyPin",""" +
             """"ciphertext":"${Base64Url.encode(ciphertext)}"$extra}}"""
 
     private fun JsonObject.result() = this["result"]!!.jsonObject
@@ -167,6 +167,9 @@ class DecryptTest {
         scope.runCurrent()
         val req = approver.requests.single()
         assertEquals("Decrypt a.age", req.reason)
+        assertEquals("age", req.program)
+        assertEquals(42, req.match)
+        assertTrue(42 in req.choices)
         assertEquals(pc, req.pc)
         approver.answer.complete(null)
         scope.runCurrent()
@@ -202,6 +205,9 @@ class DecryptTest {
         assertEquals(-32602, s.send(request(ciphertext = ByteArray(100))).single().errorCode())
         assertEquals(-32602, s.send(request(extra = ""","timeout_ms":1""")).single().errorCode())
         assertEquals(-32602, s.send("""{"jsonrpc":"2.0","id":1,"method":"decrypt","params":{"reason":"x"}}""").single().errorCode())
+        assertEquals(-32602, s.send(request().replace("\"match\":42", "\"match\":9")).single().errorCode())
+        assertEquals(-32602, s.send(request().replace("\"program\":\"age\",", "")).single().errorCode())
+        assertEquals(-32602, s.send(request().replace("\"match\":42,", "")).single().errorCode())
         assertTrue(approver.requests.isEmpty())
     }
 
@@ -211,7 +217,7 @@ class DecryptTest {
         scope.runCurrent()
         assertEquals("busy", s.send(request(id = 2)).single().why())
         val nonce = Base64Url.encode(Secrets.bytes(32))
-        val approval = s.send("""{"jsonrpc":"2.0","id":3,"method":"request_approval","params":{"reason":"Deploy?","nonce":"$nonce"}}""")
+        val approval = s.send("""{"jsonrpc":"2.0","id":3,"method":"request_approval","params":{"reason":"Deploy?","program":"deploy.sh","nonce":"$nonce","match":42,"expiry":${System.currentTimeMillis() + 40_000}}}""")
         assertEquals("busy", approval.single().why())
     }
 

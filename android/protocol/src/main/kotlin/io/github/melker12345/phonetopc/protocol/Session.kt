@@ -519,7 +519,7 @@ class Session internal constructor(
     }
 
     private fun requestApproval(params: JsonObject, replyId: JsonElement): Handled {
-        val parsed = ApprovalParams.parse(params)
+        val parsed = ApprovalParams.parse(params, hub.approvals?.clock?.invoke() ?: System.currentTimeMillis())
         val service = hub.approvals
         val pcInfo = pc
         if (service == null || pcInfo == null) {

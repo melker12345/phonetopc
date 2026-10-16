@@ -103,9 +103,12 @@ class ApprovalSessionTest {
     private val nonce = Base64Url.encode(Secrets.bytes(32))
     private val reason = "Run deploy.sh on arch-desktop?"
 
-    private fun approvalRequest(id: Int = 7, timeout: Int? = null, n: String = nonce) =
-        """{"jsonrpc":"2.0","id":$id,"method":"request_approval","params":{"reason":"$reason","nonce":"$n"""" +
-            (timeout?.let { ""","timeout_ms":$it""" } ?: "") + "}}"
+    private val program = "deploy.sh"
+    private val expiry = System.currentTimeMillis() + 40_000
+
+    private fun approvalRequest(id: Int = 7, timeout: Int? = null, n: String = nonce, match: Int = 42) =
+        """{"jsonrpc":"2.0","id":$id,"method":"request_approval","params":{"reason":"$reason","program":"$program",""" +
+            """"nonce":"$n","match":$match,"expiry":$expiry""" + (timeout?.let { ""","timeout_ms":$it""" } ?: "") + "}}"
 
     private fun JsonObject.result() = this["result"]!!.jsonObject
     private fun JsonObject.errorCode() = this["error"]?.jsonObject?.get("code")?.jsonPrimitive?.int
@@ -151,6 +154,9 @@ class ApprovalSessionTest {
         val (s, _) = session()
         assertEquals(-32602, s.send(approvalRequest(n = "short")).single().errorCode())
         assertEquals(-32602, s.send(approvalRequest(timeout = 1000)).single().errorCode())
+        assertEquals(-32602, s.send(approvalRequest(match = 100)).single().errorCode())
+        assertEquals(-32602, s.send(approvalRequest().replace(",\"expiry\":$expiry", "")).single().errorCode())
+        assertEquals(-32602, s.send(approvalRequest().replace(",\"program\":\"$program\"", "")).single().errorCode())
         assertEquals(-32602, s.send("""{"jsonrpc":"2.0","id":1,"method":"request_approval"}""").single().errorCode())
         assertEquals(-32602, s.send("""{"jsonrpc":"2.0","id":1,"method":"request_approval","params":[]}""").single().errorCode())
         // Even an unavailable phone checks params first.
@@ -165,11 +171,13 @@ class ApprovalSessionTest {
         val request = approver.requests.single()
         assertEquals(pc, request.pc)
         assertEquals(reason, request.reason)
+        assertEquals(program, request.program)
+        assertEquals(42, request.match)
         assertEquals(30_000L, request.timeoutMillis)
         // §5: phone id from hello.device.id, pc id from hello.pc.id.
         val phoneId = hello["device"]!!.jsonObject["id"]!!.jsonPrimitive.content
         val pcId = hello["pc"]!!.jsonObject["id"]!!.jsonPrimitive.content
-        val pcMessage = ApprovalMessage.build(phoneId, pcId, nonce, reason)
+        val pcMessage = ApprovalMessage.build(phoneId, pcId, nonce, reason, program, 42, expiry)
         assertArrayEquals(pcMessage, request.message)
 
         approver.answer.complete(ApprovalOutcome.Approved(approver.sign(request.message)))
@@ -323,7 +331,7 @@ class ApprovalSessionTest {
     }
 
     @Test fun outcomesPassThrough() {
-        for (why in listOf(ApprovalWhy.DENIED, ApprovalWhy.CANCELLED, ApprovalWhy.LOCKOUT, ApprovalWhy.UNAVAILABLE)) {
+        for (why in listOf(ApprovalWhy.DENIED, ApprovalWhy.CANCELLED, ApprovalWhy.LOCKOUT, ApprovalWhy.UNAVAILABLE, ApprovalWhy.MISMATCH)) {
             val (s, _) = session()
             approver.answer = CompletableDeferred(ApprovalOutcome.Refused(why))
             s.send(approvalRequest())

@@ -7,6 +7,7 @@ import io.github.melker12345.phonetopc.protocol.security.Base64Url
 import io.github.melker12345.phonetopc.protocol.security.Pem
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -25,7 +26,9 @@ class ApprovalMessageTest {
 
     private fun JsonObject.s(key: String) = this[key]!!.jsonPrimitive.content
 
-    private fun message(v: JsonObject) = ApprovalMessage.build(v.s("phone_id"), v.s("pc_id"), v.s("nonce"), v.s("reason"))
+    private fun message(v: JsonObject) = ApprovalMessage.build(
+        v.s("phone_id"), v.s("pc_id"), v.s("nonce"), v.s("reason"), v.s("program"), v.s("match").toInt(), v.s("expiry").toLong(),
+    )
 
     @Test fun messageBytesMatchTheVector() {
         val valid = vectors["valid"]!!.jsonObject
@@ -48,7 +51,9 @@ class ApprovalMessageTest {
 
     @Test fun rejectsEveryTamperedVariant() {
         val invalid = vectors["invalid"]!!.jsonArray.map { it.jsonObject }
-        assertTrue(invalid.size >= 6)
+        assertTrue(invalid.size >= 10)
+        // A real signature over the message of phonetopc-approval/1 is one of them.
+        assertTrue(invalid.any { it.s("name") == "signature over phonetopc-approval/1" })
         for (v in invalid) {
             // Built from the verifier's own values, never from echoed ones (§5).
             assertFalse(v.s("name"), ApprovalMessage.verify(v.s("key"), message(v), v.s("signature")))
@@ -73,20 +78,25 @@ class ApprovalMessageTest {
         assertTrue(ApprovalMessage.verify(valid.s("key"), message(valid), Base64Url.encode(sig)))
     }
 
-    @Test fun hashesTheReasonAsUtf8() {
-        val bytes = ApprovalMessage.build("p", "c", "n", "Kör deploy.sh? ✓")
-        val last = String(bytes, Charsets.UTF_8).substringAfterLast('\n')
-        val expected = Base64Url.encode(
-            java.security.MessageDigest.getInstance("SHA-256").digest("Kör deploy.sh? ✓".toByteArray(Charsets.UTF_8)),
-        )
-        assertEquals(expected, last)
+    @Test fun hashesTheReasonAndProgramAsUtf8() {
+        val bytes = ApprovalMessage.build("p", "c", "n", "Kör deploy.sh? ✓", "dëploy", 42, 1760000040000)
+        val lines = String(bytes, Charsets.UTF_8).split('\n')
+        fun hash(text: String) = Base64Url.encode(java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)))
+        assertEquals(listOf("phonetopc-approval/2", "p", "c", "n", hash("Kör deploy.sh? ✓"), hash("dëploy"), "42", "1760000040000"), lines)
     }
 
     // ---- params (§4) ----
 
     private val nonce = Base64Url.encode(ByteArray(32) { it.toByte() })
 
-    private fun parse(json: String) = ApprovalParams.parse(Json.parseToJsonElement(json).jsonObject)
+    private val now = 1_760_000_000_000L
+
+    /** Parses [json] at [now], with valid `program`, `match` and `expiry` where it has none. */
+    private fun parse(json: String): ApprovalParams {
+        val given = Json.parseToJsonElement(json).jsonObject
+        val defaults = mapOf("program" to JsonPrimitive("deploy.sh"), "match" to JsonPrimitive(42), "expiry" to JsonPrimitive(now + 40_000))
+        return ApprovalParams.parse(JsonObject(defaults + given), now)
+    }
 
     private fun assertInvalid(json: String) {
         try {
@@ -100,6 +110,9 @@ class ApprovalMessageTest {
     @Test fun paramsDefaultsAndBounds() {
         val p = parse("""{"reason":"Run deploy.sh?","nonce":"$nonce"}""")
         assertEquals("Run deploy.sh?", p.reason)
+        assertEquals("deploy.sh", p.program)
+        assertEquals(42, p.match)
+        assertEquals(now + 40_000, p.expiry)
         assertEquals(nonce, p.nonce)
         assertEquals(30_000L, p.timeoutMillis)
         assertEquals(5_000L, parse("""{"reason":"x","nonce":"$nonce","timeout_ms":5000}""").timeoutMillis)
@@ -167,6 +180,36 @@ class ApprovalMessageTest {
         ).forEach(::assertInvalid)
     }
 
+    @Test fun programFollowsTheRulesOfReasonWithAtMost60CodePoints() {
+        assertEquals("p".repeat(60), parse("""{"reason":"x","program":"${"p".repeat(60)}","nonce":"$nonce"}""").program)
+        assertEquals("😀".repeat(60), parse("""{"reason":"x","program":"${"😀".repeat(60)}","nonce":"$nonce"}""").program)
+        listOf(
+            """null""", """5""", """""""", """"${"p".repeat(61)}"""", """" deploy"""", """"deploy """",
+            """"de\tploy"""", """"deploy\u202esh"""", """"zw\u200bsp"""",
+        ).forEach { assertInvalid("""{"reason":"x","program":$it,"nonce":"$nonce"}""") }
+    }
+
+    @Test fun matchIsAnIntegerFrom10To99() {
+        assertEquals(10, parse("""{"reason":"x","nonce":"$nonce","match":10}""").match)
+        assertEquals(99, parse("""{"reason":"x","nonce":"$nonce","match":99}""").match)
+        listOf("null", "9", "100", "-42", "42.5", "4.2e1", "\"42\"").forEach {
+            assertInvalid("""{"reason":"x","nonce":"$nonce","match":$it}""")
+        }
+    }
+
+    @Test fun expiryAllowsFiveMinutesOfClockDifference() {
+        val minute = 60_000L
+        assertEquals(now - 5 * minute, parse("""{"reason":"x","nonce":"$nonce","expiry":${now - 5 * minute}}""").expiry)
+        parse("""{"reason":"x","nonce":"$nonce","expiry":${now + 30_000 + minute + 5 * minute}}""")
+        parse("""{"reason":"x","nonce":"$nonce","timeout_ms":120000,"expiry":${now + 120_000 + minute + 5 * minute}}""")
+        listOf(
+            """"expiry":${now - 5 * minute - 1}""",
+            """"expiry":${now + 30_000 + minute + 5 * minute + 1}""",
+            """"timeout_ms":5000,"expiry":${now + 5_000 + minute + 5 * minute + 1}""",
+            """"expiry":null""", """"expiry":"$now"""", """"expiry":$now.5""", """"expiry":0""",
+        ).forEach { assertInvalid("""{"reason":"x","nonce":"$nonce",$it}""") }
+    }
+
     @Test fun outcomesSerializeLikeTheSchema() {
         assertEquals(
             """{"approved":true,"signature":"AQI"}""",
@@ -174,7 +217,7 @@ class ApprovalMessageTest {
         )
         // `failed` is for decrypt only (DECRYPT.md §4).
         assertEquals(
-            listOf("denied", "cancelled", "timeout", "busy", "lockout", "unavailable", "failed"),
+            listOf("denied", "cancelled", "mismatch", "timeout", "busy", "cooldown", "lockout", "unavailable", "failed"),
             ApprovalWhy.entries.map { it.wire },
         )
         assertEquals("""{"approved":false,"why":"lockout"}""", ApprovalOutcome.Refused(ApprovalWhy.LOCKOUT).toJson().toString())

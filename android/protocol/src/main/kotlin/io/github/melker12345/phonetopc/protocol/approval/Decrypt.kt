@@ -32,24 +32,36 @@ object DecryptCipher {
 }
 
 /** Validated `decrypt` params (DECRYPT.md §4). */
-class DecryptParams(val reason: String, val keyPin: String, val ciphertext: ByteArray, val timeoutMillis: Long) {
+class DecryptParams(
+    val reason: String,
+    val program: String,
+    val match: Int,
+    val keyPin: String,
+    val ciphertext: ByteArray,
+    val timeoutMillis: Long,
+) {
     companion object {
         /** @throws io.github.melker12345.phonetopc.protocol.RpcException `-32602`. */
         fun parse(params: JsonObject): DecryptParams {
             val reason = ApprovalParams.parseReason(params)
+            val program = ApprovalParams.parseProgram(params)
+            val match = ApprovalParams.parseMatch(params)
             val pin = params.string("key_pin") ?: invalidParams("key_pin is required")
             val text = params.string("ciphertext") ?: invalidParams("ciphertext is required")
             val ciphertext = Base64Url.decode(text)?.takeIf { it.isNotEmpty() } ?: invalidParams("ciphertext must be base64url")
-            return DecryptParams(reason, pin, ciphertext, ApprovalParams.parseTimeout(params))
+            return DecryptParams(reason, program, match, pin, ciphertext, ApprovalParams.parseTimeout(params))
         }
     }
 }
 
-/** One decryption as the UI sees it. [reason] is shown verbatim. */
+/** One decryption as the UI sees it, with number matching as in [ApprovalRequest]. */
 class DecryptRequest(
     val id: Long,
     val pc: PcInfo,
+    val program: String,
     val reason: String,
+    val match: Int,
+    val choices: List<Int>,
     val timeoutMillis: Long,
     val ciphertext: ByteArray,
 )
