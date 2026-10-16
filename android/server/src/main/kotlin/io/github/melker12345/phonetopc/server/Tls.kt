@@ -62,19 +62,24 @@ data class Peer(val host: String, val port: Int) {
     override fun toString() = if (host.contains(':')) "[$host]:$port" else "$host:$port"
 }
 
-/** What the WebSocket server learns from, and tells, the [TlsFrontend] about a connection it relays. */
+/**
+ * What the WebSocket server learns from, and tells, the [TlsFrontend] about a connection it
+ * relays. Connections are named by their loopback address and port together: another app on
+ * the phone can connect from the same port on 127.0.0.2, but never from the same address and
+ * port, so it can't pass as a relayed client or have one dropped.
+ */
 interface Relays {
     /** The real client behind a loopback connection, or `null` if it didn't come through here. */
-    fun peerFor(loopbackPort: Int): Peer?
+    fun peerFor(loopback: Peer): Peer?
 
     /** The client authenticated, so it no longer counts against its address's limit. */
-    fun authenticated(loopbackPort: Int)
+    fun authenticated(loopback: Peer)
 
     /**
      * Drops the client at once, unsent data and all. For a client that stopped reading: a
      * normal close would wait for it forever.
      */
-    fun drop(loopbackPort: Int)
+    fun drop(loopback: Peer)
 }
 
 /**
@@ -122,8 +127,8 @@ class TlsFrontend(
     }
 
     private var server: SSLServerSocket? = null
-    private val peers = ConcurrentHashMap<Int, Peer>()
-    private val clients = ConcurrentHashMap<Int, Client>()
+    private val peers = ConcurrentHashMap<Peer, Peer>()
+    private val clients = ConcurrentHashMap<Peer, Client>()
     private val open = ConcurrentHashMap.newKeySet<Socket>()
     private val active = AtomicInteger()
     private val unauthenticated = ConcurrentHashMap<String, Int>()
@@ -137,14 +142,14 @@ class TlsFrontend(
 
     val boundPort: Int get() = requireNotNull(server) { "not started" }.localPort
 
-    override fun peerFor(loopbackPort: Int): Peer? = peers[loopbackPort]
+    override fun peerFor(loopback: Peer): Peer? = peers[loopback]
 
-    override fun authenticated(loopbackPort: Int) {
-        clients[loopbackPort]?.let(::release)
+    override fun authenticated(loopback: Peer) {
+        clients[loopback]?.let(::release)
     }
 
-    override fun drop(loopbackPort: Int) {
-        val client = clients[loopbackPort] ?: return
+    override fun drop(loopback: Peer) {
+        val client = clients[loopback] ?: return
         // Off the caller's thread, since closing a TLS socket can still block.
         runCatching { pool.execute { abort(client.socket) } }
     }
@@ -232,7 +237,7 @@ class TlsFrontend(
         val client = c.socket
         open += client
         var backend: Socket? = null
-        var loopbackPort = -1
+        var loopback: Peer? = null
         // Cut the connection unless the server has answered the upgrade by then.
         val deadline = try {
             deadlines.schedule({ abort(client) }, handshakeTimeoutMillis.toLong(), TimeUnit.MILLISECONDS)
@@ -255,9 +260,10 @@ class TlsFrontend(
                 onError("can't reach the backend at $backendHost:$backendPort", e)
                 throw e
             }
-            loopbackPort = b.localPort
-            peers[loopbackPort] = Peer(client.inetAddress.hostAddress ?: "?", client.port)
-            clients[loopbackPort] = c
+            val lb = Peer(b.localAddress.hostAddress ?: "?", b.localPort)
+            loopback = lb
+            peers[lb] = Peer(client.inetAddress.hostAddress ?: "?", client.port)
+            clients[lb] = c
 
             val back = pool.submit {
                 pump(b.getInputStream(), client.getOutputStream(), onFirst = { deadline?.cancel(false) })
@@ -273,9 +279,9 @@ class TlsFrontend(
         } finally {
             deadline?.cancel(false)
             release(c)
-            if (loopbackPort >= 0) {
-                peers.remove(loopbackPort)
-                clients.remove(loopbackPort)
+            if (loopback != null) {
+                peers.remove(loopback)
+                clients.remove(loopback)
             }
             closeBoth(client, backend)
             open -= client

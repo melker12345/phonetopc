@@ -77,9 +77,9 @@ class PhonetopcServer(
             phonetopcModule(
                 hub, pingPeriod, pingTimeout, helloTimeout,
                 object : Relays {
-                    override fun peerFor(loopbackPort: Int) = front?.peerFor(loopbackPort)
-                    override fun authenticated(loopbackPort: Int) { front?.authenticated(loopbackPort) }
-                    override fun drop(loopbackPort: Int) { front?.drop(loopbackPort) }
+                    override fun peerFor(loopback: Peer) = front?.peerFor(loopback)
+                    override fun authenticated(loopback: Peer) { front?.authenticated(loopback) }
+                    override fun drop(loopback: Peer) { front?.drop(loopback) }
                 },
             )
         }.start(wait = false)
@@ -162,10 +162,11 @@ private suspend fun DefaultWebSocketServerSession.serve(
     relays: Relays?,
 ) {
     val local = call.request.local
+    val loopback = Peer(local.remoteAddress, local.remotePort)
     val peer = if (relays == null) {
-        Peer(local.remoteAddress, local.remotePort)
+        loopback
     } else {
-        relays.peerFor(local.remotePort) ?: run {
+        relays.peerFor(loopback) ?: run {
             // A loopback connection that didn't come through the TLS frontend.
             close(CloseReason(CloseCodes.POLICY_VIOLATION, "use wss://"))
             return
@@ -191,7 +192,7 @@ private suspend fun DefaultWebSocketServerSession.serve(
                     close(CloseReason(request.code, request.reason))
                     awaitCancellation()
                 }
-                relays?.drop(local.remotePort)
+                relays?.drop(loopback)
                 this@serve.cancel()
             }
             // SECURITY.md §5: drop connections that don't authenticate promptly. The session
@@ -211,7 +212,7 @@ private suspend fun DefaultWebSocketServerSession.serve(
                             // Paired PCs don't count against their address's limit.
                             if (!authenticated && session.pc != null) {
                                 authenticated = true
-                                relays?.authenticated(local.remotePort)
+                                relays?.authenticated(loopback)
                             }
                         }
                         is Frame.Binary -> {

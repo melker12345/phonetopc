@@ -3,6 +3,8 @@ package io.github.melker12345.phonetopc.server
 import io.github.melker12345.phonetopc.protocol.security.Pem
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import org.junit.After
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -161,7 +163,7 @@ class TlsFrontendTest {
             first.getOutputStream().flush()
             val deadline = System.currentTimeMillis() + 2_000
             while (backend!!.loopbackPorts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
-            frontend!!.authenticated(backend!!.loopbackPorts.single())
+            frontend!!.authenticated(Peer("127.0.0.1", backend!!.loopbackPorts.single()))
             tls(port).use { second -> assertTrue("refused", !closedWithin(second, 300)) }
         }
     }
@@ -173,6 +175,23 @@ class TlsFrontendTest {
             held.forEach { assertTrue("refused", !closedWithin(it, 300)) }
         } finally {
             held.forEach { it.close() }
+        }
+    }
+
+    @Test fun relaysAreKnownByLoopbackAddressAndPort() {
+        val port = start()
+        val f = frontend!!
+        tls(port).use { client ->
+            client.outputStream.write('G'.code)
+            client.outputStream.flush()
+            val deadline = System.currentTimeMillis() + 5_000
+            while (backend!!.loopbackPorts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+            val lp = backend!!.loopbackPorts.single()
+            assertNotNull(f.peerFor(Peer("127.0.0.1", lp)))
+            // Another app on the phone can use the same port from another loopback address.
+            assertNull(f.peerFor(Peer("127.0.0.2", lp)))
+            f.drop(Peer("127.0.0.2", lp))
+            assertTrue("dropped by a stranger", !closedWithin(client, 300))
         }
     }
 }
