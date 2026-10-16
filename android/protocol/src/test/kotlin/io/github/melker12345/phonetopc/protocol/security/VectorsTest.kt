@@ -117,4 +117,12 @@ class CryptoTest {
         now = 1_000
         assertFalse(limiter.isBlocked("1.2.3.4"))
     }
+
+    @Test fun rateLimiterExemptsLoopback() {
+        val limiter = HelloRateLimiter(maxFailures = 1)
+        for (a in listOf("127.0.0.1", "::1", "0:0:0:0:0:0:0:1")) {
+            repeat(3) { limiter.recordFailure(a) }
+            assertFalse(a, limiter.isBlocked(a))
+        }
+    }
 }

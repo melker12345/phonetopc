@@ -4,7 +4,8 @@ package io.github.melker12345.phonetopc.protocol.security
  * Limits failed `hello`s per source address (SECURITY.md §5). Sliding window: once an address
  * has [maxFailures] failures within [windowMillis], it is blocked until the oldest of them ages
  * out. Successful hellos don't reset the count, so guessing can't be interleaved with a
- * valid login from the same address. Thread-safe.
+ * valid login from the same address. Loopback is exempt: `adb forward` clients all come from
+ * 127.0.0.1, so one bad client would lock out the others. Thread-safe.
  */
 class HelloRateLimiter(
     private val maxFailures: Int = 5,
@@ -12,11 +13,13 @@ class HelloRateLimiter(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Bound on tracked addresses so a flood of sources can't grow memory without limit. */
     private val maxAddresses: Int = 1024,
+    private val exempt: (address: String) -> Boolean = ::isLoopback,
 ) {
     private val failures = LinkedHashMap<String, ArrayDeque<Long>>()
 
     @Synchronized
     fun isBlocked(address: String): Boolean {
+        if (exempt(address)) return false
         val q = failures[address] ?: return false
         prune(q, clock())
         if (q.isEmpty()) failures.remove(address)
@@ -25,6 +28,7 @@ class HelloRateLimiter(
 
     @Synchronized
     fun recordFailure(address: String) {
+        if (exempt(address)) return
         val now = clock()
         val q = failures.getOrPut(address) { ArrayDeque() }
         prune(q, now)
@@ -34,6 +38,11 @@ class HelloRateLimiter(
             // Drop the least recently inserted address.
             failures.keys.firstOrNull()?.let { failures.remove(it) }
         }
+    }
+
+    private companion object {
+        fun isLoopback(address: String) =
+            address.startsWith("127.") || address == "::1" || address == "0:0:0:0:0:0:0:1"
     }
 
     private fun prune(q: ArrayDeque<Long>, now: Long) {

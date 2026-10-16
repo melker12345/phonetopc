@@ -227,7 +227,9 @@ In secure mode, `hello` gains an `auth` member:
   with code 1008. Before a successful `hello`, the `-32003` rule of `PROTOCOL.md` §3 still applies.
 - The server SHOULD close connections that haven't sent a successful `hello` within 10 seconds (code 1008), and
   SHOULD rate-limit failed `hello`s to 5 per minute per source address; a limited address is closed with 1013,
-  even with a valid token. Conformance runners need the limit off or at least 20 per minute.
+  even with a valid token. Loopback MAY be exempt: `adb forward` clients all come from 127.0.0.1, so one bad
+  client would lock out the rest, and tokens are too long to guess anyway. Conformance runners need the limit off
+  or at least 20 per minute.
 - The TLS handshake and the WebSocket upgrade together MUST finish within the `hello` timeout (10 s by default),
   however slowly the bytes arrive. A server SHOULD limit how many unauthenticated connections one address can
   hold open (Android: 8); loopback is exempt, because `adb forward` clients all come from 127.0.0.1, but a

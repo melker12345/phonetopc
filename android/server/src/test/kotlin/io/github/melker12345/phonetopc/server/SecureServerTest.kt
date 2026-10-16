@@ -13,6 +13,7 @@ import io.github.melker12345.phonetopc.protocol.SensorCatalog
 import io.github.melker12345.phonetopc.protocol.SensorInfo
 import io.github.melker12345.phonetopc.protocol.SensorSource
 import io.github.melker12345.phonetopc.protocol.ServerInfo
+import io.github.melker12345.phonetopc.protocol.security.HelloRateLimiter
 import io.github.melker12345.phonetopc.protocol.security.Pem
 import io.github.melker12345.phonetopc.protocol.security.Pins
 import io.github.melker12345.phonetopc.protocol.security.Secrets
@@ -65,7 +66,10 @@ class SecureServerTest {
 
     private val hub = BridgeHub(
         Source(), ServerInfo("phonetopc-android", "test"), { DeviceInfo("dev1", "Phone", platform = "android") },
-        security = SecureAccess(authenticate = { t -> pc.takeIf { TokenHash.matches(t, TokenHash.of(token)) } }),
+        security = SecureAccess(
+            authenticate = { t -> pc.takeIf { TokenHash.matches(t, TokenHash.of(token)) } },
+            limiter = HelloRateLimiter(exempt = { false }), // these tests connect over loopback
+        ),
     )
     private var server: PhonetopcServer? = null
 
