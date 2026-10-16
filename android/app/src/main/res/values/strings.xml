@@ -162,6 +162,7 @@
     <string name="pair_err_expired">The pairing session on your PC timed out. Run phonetopc pair again.</string>
     <string name="pair_err_unsupported">Your PC uses a different pairing version. Update phonetopc on the PC or this app.</string>
     <string name="pair_err_pin_mismatch">The PC that answered isn\'t the one in the QR code. Nothing was sent. Check that you scanned your own PC\'s code.</string>
+    <string name="pair_err_id_taken">This PC uses the same id as %1$s, which you already paired, but it has a different key. Nothing was sent. If %1$s was reinstalled, remove it under Paired devices and pair again.</string>
     <string name="pair_err_unreachable">Couldn\'t reach your PC. Check that both are on the same network and phonetopc pair is still running.</string>
     <string name="pair_err_connection_lost">The connection to your PC dropped. Try again.</string>
     <string name="pair_err_timeout">Your PC didn\'t answer in time.</string>

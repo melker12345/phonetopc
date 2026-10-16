@@ -84,6 +84,12 @@ sealed interface PairingFailure {
 
     data object PinMismatch : PairingFailure
 
+    /**
+     * Another PC with a different key is already paired under this PC's id (SECURITY.md §6).
+     * Pairing would hand it that PC's place, so it stops before the token is sent.
+     */
+    data class IdTaken(val pairedName: String) : PairingFailure
+
     /** None of the PC's addresses could be reached. */
     data class Unreachable(val detail: String?) : PairingFailure
 
@@ -123,11 +129,13 @@ sealed interface PairingState {
  *
  * @param store persists the new pairing. Called only after the PC answered `pair_finish`, and
  *   before [state] becomes [PairingState.Paired].
+ * @param paired the stored PC with this id, as (name, pin), or `null`.
  */
 class PairingClient(
     private val connector: PairingConnector,
     private val phone: suspend () -> PhoneInfo,
     private val store: suspend (NewPairing) -> Unit,
+    private val paired: suspend (pcId: String) -> Pair<String, String>? = { null },
     private val requestTimeout: Duration = 15.seconds,
     /**
      * How long the PC's user may take to answer `pair_qr` and `pair_sas_confirm`. SECURITY.md
@@ -224,14 +232,23 @@ class PairingClient(
         }
     }
 
+    /** Re-pairing the same PC (same pin) is fine; another key under its id is refused. */
+    private suspend fun checkIdFree(pcId: String, pin: String) {
+        val (name, storedPin) = paired(pcId) ?: return
+        if (storedPin != pin) throw Failure(PairingFailure.IdTaken(name))
+    }
+
     /** §4.4: issue a fresh token; store the PC only after the PC's answer. */
     private suspend fun finish(ch: PairingChannel, pin: String, fallbackId: String?, fallbackName: String) {
         _state.value = PairingState.Finishing(fallbackName)
+        fallbackId?.let { checkIdFree(it, pin) }
         val token = Secrets.newToken()
         val result = ch.call("pair_finish", buildJsonObject { put("token", token) }, requestTimeout)
         val pc = result.lenientObj("pc")
         val id = pc?.lenientString("id")?.takeIf { it.isNotEmpty() } ?: fallbackId
             ?: throw ProtocolError("pair_finish result has no pc.id")
+        if (fallbackId != null && id != fallbackId) throw ProtocolError("pair_finish names another PC id than before")
+        checkIdFree(id, pin)
         val name = pc?.lenientString("name")?.takeIf(::isName) ?: fallbackName
         store(NewPairing(id, name, pin, token))
         _state.value = PairingState.Paired(id, name)

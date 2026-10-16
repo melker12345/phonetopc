@@ -184,8 +184,10 @@ Both ways end with the phone issuing a token to the PC:
   only after that answer, and shows it under *Paired devices*.
 - `pair_finish` is only valid after a successful `pair_qr` confirmation or a mutual SAS confirmation;
   otherwise `-32022`.
-- Re-pairing a PC that the phone already knows (same PC id) replaces its old token, and the phone closes sessions
-  that used the old token with 1008.
+- Re-pairing a PC that the phone already knows (same PC id and pin) replaces its old token, and the phone closes
+  sessions that used the old token with 1008. A PC that uses a known PC id with a **different** pin would take
+  that PC's place, including the PC id approvals are signed for: the phone MUST NOT send `pair_finish` to it
+  and MUST tell the user, who can remove the old PC first.
 - On the PC, a pairing whose `phone.id` is already paired with a **different** pin would replace that phone's
   entry, and with it the key the PC trusts (including for approvals). The PC MUST warn its user and get an
   explicit yes for that (an empty answer is no); a PC that pairs without asking MUST refuse it with `-32021`.

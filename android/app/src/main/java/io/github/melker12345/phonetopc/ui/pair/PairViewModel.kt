@@ -31,6 +31,7 @@ class PairViewModel(app: Application) : AndroidViewModel(app) {
         connector = WebSocketPairingConnector(),
         phone = ::phoneInfo,
         store = { graph.pairedPcs.add(it) },
+        paired = { id -> graph.pairedPcs.current().find { it.id == id }?.let { it.name to it.pin } },
     )
 
     val state: StateFlow<PairingState> = client.state

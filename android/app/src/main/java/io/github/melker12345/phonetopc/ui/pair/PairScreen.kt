@@ -510,6 +510,7 @@ private fun failureMessage(f: PairingFailure): String = when (f) {
     PairingFailure.Expired -> stringResource(R.string.pair_err_expired)
     PairingFailure.UnsupportedProtocol -> stringResource(R.string.pair_err_unsupported)
     PairingFailure.PinMismatch -> stringResource(R.string.pair_err_pin_mismatch)
+    is PairingFailure.IdTaken -> stringResource(R.string.pair_err_id_taken, f.pairedName)
     is PairingFailure.Unreachable -> stringResource(R.string.pair_err_unreachable)
     is PairingFailure.ConnectionLost -> stringResource(R.string.pair_err_connection_lost)
     PairingFailure.TimedOut -> stringResource(R.string.pair_err_timeout)

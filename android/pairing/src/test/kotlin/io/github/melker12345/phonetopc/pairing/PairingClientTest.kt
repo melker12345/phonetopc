@@ -50,6 +50,22 @@ class PairingClientTest {
         assertEquals("192.168.1.153", seen["addresses"]!!.jsonArray.single().jsonPrimitive.content)
     }
 
+    @Test fun anotherKeyUnderAPairedIdIsRefusedBeforeTheToken() = runTest {
+        val pc = FakePc()
+        val c = PairingClient(pc, phone = { phone }, store = { stored += it }, paired = { id -> ("old PC" to FakePc.MITM_PIN).takeIf { id == pc.id } })
+        c.pairWithQr(pc.qr())
+        assertEquals(PairingFailure.IdTaken("old PC"), failure(c))
+        assertEquals(listOf("pair_qr"), pc.calls)
+        assertTrue(stored.isEmpty())
+    }
+
+    @Test fun repairingTheSamePcIsFine() = runTest {
+        val pc = FakePc()
+        val c = PairingClient(pc, phone = { phone }, store = { stored += it }, paired = { id -> ("arch" to pc.pin).takeIf { id == pc.id } })
+        c.pairWithQr(pc.qr())
+        assertTrue(c.state.value is PairingState.Paired)
+    }
+
     @Test fun qrTriesEachHostInOrder() = runTest {
         val pc = FakePc(reachable = setOf("10.0.0.2"))
         val c = client(pc)
