@@ -294,7 +294,7 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// secureDialOptions checks the pin against the URL scheme and, for wss://,
+// secureDialOptions checks the pin and token against the URL scheme and, for wss://,
 // installs the pinned TLS configuration.
 func (o *options) secureDialOptions(url string) (*websocket.DialOptions, error) {
 	secure := strings.HasPrefix(url, "wss://")
@@ -303,6 +303,8 @@ func (o *options) secureDialOptions(url string) (*websocket.DialOptions, error) 
 		return nil, errors.New("phonetopc: a wss:// URL needs the phone's pin (WithPin); certificates are never trusted otherwise")
 	case !secure && o.pin != "":
 		return nil, fmt.Errorf("phonetopc: a pin was given but %s is not a wss:// URL; refusing to connect in plaintext", url)
+	case !secure && o.token != "":
+		return nil, fmt.Errorf("phonetopc: a token was given but %s is not a wss:// URL; refusing to send it in plaintext", url)
 	case !secure:
 		return o.dialOptions, nil
 	}

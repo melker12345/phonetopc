@@ -108,12 +108,15 @@ func TestSecurePinMismatch(t *testing.T) {
 	if n := frames.Load(); n != 0 {
 		t.Errorf("the server received %d frames despite the pin mismatch", n)
 	}
-	// No pin, or a pin with plaintext: refused before connecting.
+	// No pin, or a pin or token with plaintext: refused before connecting.
 	if _, err := client.Dial(testCtx(t), m.url, client.WithToken(m.pc.Token)); err == nil || !strings.Contains(err.Error(), "pin") {
 		t.Errorf("no pin: %v", err)
 	}
 	if _, err := client.Dial(testCtx(t), "ws://"+m.addr+"/v1/ws", client.WithPin(m.id.Pin)); err == nil || !strings.Contains(err.Error(), "plaintext") {
 		t.Errorf("plaintext with pin: %v", err)
+	}
+	if _, err := client.Dial(testCtx(t), "ws://"+m.addr+"/v1/ws", client.WithToken(m.pc.Token)); err == nil || !strings.Contains(err.Error(), "plaintext") {
+		t.Errorf("plaintext with token: %v", err)
 	}
 }
 
