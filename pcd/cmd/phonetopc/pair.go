@@ -381,6 +381,10 @@ func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for {
+		if p.fresh {
+			// Also drops a line typed but not yet ended with Enter.
+			flushInput(p.in)
+		}
 		fmt.Fprintf(p.out, "%s ", question)
 		select {
 		case <-ctx.Done():
