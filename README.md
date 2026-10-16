@@ -38,7 +38,7 @@ curl -N 'localhost:8767/v1/events?source=gyro'
 You need Go 1.27 or newer on a Linux PC, and an Android 8.0 or newer phone on the same network.
 
 ```sh
-cd pcd && go build -o bin/ ./cmd/...   # builds phonetopcd, phonetopc and phonetopc-mock
+cd pcd && go build -o bin/ ./cmd/...   # builds phonetopcd, phonetopc, age-plugin-phonetopc and phonetopc-mock
 ```
 
 **With a phone:** build and install the app ([`android/README.md`](android/README.md)), then:
