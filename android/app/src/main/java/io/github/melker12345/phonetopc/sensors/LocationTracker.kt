@@ -76,7 +76,12 @@ class LocationTracker(context: Context) {
     }
 
     fun stop(listener: LocationListenerCompat) {
-        manager?.let { LocationManagerCompat.removeUpdates(it, listener) }
+        val lm = manager ?: return
+        try {
+            LocationManagerCompat.removeUpdates(lm, listener)
+        } catch (_: SecurityException) {
+            // Permission revoked, which ended the updates too.
+        }
     }
 
     @SuppressLint("MissingPermission")
