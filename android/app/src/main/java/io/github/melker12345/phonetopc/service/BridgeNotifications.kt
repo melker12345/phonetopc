@@ -90,8 +90,7 @@ internal object BridgeNotifications {
         )
         val start = PendingIntent.getActivity(
             context, 3,
-            Intent(context, MainActivity::class.java)
-                .setAction(MainActivity.ACTION_START_SERVER)
+            Intent().setClassName(context, MainActivity.START_SERVER)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

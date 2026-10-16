@@ -70,8 +70,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         if (intent == null || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
-        if (intent.action == ACTION_START_SERVER) {
-            intent.action = null // don't start again on recreation
+        if (intent.component?.className == START_SERVER) {
+            intent.component = null // don't start again on recreation
             startServerOnResume = true
         }
     }
@@ -79,7 +79,11 @@ class MainActivity : ComponentActivity() {
     private var startServerOnResume = false
 
     companion object {
-        /** From the "Tap to start phonetopc" notification. */
-        const val ACTION_START_SERVER = "io.github.melker12345.phonetopc.action.START_SERVER"
+        /**
+         * The "Tap to start phonetopc" notification opens this activity through a non-exported
+         * alias of that name, so other apps, which can open this activity but not the alias,
+         * can't start the server.
+         */
+        val START_SERVER = "${MainActivity::class.java.`package`!!.name}.StartServer"
     }
 }

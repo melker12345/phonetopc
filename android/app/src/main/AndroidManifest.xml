@@ -69,6 +69,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- For the "Tap to start" notification only: MainActivity starts the server when opened
+             through this alias, which other apps can't open. -->
+        <activity-alias
+            android:name=".StartServer"
+            android:exported="false"
+            android:targetActivity=".MainActivity" />
 
         <!-- Fingerprint approval (APPROVAL.md): a transparent host for the biometric prompt, in
              its own task. Not showWhenLocked: from a locked phone the user unlocks first. -->
