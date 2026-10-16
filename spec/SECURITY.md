@@ -195,6 +195,7 @@ Both ways end with the phone issuing a token to the PC:
 - On the PC, a pairing whose `phone.id` is already paired with a **different** pin would replace that phone's
   entry, and with it the key the PC trusts (including for approvals). The PC MUST warn its user and get an
   explicit yes for that (an empty answer is no); a PC that pairs without asking MUST refuse it with `-32021`.
+  If the stored entry changed between the question and the save, the PC MUST NOT save (`-32603`).
 
 ### 4.5 Pairing errors
 

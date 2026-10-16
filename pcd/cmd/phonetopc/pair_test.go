@@ -458,6 +458,40 @@ func TestPairReplacingAnotherKey(t *testing.T) {
 	}
 }
 
+// TestPairStoreChangedDuringPrompt: if another process pairs the same phone
+// id with another key while the user is asked, the user's yes doesn't
+// overwrite it: they were never told about that entry.
+func TestPairStoreChangedDuringPrompt(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startPhone(t)
+	st := store.Open(filepath.Join(env["XDG_CONFIG_HOME"], "phonetopc"))
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	pc := startPair(t, env, pr)
+	u := pc.uri(t)
+	errc := make(chan error, 1)
+	go func() {
+		_, err := pairing.PairQR(tctx(t), u, ph.info(), security.NewToken())
+		errc <- err
+	}()
+	waitFor(t, &pc.out, `Pair with "Test Phone"? [y/N]`)
+
+	other := startPhone(t)
+	theirs := store.Device{ID: ph.id.ID, Name: "phone", Pin: other.id.Pin, Token: security.NewToken(), PairedAt: store.Now(time.Now())}
+	if err := st.PutDevice(theirs); err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(pw, "y\n")
+	err := <-errc
+	if code, _ := protocol.ErrorCodeOf(err); code != protocol.CodeInternalError {
+		t.Fatalf("want -32603, got %v", err)
+	}
+	if d, err := st.Find(ph.id.ID); err != nil || d.Pin != theirs.Pin || d.Token != theirs.Token {
+		t.Fatalf("overwritten: %+v %v", d, err)
+	}
+	waitFor(t, &pc.errb, "changed the pairing")
+}
+
 // pairDirect stores a pairing for ph in env's store without the listener.
 func pairDirect(t *testing.T, env map[string]string, ph *phone, name string, addrs []string) store.Device {
 	t.Helper()

@@ -105,7 +105,7 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	}
 
 	prompt := newTermPrompter(c.stdin, c.stdout, *yes, isTerminal(c.stdin))
-	prompt.replaces = func(phone pairing.PhoneInfo) (store.Device, bool) { return replaces(st, phone) }
+	prompt.stored = func(phone pairing.PhoneInfo) (store.Device, bool) { return stored(st, phone) }
 	l, err := pairing.New(pairing.Options{
 		PC:     protocol.PCInfo{ID: pc.ID, Name: pc.Name},
 		Cert:   pc.Cert,
@@ -125,10 +125,19 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 			if p.RemoteHost != "" && !slices.Contains(addrs, p.RemoteHost) {
 				addrs = append(addrs, p.RemoteHost)
 			}
-			return st.PutDevice(store.Device{
+			oldPin, ok := prompt.shown(p.Phone)
+			if !ok {
+				return errors.New("the pairing was not confirmed")
+			}
+			err := st.PutDeviceIf(store.Device{
 				ID: p.Phone.ID, Name: p.Phone.Name, Pin: p.Phone.Pin, Token: p.Token,
 				Port: p.Phone.Port, Addresses: addrs, PairedAt: store.Now(time.Now()),
-			})
+			}, oldPin)
+			if errors.Is(err, store.ErrDeviceChanged) {
+				fmt.Fprintf(c.stderr, "phonetopc: not saved: another phonetopc changed the pairing with %q (id %s) "+
+					"while you were asked; the phone may try again\n", p.Phone.Name, p.Phone.ID)
+			}
+			return err
 		},
 	})
 	if err != nil {
@@ -183,16 +192,14 @@ func (c *cli) pair(ctx context.Context, args []string) error {
 	return nil
 }
 
-// replaces returns the stored device that pairing phone would replace with a
-// different key: the phone was reset or reinstalled, or someone else claims
-// its id.
-func replaces(st *store.Store, phone pairing.PhoneInfo) (store.Device, bool) {
+// stored returns the stored device with phone's id.
+func stored(st *store.Store, phone pairing.PhoneInfo) (store.Device, bool) {
 	devs, err := st.Devices()
 	if err != nil {
 		return store.Device{}, false // Save reports a broken store
 	}
 	i := slices.IndexFunc(devs, func(d store.Device) bool { return d.ID == phone.ID })
-	if i < 0 || devs[i].Pin == phone.Pin {
+	if i < 0 {
 		return store.Device{}, false
 	}
 	return devs[i], true
@@ -315,12 +322,17 @@ type termPrompter struct {
 	// fresh drops lines typed while no question is waiting (stdin is a
 	// terminal): a stray Enter pressed while waiting for the phone must not
 	// answer a later question. Piped answers are kept for the next one.
-	fresh    bool
-	replaces func(pairing.PhoneInfo) (store.Device, bool)
+	fresh  bool
+	stored func(pairing.PhoneInfo) (store.Device, bool)
 
 	once sync.Once
 	ch   chan string // closed at EOF
 	mu   sync.Mutex  // one prompt at a time
+
+	shownMu sync.Mutex
+	// shownPins holds, per phone id and pin, the pin stored for that id when
+	// the user was asked ("" for none): Save replaces only that entry.
+	shownPins map[[2]string]string
 }
 
 func newTermPrompter(in io.Reader, out io.Writer, yes, fresh bool) *termPrompter {
@@ -391,12 +403,29 @@ func (p *termPrompter) ask(ctx context.Context, question string, def bool) (bool
 	}
 }
 
+func (p *termPrompter) shown(phone pairing.PhoneInfo) (oldPin string, ok bool) {
+	p.shownMu.Lock()
+	defer p.shownMu.Unlock()
+	oldPin, ok = p.shownPins[[2]string{phone.ID, phone.Pin}]
+	return oldPin, ok
+}
+
+// replacing looks up the device phone would replace, remembers it for Save,
+// and warns if its key differs: the phone was reset or reinstalled, or
+// someone else claims its id.
 func (p *termPrompter) replacing(phone pairing.PhoneInfo) bool {
-	if p.replaces == nil {
-		return false
+	var old store.Device
+	var ok bool
+	if p.stored != nil {
+		old, ok = p.stored(phone)
 	}
-	old, ok := p.replaces(phone)
-	if !ok {
+	p.shownMu.Lock()
+	if p.shownPins == nil {
+		p.shownPins = map[[2]string]string{}
+	}
+	p.shownPins[[2]string{phone.ID, phone.Pin}] = old.Pin
+	p.shownMu.Unlock()
+	if !ok || old.Pin == phone.Pin {
 		return false
 	}
 	fmt.Fprintf(p.out, "\nWarning: %q (id %s) is already paired, with a different key.\n"+

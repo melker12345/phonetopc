@@ -200,6 +200,34 @@ func TestDevices(t *testing.T) {
 	}
 }
 
+func TestPutDeviceIf(t *testing.T) {
+	s := Open(t.TempDir())
+	a := Device{ID: "635f3a01db1859bc", Name: "phone", Pin: "sha256/a", Token: "t1"}
+	if err := s.PutDeviceIf(a, "sha256/x"); !errors.Is(err, ErrDeviceChanged) {
+		t.Errorf("expected a device that isn't there: %v", err)
+	}
+	if err := s.PutDeviceIf(a, ""); err != nil {
+		t.Fatal(err)
+	}
+	b := a
+	b.Pin, b.Token = "sha256/b", "t2"
+	if err := s.PutDeviceIf(b, ""); !errors.Is(err, ErrDeviceChanged) {
+		t.Errorf("expected no device: %v", err)
+	}
+	if err := s.PutDeviceIf(b, "sha256/c"); !errors.Is(err, ErrDeviceChanged) {
+		t.Errorf("expected another pin: %v", err)
+	}
+	if d, _ := s.Find(a.ID); d.Pin != a.Pin || d.Token != "t1" {
+		t.Fatalf("overwritten: %+v", d)
+	}
+	if err := s.PutDeviceIf(b, a.Pin); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.Find(a.ID); d.Pin != b.Pin {
+		t.Errorf("not replaced: %+v", d)
+	}
+}
+
 // TestDevicesUnknownFieldsAndDefaults: SECURITY.md §6 defaults, unknown
 // members kept when rewriting, and the approval key's life cycle.
 func TestDevicesUnknownFieldsAndDefaults(t *testing.T) {

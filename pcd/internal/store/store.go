@@ -261,6 +261,26 @@ func (s *Store) updateDevices(f func(devs []Device) ([]Device, bool, error)) err
 // A re-pairing clears the stored approval key (APPROVAL.md §3) unless d
 // has one, and keeps the old entry's unknown members unless d has its own.
 func (s *Store) PutDevice(d Device) error {
+	return s.putDevice(d, func([]Device, int) error { return nil })
+}
+
+// ErrDeviceChanged means the stored entry for a phone changed after the user
+// was asked about it.
+var ErrDeviceChanged = errors.New("the stored pairing for this phone changed while you were asked; pair again")
+
+// PutDeviceIf is PutDevice, but only if the device stored under d.ID still
+// has pin oldPin ("" for no device): the entry the user was shown when
+// agreeing to the pairing. Otherwise it returns ErrDeviceChanged.
+func (s *Store) PutDeviceIf(d Device, oldPin string) error {
+	return s.putDevice(d, func(devs []Device, i int) error {
+		if (i < 0 && oldPin == "") || (i >= 0 && oldPin != "" && devs[i].Pin == oldPin) {
+			return nil
+		}
+		return ErrDeviceChanged
+	})
+}
+
+func (s *Store) putDevice(d Device, check func(devs []Device, i int) error) error {
 	if d.Addresses == nil {
 		d.Addresses = []string{}
 	}
@@ -269,6 +289,9 @@ func (s *Store) PutDevice(d Device) error {
 	}
 	return s.updateDevices(func(devs []Device) ([]Device, bool, error) {
 		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == d.ID })
+		if err := check(devs, i); err != nil {
+			return nil, false, err
+		}
 		if i >= 0 {
 			if d.Extra == nil {
 				d.Extra = devs[i].Extra
