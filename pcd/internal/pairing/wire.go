@@ -173,9 +173,15 @@ func ParseURI(s string) (URI, error) {
 	}
 	u := URI{ID: q.Get("id"), Name: q.Get("n"), Pin: q.Get("pin"), Secret: q.Get("s")}
 	for _, h := range strings.Split(q.Get("h"), ",") {
-		if h = strings.TrimSpace(h); h != "" {
-			u.Hosts = append(u.Hosts, strings.Trim(h, "[]"))
+		h = strings.TrimSpace(h)
+		h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+		if h == "" {
+			continue
 		}
+		if strings.ContainsAny(h, "[]/@?#") || strings.IndexFunc(h, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+			return URI{}, fmt.Errorf("pairing URI: bad host %q", h)
+		}
+		u.Hosts = append(u.Hosts, h)
 	}
 	u.Port, err = strconv.Atoi(q.Get("p"))
 	switch {

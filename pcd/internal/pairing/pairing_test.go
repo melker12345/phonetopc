@@ -179,6 +179,9 @@ func TestURIRoundTrip(t *testing.T) {
 		"phonetopc://pair?v=1&id=a&h=&p=1&pin=" + u.Pin + "&s=AAAA",
 		"phonetopc://pair?v=1&id=a&h=x&p=1&pin=sha256/x&s=AAAA",
 		"phonetopc://pair?v=1&id=a&h=x&p=1&pin=" + u.Pin + "&s=",
+		"phonetopc://pair?v=1&id=a&h=%5B+a%5D&p=1&pin=" + u.Pin + "&s=AAAA",
+		"phonetopc://pair?v=1&id=a&h=evil.example%2Fx%40&p=1&pin=" + u.Pin + "&s=AAAA",
+		"phonetopc://pair?v=1&id=a&h=%5B%5Bfd00::1%5D%5D&p=1&pin=" + u.Pin + "&s=AAAA",
 	} {
 		if _, err := ParseURI(bad); err == nil {
 			t.Errorf("accepted %s", bad)
