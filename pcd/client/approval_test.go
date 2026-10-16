@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
@@ -42,16 +45,64 @@ func loadApprovalVectors(t *testing.T) (valid approvalVector, invalid []approval
 }
 
 // approvalPhone is a fake secure phone: its hello names phoneID, pcID and
-// the approval key, and answer produces the request_approval result.
+// the approval key with a good attestation by testCA, or attestation if
+// set, and answer produces the request_approval result.
 type approvalPhone struct {
 	phoneID, pcID, key string
 	caps               []string
+	attestation        []string
 	answer             func(p protocol.RequestApprovalParams) any
 	requests           atomic.Int32
 	lastParams         atomic.Value // protocol.RequestApprovalParams
 }
 
+// testCA attests the fake phones' keys, bound to testChallenge in place of
+// their TLS pin.
+var (
+	testCA        = must(attesttest.NewCA())
+	testChallenge = attest.Challenge([]byte("the fake phone's TLS key"))
+)
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// testAttestation makes a client trust testCA and expect testChallenge.
+func testAttestation(o *options) {
+	o.attestRoots = []*x509.Certificate{testCA.Root}
+	o.testChallenge = testChallenge
+}
+
+// chainFor attests key (base64url SPKI) with testCA.
+func chainFor(t *testing.T, key string, purpose attest.Purpose, tweak func(*attesttest.Description)) []string {
+	t.Helper()
+	spki, _ := security.DecodeB64(key)
+	pub, err := x509.ParsePKIXPublicKey(spki)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := attesttest.Good(testChallenge, purpose)
+	if tweak != nil {
+		tweak(&d)
+	}
+	ders, err := testCA.Chain(pub, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chain []string
+	for _, der := range ders {
+		chain = append(chain, security.B64(der))
+	}
+	return chain
+}
+
 func (ap *approvalPhone) serve(t *testing.T) string {
+	if ap.attestation == nil && ap.key != "" {
+		ap.attestation = chainFor(t, ap.key, attest.PurposeSign, nil)
+	}
 	return fakeServer(t, func(ctx context.Context, fc *fakeConn) {
 		for {
 			m, err := fc.read(ctx)
@@ -69,7 +120,7 @@ func (ap *approvalPhone) serve(t *testing.T) string {
 				}
 				if ap.key != "" {
 					pin, _ := security.ApprovalKeyPin(ap.key)
-					h.Approval = &protocol.ApprovalInfo{Key: ap.key, Pin: pin}
+					h.Approval = &protocol.ApprovalInfo{Key: ap.key, Pin: pin, Attestation: ap.attestation}
 				}
 				fc.send(ctx, protocol.NewResult(m.ID, h))
 			case protocol.MethodRequestApproval:
@@ -104,7 +155,7 @@ func TestApprovalVectors(t *testing.T) {
 			answer: func(protocol.RequestApprovalParams) any {
 				return protocol.RequestApprovalResult{Approved: true, Signature: v.Signature}
 			}}
-		c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pinOf(t, v.Key)), func(o *options) { o.testNonce = v.Nonce })
+		c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pinOf(t, v.Key)), testAttestation, func(o *options) { o.testNonce = v.Nonce })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +190,7 @@ func TestApprovalRequestAndOwnValues(t *testing.T) {
 		sig, _ := security.SignApproval(key, security.ApprovalMessage("phone-1", "pc-1", p.Nonce, p.Reason))
 		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
 	}
-	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin))
+	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin), testAttestation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +251,7 @@ func TestApprovalNoAnswer(t *testing.T) {
 	defer close(block)
 	ap := &approvalPhone{phoneID: "p", pcID: "pc", key: keyB64,
 		answer: func(protocol.RequestApprovalParams) any { <-block; return nil }}
-	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin))
+	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin), testAttestation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +270,7 @@ func TestApprovalKeyTrust(t *testing.T) {
 	url := ap.serve(t)
 
 	// A changed key: a typed error, and nothing is sent.
-	c, err := Dial(ctxT(t), url, WithApprovalKey("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+	c, err := Dial(ctxT(t), url, WithApprovalKey("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), testAttestation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +302,7 @@ func TestApprovalKeyTrust(t *testing.T) {
 		fc.send(ctx, protocol.NewResult(m.ID, h))
 		fc.drain(ctx)
 	})
-	c3, _ := Dial(ctxT(t), url2, WithApprovalKey("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+	c3, _ := Dial(ctxT(t), url2, WithApprovalKey("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), testAttestation)
 	defer c3.Close()
 	if _, err := c3.RequestApproval(ctxT(t), "Deploy?", 0); !errors.Is(err, ErrApprovalInvalid) {
 		t.Errorf("pin not matching key: %v", err)
@@ -265,7 +316,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 		answer: func(protocol.RequestApprovalParams) any {
 			return protocol.RequestApprovalResult{Approved: true, Signature: "x"}
 		}}
-	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin))
+	c, err := Dial(ctxT(t), ap.serve(t), WithApprovalKey(pin), testAttestation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +339,7 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 
 	// The capability without hello.approval: unavailable too.
 	ap2 := &approvalPhone{phoneID: "p", pcID: "pc", answer: ap.answer}
-	c2, err := Dial(ctxT(t), ap2.serve(t), WithApprovalKey(pin))
+	c2, err := Dial(ctxT(t), ap2.serve(t), WithApprovalKey(pin), testAttestation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,5 +363,69 @@ func TestApprovalUnavailableAndArguments(t *testing.T) {
 	defer cd.Close()
 	if _, err := cd.RequestApproval(ctxT(t), "Deploy?", 0); !errors.Is(err, ErrApprovalNeedsSecureMode) {
 		t.Errorf("dev mode: %v", err)
+	}
+}
+
+// TestApprovalAttestation: a key whose attestation is missing or fails is
+// refused like a changed key, before anything is sent (APPROVAL.md §3.1).
+func TestApprovalAttestation(t *testing.T) {
+	key, _ := security.GenerateKey()
+	keyB64, pin, _ := security.EncodeApprovalKey(&key.PublicKey)
+	answer := func(p protocol.RequestApprovalParams) any {
+		sig, _ := security.SignApproval(key, security.ApprovalMessage("p", "pc", p.Nonce, p.Reason))
+		return protocol.RequestApprovalResult{Approved: true, Signature: sig}
+	}
+	request := func(attestation []string, opts ...Option) (ApprovalResult, int32, error) {
+		ap := &approvalPhone{phoneID: "p", pcID: "pc", key: keyB64, attestation: attestation, answer: answer}
+		c, err := Dial(ctxT(t), ap.serve(t), append([]Option{WithApprovalKey(pin)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		res, err := c.RequestApproval(ctxT(t), "Deploy?", 0)
+		return res, ap.requests.Load(), err
+	}
+	refused := func(name string, check string, attestation []string, opts ...Option) {
+		t.Helper()
+		res, sent, err := request(attestation, opts...)
+		var kae *KeyAttestationError
+		if !errors.As(err, &kae) || !errors.Is(err, ErrKeyAttestation) || kae.Check != check || kae.Key != "approval" || res.Approved() || sent != 0 {
+			t.Errorf("%s: %+v, %d sent, %v", name, res, sent, err)
+		}
+	}
+
+	res, _, err := request(nil, testAttestation)
+	if err != nil || !res.Approved() || res.Attestation != AttestedTEE {
+		t.Fatalf("attested: %+v %v", res, err)
+	}
+	sb := chainFor(t, keyB64, attest.PurposeSign, func(d *attesttest.Description) {
+		d.AttestationLevel, d.KeyMintLevel = attest.StrongBox, attest.StrongBox
+	})
+	if res, _, err := request(sb, testAttestation, WithRequireStrongBox()); err != nil || res.Attestation != AttestedStrongBox {
+		t.Fatalf("strongbox: %+v %v", res, err)
+	}
+
+	refused("no attestation", CheckMissing, []string{}, testAttestation)
+	refused("software key", attest.CheckSecurityLevel, chainFor(t, keyB64, attest.PurposeSign, func(d *attesttest.Description) {
+		d.AttestationLevel, d.KeyMintLevel = attest.Software, attest.Software
+	}), testAttestation)
+	refused("pin fallback", attest.CheckBiometric, chainFor(t, keyB64, attest.PurposeSign, func(d *attesttest.Description) {
+		d.UserAuthType = attesttest.Int(attest.AuthPassword | attest.AuthFingerprint)
+	}), testAttestation)
+	refused("decryption key", attest.CheckPurpose, chainFor(t, keyB64, attest.PurposeDecrypt, nil), testAttestation)
+	refused("google roots", attest.CheckRoot, nil, func(o *options) { o.testChallenge = testChallenge })
+	// Over plaintext there is no TLS key to bind the attestation to.
+	refused("not pinned", attest.CheckChallenge, nil, func(o *options) { o.attestRoots = []*x509.Certificate{testCA.Root} })
+	refused("tee, strongbox required", CheckStrongBox, nil, testAttestation, WithRequireStrongBox())
+
+	// A trust function may accept an unattested key explicitly.
+	accept := WithApprovalTrust(func(p string, attest func() (string, error)) (string, error) {
+		if _, err := attest(); err != nil {
+			return Unattested, nil
+		}
+		return "", errors.New("expected a failed attestation")
+	})
+	if res, _, err := request([]string{}, testAttestation, accept); err != nil || !res.Approved() || res.Attestation != Unattested {
+		t.Fatalf("accepted unattested: %+v %v", res, err)
 	}
 }

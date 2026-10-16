@@ -17,10 +17,20 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/melker12345/phonetopc/pcd/client"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
+
+// testCA attests the secure mocks' keys; their clients trust it.
+var testCA = func() *attesttest.CA {
+	ca, err := attesttest.NewCA()
+	if err != nil {
+		panic(err)
+	}
+	return ca
+}()
 
 type secureMock struct {
 	srv   *mockphone.Server
@@ -49,6 +59,7 @@ func startSecure(t *testing.T, tweak func(*mockphone.Options)) *secureMock {
 	opts := quietOptions()
 	opts.Device.ID = id.ID
 	opts.Authenticate = st.Authenticate
+	opts.Attest = mockphone.TestAttestation(testCA, id.Pin, nil)
 	if tweak != nil {
 		tweak(&opts)
 	}
@@ -70,7 +81,8 @@ func serveTLS(t *testing.T, opts mockphone.Options, cert tls.Certificate) (*mock
 
 func (m *secureMock) dial(t *testing.T, opts ...client.Option) (*client.Client, error) {
 	t.Helper()
-	return client.Dial(testCtx(t), m.url, append([]client.Option{client.WithPin(m.id.Pin), client.WithToken(m.pc.Token)}, opts...)...)
+	return client.Dial(testCtx(t), m.url, append([]client.Option{client.WithPin(m.id.Pin), client.WithToken(m.pc.Token),
+		client.WithAttestationRoots(testCA.Root)}, opts...)...)
 }
 
 func TestSecureSession(t *testing.T) {

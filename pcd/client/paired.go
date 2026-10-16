@@ -144,7 +144,10 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 	}
 	// The store decides about approval keys unless the caller does.
 	dialOpts := append(append([]Option{WithApprovalTrust(storeApprovalTrust(st, dev))}, opts...), WithPin(dev.Pin), WithToken(dev.Token),
-		func(o *options) { o.pairedPhoneID, o.pairedPCID = dev.ID, pc.ID })
+		func(o *options) {
+			o.pairedPhoneID, o.pairedPCID = dev.ID, pc.ID
+			o.decryptTrust = storeDecryptTrust(st, dev)
+		})
 	var (
 		pinErr  error
 		lastErr error
@@ -165,10 +168,12 @@ func DialPaired(ctx context.Context, selector string, opts ...Option) (*Client, 
 				// Approvals are refused (APPROVAL.md §5).
 				cl.warn(fmt.Sprintf("the phone paired as %q (id %s) now reports device id %s; approvals are refused until you re-pair", dev.Name, dev.ID, got))
 			}
-			// APPROVAL.md §3: the first sight of the approval key stores it.
-			// A changed key is reported by RequestApproval and
-			// CheckApprovalKey.
+			// APPROVAL.md §3: the first sight of the approval key stores it,
+			// with its attestation. A changed or unattested key is reported
+			// by RequestApproval and CheckApprovalKey. The decryption key's
+			// attestation is recorded too, while its certificates are fresh.
 			_, _ = cl.CheckApprovalKey()
+			_, _ = cl.decryptKey(ctx, false)
 			return cl, nil
 		}
 		if ctx.Err() != nil {

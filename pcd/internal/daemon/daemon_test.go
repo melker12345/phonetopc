@@ -23,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/melker12345/phonetopc/pcd/client"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/daemon"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
@@ -716,6 +717,7 @@ func newSecurePhone(t *testing.T, tweak func(*mockphone.Options)) *securePhone {
 	opts.Authenticate = st.Authenticate
 	opts.ApprovalKey = func() *ecdsa.PrivateKey { k, _ := st.ApprovalKey(); return k }
 	opts.DecryptKey = func() *rsa.PrivateKey { k, _ := st.DecryptKey(); return k }
+	opts.Attest = mockphone.TestAttestation(testCA, id.Pin, nil)
 	if tweak != nil {
 		tweak(&opts)
 	}
@@ -738,9 +740,18 @@ func newSecurePhone(t *testing.T, tweak func(*mockphone.Options)) *securePhone {
 		t.Fatal(err)
 	}
 	return &securePhone{st: st, srv: srv, pcID: pc.ID, dial: func(ctx context.Context) (*client.Client, error) {
-		return client.DialPaired(ctx, "", client.WithConfigDir(cfg), client.WithAddress(addr))
+		return client.DialPaired(ctx, "", client.WithConfigDir(cfg), client.WithAddress(addr), client.WithAttestationRoots(testCA.Root))
 	}}
 }
+
+// testCA attests the secure phones' keys; their daemons trust it.
+var testCA = func() *attesttest.CA {
+	ca, err := attesttest.NewCA()
+	if err != nil {
+		panic(err)
+	}
+	return ca
+}()
 
 func TestApprovals(t *testing.T) {
 	var (
@@ -831,7 +842,7 @@ func TestDecryptions(t *testing.T) {
 
 	r := do(t, "GET", url+"/v1/decryption-key", "")
 	var key daemon.DecryptKeyResponse
-	if err := json.Unmarshal([]byte(r.raw), &key); err != nil || r.status != 200 {
+	if err := json.Unmarshal([]byte(r.raw), &key); err != nil || r.status != 200 || key.Attestation != client.AttestedTEE {
 		t.Fatalf("key: %s", r.raw)
 	}
 	pub, _, err := security.ParseDecryptKey(key.Key)
@@ -886,5 +897,22 @@ func TestDecryptions(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != n {
 		t.Error("the user was asked about a ciphertext for the old key")
+	}
+}
+
+// TestDecryptKeyUnattested: an unattested decryption key is refused unless
+// the program asks for it explicitly.
+func TestDecryptKeyUnattested(t *testing.T) {
+	sp := newSecurePhone(t, func(o *mockphone.Options) { o.Attest = nil })
+	d, url := startDaemon(t, sp.dial)
+	if err := d.WaitConnected(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, do(t, "GET", url+"/v1/decryption-key", ""), 409, "decrypt_key_unattested")
+	wantStatus(t, do(t, "GET", url+"/v1/decryption-key?unattested=maybe", ""), 400, "invalid_request")
+	r := do(t, "GET", url+"/v1/decryption-key?unattested=true", "")
+	var key daemon.DecryptKeyResponse
+	if err := json.Unmarshal([]byte(r.raw), &key); err != nil || r.status != 200 || key.Attestation != client.Unattested || key.Pin == "" {
+		t.Fatalf("key: %s", r.raw)
 	}
 }

@@ -107,7 +107,7 @@ bin/phonetopc pc                            # this PC's id, name and pin
 | `get <source>` | Read the latest value of a source |
 | `tail <source>` | Stream events of a source until Ctrl-C |
 | `approve "reason"` | Ask for approval with a fingerprint on the phone |
-| `approval-key` | Show the phone's accepted and current approval key |
+| `approval-key` | Show the phone's accepted and current approval key, and what its hardware proved about it |
 | `notify "title"` | Post a notification on the phone and print its id |
 | `daemon install` | Start `phonetopcd` whenever a program connects to it (systemd user units) |
 | `daemon uninstall` | Undo `daemon install` |
@@ -125,6 +125,7 @@ bin/phonetopc pc                            # this PC's id, name and pin
 | `tail --count N` | Exit after N events (0 = until Ctrl-C) |
 | `approve --timeout D` | How long the phone waits for the user (default 30s, 5s to 2m) |
 | `approval-key --accept` | Accept a changed approval key |
+| `approval-key --accept --unattested` | Accept it even though the phone's hardware can't prove that it needs a fingerprint for every use |
 | `notify --body TEXT` | Text under the title (`\n` starts a new line) |
 | `notify --id ID` | Replace the earlier notification with this id |
 | `notify --action ID:LABEL` | Add a button (up to 3; `LABEL` alone derives the id) |
@@ -153,7 +154,8 @@ age -d -i phone.txt secrets.age
 ```
 
 `phone.txt` holds no secret. The phone's key is replaced when fingerprints are added or removed, and is lost with the
-phone, so always encrypt to a recovery key as well.
+phone, so always encrypt to a recovery key as well. `--generate` needs the phone's hardware to prove that the key
+needs a fingerprint for every use; `--unattested` takes the key without that proof.
 
 ## Troubleshooting
 
@@ -164,6 +166,14 @@ phone, so always encrypt to a recovery key as well.
   also tries the phone's last known addresses, and `--addr host:port` sets one by hand.
 - **Approval key changed.** Fingerprints were added or removed on the phone, so it made a new approval key.
   Approvals are refused until you run `phonetopc approval-key --accept`.
+- **Key attestation failed.** The phone's hardware didn't prove that its key is in secure hardware, needs a
+  fingerprint for every use and belongs to the phonetopc app on a phone with verified boot; the message names the
+  check. Expected with an unlocked bootloader, a custom OS, an emulator or the mock. If you trust the phone anyway,
+  run `phonetopc approval-key --accept --unattested`.
+- **Stricter checks.** `PHONETOPC_REQUIRE_STRONGBOX=1` refuses keys that aren't in StrongBox,
+  `PHONETOPC_CHECK_REVOCATION=1` checks Google's revocation list (online), and
+  `PHONETOPC_APP_SIGNING_DIGEST=<hex SHA-256>` accepts only an app signed with that certificate. They apply to
+  `phonetopc`, `phonetopcd` and `age-plugin-phonetopc`.
 - **`not_allowed` / `-32030`.** Allow notifications or panels for this PC in the phone app under *Devices*.
 
 ## Run the mock

@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
@@ -21,7 +22,7 @@ func (s *Server) decryptKey() *rsa.PrivateKey {
 	return s.opts.DecryptKey()
 }
 
-func decryptInfo(key *rsa.PrivateKey) *protocol.DecryptInfo {
+func (s *Server) decryptInfo(key *rsa.PrivateKey) *protocol.DecryptInfo {
 	if key == nil {
 		return nil
 	}
@@ -29,7 +30,7 @@ func decryptInfo(key *rsa.PrivateKey) *protocol.DecryptInfo {
 	if err != nil {
 		return nil
 	}
-	return &protocol.DecryptInfo{Key: k, Pin: pin}
+	return &protocol.DecryptInfo{Key: k, Pin: pin, Attestation: s.attestation(k, attest.PurposeDecrypt)}
 }
 
 // decrypt handles decrypt (§4) like requestApproval handles
@@ -71,7 +72,7 @@ func (s *session) decrypt(id json.RawMessage, params json.RawMessage) (result an
 	if key != nil && len(ct) != key.Size() {
 		return nil, false, protocol.NewError(protocol.CodeInvalidParams, "params.ciphertext must be %d bytes", key.Size())
 	}
-	if key == nil || pc == nil || decryptInfo(key).Pin != *p.KeyPin {
+	if key == nil || pc == nil || s.srv.decryptInfo(key).Pin != *p.KeyPin {
 		return protocol.DecryptResult{Why: protocol.WhyUnavailable}, false, nil
 	}
 	slot := s.srv.beginApproval(pc.ID)

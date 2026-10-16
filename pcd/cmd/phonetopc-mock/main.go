@@ -29,6 +29,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/discovery"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/pairing"
@@ -53,7 +54,9 @@ selects secure mode (wss:// with the mock's own key, tokens checked).
 In secure mode the mock offers fingerprint approval and decryption;
 --approval says how its "user" answers: auto (approve), deny, cancel, timeout (never answer),
 lockout, ask (on this terminal), tamper (approve with a corrupted
-signature, to test clients) or off (neither capability).
+signature, to test clients) or off (neither capability). Its keys are
+attested by a test root made at start, which PCs don't trust: accept
+them with phonetopc approval-key --accept --unattested.
 
 Notifications and panels (spec/PANELS.md) are allowed for every PC. A
 simulated user (--user-every) opens the newest panel, uses one of its
@@ -198,6 +201,11 @@ func serve(ctx context.Context, args []string) error {
 		if err := approvalOptions(&opts, *approval, *approvalDly, st, os.Stdin, os.Stdout); err != nil {
 			return err
 		}
+		ca, err := attesttest.NewCA()
+		if err != nil {
+			return err
+		}
+		opts.Attest = mockphone.TestAttestation(ca, ident.Pin, nil)
 	} else if explicit["approval"] && *approval != "off" {
 		return errors.New("--approval needs secure mode (--state DIR): approvals don't exist in dev mode")
 	}

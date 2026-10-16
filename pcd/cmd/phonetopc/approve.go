@@ -86,8 +86,12 @@ func (c *cli) approve(ctx context.Context, args []string) error {
 func (c *cli) approvalKey(ctx context.Context, args []string) error {
 	fs := c.flagSet("approval-key")
 	accept := fs.Bool("accept", false, "")
+	unattested := fs.Bool("unattested", false, "")
 	if _, err := parse(fs, args, 0, ""); err != nil {
 		return err
+	}
+	if *unattested && !*accept {
+		return usageErr{errors.New("--unattested only goes with --accept")}
 	}
 	if c.dev {
 		return errors.New("approval keys belong to paired phones; approvals don't exist in dev mode")
@@ -122,30 +126,72 @@ func (c *cli) approvalKey(ctx context.Context, args []string) error {
 	}
 	current, perr := security.ApprovalKeyPin(h.Approval.Key)
 	fmt.Fprintf(tw, "current\t%s\n", h.Approval.Pin)
-	var changed *client.ApprovalKeyChangedError
+	var (
+		changed *client.ApprovalKeyChangedError
+		kae     *client.KeyAttestationError
+	)
 	switch {
 	case perr != nil || errors.Is(err, client.ErrApprovalInvalid):
 		return exitError{2, fmt.Errorf("the phone's approval key is malformed: %v", errors.Join(perr, err))}
-	case errors.As(err, &changed):
+	case errors.As(err, &kae) && kae.Check == client.CheckStrongBox:
+		fmt.Fprintf(tw, "status\tREFUSED: %v\n", kae.Err)
+		return exitError{1, nil}
+	case errors.As(err, &changed) || errors.As(err, &kae):
 		if !*accept {
-			fmt.Fprintf(tw, "status\tCHANGED: approvals are refused until you accept the new key\n")
-			tw.Flush()
-			fmt.Fprintln(c.stderr, "phonetopc: the approval key changed. That is expected after fingerprints were added or removed on the phone;\n"+
-				"  if you did that, accept it with `phonetopc approval-key --accept`. Otherwise someone may be tampering with the phone app.")
+			if changed != nil {
+				fmt.Fprintf(tw, "status\tCHANGED: approvals are refused until you accept the new key\n")
+				tw.Flush()
+				fmt.Fprintln(c.stderr, "phonetopc: the approval key changed. That is expected after fingerprints were added or removed on the phone;\n"+
+					"  if you did that, accept it with `phonetopc approval-key --accept`. Otherwise someone may be tampering with the phone app.")
+			} else {
+				fmt.Fprintf(tw, "status\tNOT ATTESTED: approvals are refused\n")
+				tw.Flush()
+				fmt.Fprintf(c.stderr, "phonetopc: %v.\n  %s\n", kae, unattestedHint)
+			}
 			return exitError{1, nil}
 		}
-		if err := st.AcceptApprovalKey(before.ID, current); err != nil {
+		level, aerr := cl.AttestApprovalKey(ctx)
+		if aerr != nil {
+			if !*unattested {
+				return exitError{2, fmt.Errorf("%w; the key was not accepted. %s", aerr, unattestedHint)}
+			}
+			level = client.Unattested
+		}
+		if err := st.AcceptApprovalKey(before.ID, current, level); err != nil {
 			return err
 		}
+		fmt.Fprintf(tw, "attestation\t%s\n", describeAttestation(level))
 		fmt.Fprintf(tw, "status\taccepted now\n")
 	case err != nil:
 		return err
-	case before.ApprovalKey == "":
-		fmt.Fprintf(tw, "status\ttrusted (first seen now, over the pinned connection)\n")
 	default:
-		fmt.Fprintf(tw, "status\ttrusted\n")
+		after, err := st.Find(before.ID)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(tw, "attestation\t%s\n", describeAttestation(after.ApprovalAttestation))
+		if before.ApprovalKey == "" {
+			fmt.Fprintf(tw, "status\ttrusted (first seen now, over the pinned connection)\n")
+		} else {
+			fmt.Fprintf(tw, "status\ttrusted\n")
+		}
 	}
 	return nil
+}
+
+const unattestedHint = "The phone's hardware didn't prove that this key needs your fingerprint for every use. If you trust this phone and app anyway\n" +
+	"  (a custom ROM, an unlocked bootloader, an emulator), accept it with `phonetopc approval-key --accept --unattested`."
+
+func describeAttestation(level string) string {
+	switch level {
+	case client.AttestedStrongBox:
+		return "StrongBox (proved by the phone's hardware)"
+	case client.AttestedTEE:
+		return "TEE (proved by the phone's hardware)"
+	case client.Unattested:
+		return "none: accepted without attestation"
+	}
+	return "not checked"
 }
 
 func approvalRow(cl *client.Client) string {
@@ -159,8 +205,11 @@ func approvalRow(cl *client.Client) string {
 		return "no (the phone offers no approvals)"
 	case errors.Is(err, client.ErrApprovalKeyChanged):
 		return fmt.Sprintf("yes, key %s — CHANGED, refused until accepted (see `phonetopc approval-key`)", h.Approval.Pin)
+	case errors.Is(err, client.ErrKeyAttestation):
+		return fmt.Sprintf("yes, key %s — refused: %v (see `phonetopc approval-key`)", h.Approval.Pin, err)
 	case err != nil:
 		return fmt.Sprintf("yes, key %s — unusable: %v", h.Approval.Pin, err)
 	}
-	return fmt.Sprintf("yes, key %s (trusted)", h.Approval.Pin)
+	level, _ := cl.ApprovalKeyAttestation(context.Background())
+	return fmt.Sprintf("yes, key %s (trusted, attestation: %s)", h.Approval.Pin, describeAttestation(level))
 }

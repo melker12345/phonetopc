@@ -260,14 +260,30 @@ func TestDevicesUnknownFieldsAndDefaults(t *testing.T) {
 	}
 
 	// First sight keeps an existing key; a changed one needs accepting.
-	if prev, err := s.TrustApprovalKey("p1", "sha256/new"); err != nil || prev != "sha256/ak" {
+	// A key stored before attestation gets its outcome added.
+	if prev, err := s.TrustApprovalKey("p1", "sha256/new", AttestedTEE); err != nil || prev != "sha256/ak" {
 		t.Errorf("trust: %q %v", prev, err)
 	}
-	if err := s.AcceptApprovalKey("p1", "sha256/new"); err != nil {
+	if d, _ := s.Find("p1"); d.ApprovalAttestation != "" {
+		t.Errorf("attestation of another key stored: %q", d.ApprovalAttestation)
+	}
+	if prev, err := s.TrustApprovalKey("p1", "sha256/ak", AttestedStrongBox); err != nil || prev != "sha256/ak" {
+		t.Errorf("trust: %q %v", prev, err)
+	}
+	if d, _ := s.Find("p1"); d.ApprovalAttestation != AttestedStrongBox {
+		t.Errorf("attestation: %q", d.ApprovalAttestation)
+	}
+	if err := s.AcceptApprovalKey("p1", "sha256/new", Unattested); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/new" {
-		t.Errorf("accepted: %q", d.ApprovalKey)
+	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/new" || d.ApprovalAttestation != Unattested {
+		t.Errorf("accepted: %q %q", d.ApprovalKey, d.ApprovalAttestation)
+	}
+	if err := s.NoteDecryptKey("p1", "sha256/dk", AttestedTEE); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.Find("p1"); d.DecryptKey != "sha256/dk" || d.DecryptAttestation != AttestedTEE {
+		t.Errorf("decryption key: %q %q", d.DecryptKey, d.DecryptAttestation)
 	}
 	// Re-pairing clears the approval key but keeps unknown members.
 	d.Token, d.ApprovalKey, d.Extra = "t2", "", nil
@@ -278,13 +294,16 @@ func TestDevicesUnknownFieldsAndDefaults(t *testing.T) {
 	if _, has := dev["approval_key"]; has || dev["token"] != "t2" || dev["x_dev"] == nil {
 		t.Errorf("re-paired: %v", dev)
 	}
-	if prev, err := s.TrustApprovalKey("p1", "sha256/third"); err != nil || prev != "" {
+	if _, has := dev["approval_attestation"]; has {
+		t.Errorf("re-paired: %v", dev)
+	}
+	if prev, err := s.TrustApprovalKey("p1", "sha256/third", AttestedTEE); err != nil || prev != "" {
 		t.Errorf("first sight: %q %v", prev, err)
 	}
-	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/third" {
-		t.Errorf("first sight stored %q", d.ApprovalKey)
+	if d, _ := s.Find("p1"); d.ApprovalKey != "sha256/third" || d.ApprovalAttestation != AttestedTEE {
+		t.Errorf("first sight stored %q %q", d.ApprovalKey, d.ApprovalAttestation)
 	}
-	if _, err := s.TrustApprovalKey("gone", "sha256/x"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.TrustApprovalKey("gone", "sha256/x", AttestedTEE); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown device: %v", err)
 	}
 }

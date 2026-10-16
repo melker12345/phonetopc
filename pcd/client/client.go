@@ -41,6 +41,7 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,18 +122,28 @@ type options struct {
 	skipHello   bool
 	eventBuffer int
 	tap         func(Direction, []byte)
-	// approvalTrust decides whether an approval key pin is trusted
-	// (APPROVAL.md §3); see WithApprovalTrust.
-	approvalTrust func(pin string) error
+	// approvalTrust decides whether an approval key is trusted
+	// (APPROVAL.md §3); see WithApprovalTrust. decryptTrust remembers
+	// verified decryption keys (DialPaired).
+	approvalTrust ApprovalTrust
+	decryptTrust  func(pin string, verify func() (string, error)) (string, error)
+	// Key attestation; see attestation.go.
+	attestRoots       []*x509.Certificate
+	requireStrongBox  bool
+	revocation        *http.Client
+	appDigests        [][]byte
+	unattestedDecrypt bool
 	// pairedPhoneID and pairedPCID are the ids stored at pairing, which
 	// approvals are signed over (APPROVAL.md §5); DialPaired sets them.
 	pairedPhoneID, pairedPCID string
-	// testNonce replaces the approval nonce; only set by this package's
-	// tests, to replay the signed test vectors.
-	testNonce   string
-	dialOptions *websocket.DialOptions
-	pin         string
-	token       string
+	// testNonce replaces the approval nonce, and testChallenge the
+	// attestation challenge; only set by this package's tests, to replay
+	// signed test vectors and to attest over plaintext.
+	testNonce     string
+	testChallenge []byte
+	dialOptions   *websocket.DialOptions
+	pin           string
+	token         string
 
 	// DialPaired only.
 	configDir        string

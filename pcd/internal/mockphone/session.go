@@ -450,7 +450,7 @@ func (s *session) hello(params json.RawMessage) (any, *protocol.Error) {
 	)
 	if pc != nil {
 		key, dkey := s.srv.approvalKey(), s.srv.decryptKey()
-		approval, decrypt = approvalInfo(key), decryptInfo(dkey)
+		approval, decrypt = s.srv.approvalInfo(key), s.srv.decryptInfo(dkey)
 		s.mu.Lock()
 		s.pc, s.token, s.approvalKey, s.decryptKey = pc, token, key, dkey
 		s.mu.Unlock()

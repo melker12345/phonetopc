@@ -191,6 +191,7 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 		ue  *unavailableError
 		pe  *protocol.Error
 		kce *client.ApprovalKeyChangedError
+		kae *client.KeyAttestationError
 	)
 	switch {
 	case errors.As(err, &br):
@@ -209,6 +210,12 @@ func (d *Daemon) fail(w http.ResponseWriter, err error) {
 			name = "phone_error"
 		}
 		writeRPCError(w, status, name, pe.Message+hintOf[pe.Code], pe.Code)
+	case errors.As(err, &kae) && kae.Key == "approval":
+		writeError(w, http.StatusConflict, "approval_key_unattested", kae.Error()+
+			". Approvals are refused; to accept the key anyway, run `phonetopc approval-key --accept --unattested`. Nothing was sent")
+	case errors.As(err, &kae):
+		writeError(w, http.StatusConflict, "decrypt_key_unattested", kae.Error()+
+			". To use the key anyway, ask for /v1/decryption-key?unattested=true")
 	case errors.As(err, &kce):
 		writeError(w, http.StatusConflict, "approval_key_changed", kce.Error()+
 			". Typically fingerprints were added or removed on the phone; if so, accept the new key with `phonetopc approval-key --accept`. Nothing was sent")
@@ -373,17 +380,31 @@ func (d *Daemon) handleApproval(w http.ResponseWriter, r *http.Request) {
 
 // DecryptKeyResponse is the answer to GET /v1/decryption-key.
 type DecryptKeyResponse struct {
-	Key string `json:"key"`
-	Pin string `json:"pin"`
+	Key         string `json:"key"`
+	Pin         string `json:"pin"`
+	Attestation string `json:"attestation"`
 }
 
 func (d *Daemon) handleDecryptKey(w http.ResponseWriter, r *http.Request) {
+	unattested := false
+	if v := r.URL.Query().Get("unattested"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			d.fail(w, badRequestf("unattested must be true or false"))
+			return
+		}
+		unattested = b
+	}
 	d.call(w, r, func(cl *client.Client) (any, error) {
-		k, err := cl.DecryptKey()
+		get := cl.DecryptKey
+		if unattested {
+			get = cl.DecryptKeyAllowUnattested
+		}
+		k, err := get()
 		if err != nil {
 			return nil, err
 		}
-		return DecryptKeyResponse{Key: security.B64(k.SPKI), Pin: k.Pin}, nil
+		return DecryptKeyResponse{Key: security.B64(k.SPKI), Pin: k.Pin, Attestation: k.Attestation}, nil
 	})
 }
 

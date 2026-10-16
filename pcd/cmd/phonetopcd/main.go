@@ -64,6 +64,12 @@ Flags:
                        $XDG_RUNTIME_DIR/phonetopc.token)
   -v                   log every reconnect attempt, not only new errors
   --version            print the version
+
+The phone's approval and decryption keys must be attested by its hardware
+(phonetopc approval-key). $PHONETOPC_REQUIRE_STRONGBOX=1 also requires
+StrongBox, $PHONETOPC_CHECK_REVOCATION=1 checks Google's revocation list
+(online), and $PHONETOPC_APP_SIGNING_DIGEST=<hex SHA-256> accepts only an
+app signed with that certificate.
 `
 
 func main() {
@@ -262,6 +268,11 @@ func (c config) dialer(getenv func(string) string) (daemon.Dialer, error) {
 	if c.addr != "" {
 		opts = append(opts, client.WithAddress(c.addr))
 	}
+	aopts, err := client.AttestationOptionsFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, aopts...)
 	return func(ctx context.Context) (*client.Client, error) {
 		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()

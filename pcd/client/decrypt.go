@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
+	"github.com/melker12345/phonetopc/pcd/internal/store"
 )
 
 // Decryption with the phone's key (spec/DECRYPT.md): anyone can encrypt to
@@ -25,6 +27,9 @@ type DecryptKey struct {
 	// SPKI is its DER SubjectPublicKeyInfo, Pin the pin of that.
 	SPKI []byte
 	Pin  string
+	// Attestation is AttestedStrongBox, AttestedTEE, or Unattested if
+	// unattested keys were allowed and this is one.
+	Attestation string
 }
 
 // Encrypt encrypts plaintext (at most 190 bytes) so that only the phone can
@@ -56,8 +61,19 @@ func (e *DecryptKeyChangedError) Is(target error) bool { return target == ErrDec
 
 // DecryptKey returns this session's decryption key from hello, or
 // ErrDecryptUnavailable. A hello whose pin isn't the pin of its key is an
-// error.
+// error. So is a key whose attestation is missing or fails (a
+// *KeyAttestationError), unless WithUnattestedDecryptKey: whatever is
+// encrypted to the key is only as safe as the key.
 func (c *Client) DecryptKey() (DecryptKey, error) {
+	return c.decryptKey(context.Background(), c.opts.unattestedDecrypt)
+}
+
+// DecryptKeyAllowUnattested is DecryptKey with WithUnattestedDecryptKey.
+func (c *Client) DecryptKeyAllowUnattested() (DecryptKey, error) {
+	return c.decryptKey(context.Background(), true)
+}
+
+func (c *Client) decryptKey(ctx context.Context, allowUnattested bool) (DecryptKey, error) {
 	h := c.Server()
 	if h.PC == nil || !h.HasCapability(protocol.CapabilityDecrypt) || h.Decrypt == nil {
 		return DecryptKey{}, ErrDecryptUnavailable
@@ -70,7 +86,42 @@ func (c *Client) DecryptKey() (DecryptKey, error) {
 	if pin != h.Decrypt.Pin {
 		return DecryptKey{}, fmt.Errorf("phonetopc: the phone's decryption key has pin %s, not the %s it claims", pin, h.Decrypt.Pin)
 	}
-	return DecryptKey{Public: pub, SPKI: der, Pin: pin}, nil
+	verify := func() (string, error) {
+		return c.attestKey(ctx, "decryption", h.Decrypt.Attestation, der, attest.PurposeDecrypt)
+	}
+	var level string
+	if c.opts.decryptTrust != nil {
+		level, err = c.opts.decryptTrust(pin, verify)
+	} else {
+		level, err = verify()
+	}
+	if err == nil {
+		err = c.checkStrongBox("decryption", level)
+	}
+	if err != nil {
+		if !allowUnattested || !errors.Is(err, ErrKeyAttestation) {
+			return DecryptKey{}, err
+		}
+		level = Unattested
+	}
+	return DecryptKey{Public: pub, SPKI: der, Pin: pin, Attestation: level}, nil
+}
+
+// storeDecryptTrust remembers in devices.json which decryption key's
+// attestation verified, so it is checked once per key, while its
+// certificates are fresh.
+func storeDecryptTrust(st *store.Store, dev store.Device) func(string, func() (string, error)) (string, error) {
+	return func(pin string, verify func() (string, error)) (string, error) {
+		if d, err := st.Find(dev.ID); err == nil && d.DecryptKey == pin && d.DecryptAttestation != "" {
+			return d.DecryptAttestation, nil
+		}
+		level, err := verify()
+		if err != nil {
+			return "", err
+		}
+		_ = st.NoteDecryptKey(dev.ID, pin, level) // best effort: it is checked again next time
+		return level, nil
+	}
 }
 
 // DecryptResult is the outcome of Decrypt. A refusal is a result, not an
@@ -91,7 +142,8 @@ func (r DecryptResult) Decrypted() bool { return r.Why == "" }
 //
 // Not decrypted (denied, cancelled, timeout, busy, lockout, unavailable,
 // failed) is a result. Errors: invalid arguments, ErrDecryptUnavailable,
-// a *DecryptKeyChangedError (nothing sent), and connection problems.
+// a *DecryptKeyChangedError (nothing sent), and connection problems. It
+// doesn't need the key's attestation: that matters when encrypting.
 //
 // Check what the plaintext unlocks: the phone can't prove it is correct.
 func (c *Client) Decrypt(ctx context.Context, reason, keyPin string, ciphertext []byte, timeout time.Duration) (DecryptResult, error) {
@@ -105,7 +157,7 @@ func (c *Client) Decrypt(ctx context.Context, reason, keyPin string, ciphertext 
 		return DecryptResult{}, fmt.Errorf("phonetopc: decrypt timeout %v is outside %v–%v", timeout, MinApprovalTimeout, MaxApprovalTimeout)
 	}
 	timeout = timeout.Truncate(time.Millisecond)
-	key, err := c.DecryptKey()
+	key, err := c.decryptKey(ctx, true)
 	if err != nil {
 		return DecryptResult{}, err
 	}

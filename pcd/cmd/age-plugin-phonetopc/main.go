@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,7 +24,7 @@ import (
 
 const usage = `age-plugin-phonetopc: age files that need a fingerprint on your phone to decrypt.
 
-  age-plugin-phonetopc --generate [--device D] > identity.txt
+  age-plugin-phonetopc --generate [--device D] [--unattested] > identity.txt
       print an identity for the paired phone, with its recipient in a comment
   age -r age1phonetopc1… -r <recovery recipient> -o secrets.age secrets
   age -d -i identity.txt secrets.age
@@ -31,8 +33,12 @@ The identity holds no secret: the key stays on the phone, which asks for a finge
 every time. Adding or removing a fingerprint replaces that key, so also encrypt to a
 recovery key kept offline.
 
-Uses the pairing of phonetopc; $PHONETOPC_DEVICE, $PHONETOPC_ADDR and
-$PHONETOPC_NO_MDNS work as there.
+--generate needs the phone's hardware to prove (attest) that the key needs a fingerprint
+for every use; --unattested accepts a key without that proof.
+
+Uses the pairing of phonetopc; $PHONETOPC_DEVICE, $PHONETOPC_ADDR, $PHONETOPC_NO_MDNS,
+$PHONETOPC_REQUIRE_STRONGBOX, $PHONETOPC_CHECK_REVOCATION and $PHONETOPC_APP_SIGNING_DIGEST
+work as there.
 `
 
 func main() {
@@ -61,6 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("age-plugin-phonetopc", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	gen := fs.Bool("generate", false, "")
+	unattested := fs.Bool("unattested", false, "")
 	device := fs.String("device", os.Getenv("PHONETOPC_DEVICE"), "")
 	help := fs.Bool("help", false, "")
 	p.RegisterFlags(fs)
@@ -70,7 +77,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch {
 	case *gen:
-		if err := generate(context.Background(), *device, stdout); err != nil {
+		if err := generate(context.Background(), *device, *unattested, stdout); err != nil {
 			fmt.Fprintln(stderr, "age-plugin-phonetopc:", err)
 			return 1
 		}
@@ -85,13 +92,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return p.Main()
 }
 
-func generate(ctx context.Context, device string, out io.Writer) error {
-	cl, err := dial(ctx, device)
+func generate(ctx context.Context, device string, unattested bool, out io.Writer) error {
+	var opts []client.Option
+	if unattested {
+		opts = append(opts, client.WithUnattestedDecryptKey())
+	}
+	cl, err := dial(ctx, device, opts...)
 	if err != nil {
 		return err
 	}
 	defer cl.Close()
 	k, err := cl.DecryptKey()
+	if errors.Is(err, client.ErrKeyAttestation) {
+		return fmt.Errorf("%w.\nWhat is encrypted to this key is only as safe as the key. To use it anyway: age-plugin-phonetopc --generate --unattested", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -102,12 +116,13 @@ func generate(ctx context.Context, device string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "# phone: %q (%s)\n", dev.Name, dev.ID)
 	fmt.Fprintf(out, "# created: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(out, "# attestation: %s\n", k.Attestation)
 	fmt.Fprintf(out, "# recipient: %s\n", plugin.EncodeRecipient(name, k.SPKI))
 	fmt.Fprintln(out, plugin.EncodeIdentity(name, data))
 	return nil
 }
 
-func dial(ctx context.Context, selector string) (*client.Client, error) {
+func dial(ctx context.Context, selector string, extra ...client.Option) (*client.Client, error) {
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	noMDNS := os.Getenv("PHONETOPC_NO_MDNS")
@@ -118,8 +133,19 @@ func dial(ctx context.Context, selector string) (*client.Client, error) {
 	if a := os.Getenv("PHONETOPC_ADDR"); a != "" {
 		opts = append(opts, client.WithAddress(a))
 	}
-	return client.DialPaired(dctx, selector, opts...)
+	aopts, err := client.AttestationOptionsFromEnv(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, aopts...)
+	if attestationRoots != nil {
+		opts = append(opts, client.WithAttestationRoots(attestationRoots...))
+	}
+	return client.DialPaired(dctx, selector, append(opts, extra...)...)
 }
+
+// attestationRoots replaces Google's attestation roots; only tests set it.
+var attestationRoots []*x509.Certificate
 
 // askWith asks the phone over a paired connection, telling the user through
 // age to look at it.

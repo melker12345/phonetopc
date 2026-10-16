@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -56,7 +57,8 @@ Commands:
                        approved, 1 not approved (denied, cancelled, timeout,
                        busy, lockout, unavailable), 2 error:
                          phonetopc approve "Deploy?" && ./deploy.sh
-  approval-key         show the phone's accepted and current approval key
+  approval-key         show the phone's accepted and current approval key, and
+                       what the phone's hardware proved about it
   notify "title"       post a notification on the phone and print its id:
                          phonetopc notify "Claude Code is done" --body "3 files changed"
                        (tail panel / tail notification show panel input and
@@ -93,6 +95,8 @@ approve flags:
 approval-key flags:
   --accept             accept a changed approval key (after fingerprints were
                        added or removed on the phone)
+  --unattested         with --accept: accept it even though the phone's hardware
+                       can't prove that it needs a fingerprint for every use
 
 notify flags:
   --body TEXT          text under the title (\n starts a new line)
@@ -109,6 +113,12 @@ tail flags:
   --count N            exit after N events (0 = run until Ctrl-C)
 
 Sequence gaps (dropped events) are reported on stderr.
+
+The phone's hardware must prove (attest) that its approval key needs a fingerprint
+for every use. $PHONETOPC_REQUIRE_STRONGBOX=1 also requires StrongBox,
+$PHONETOPC_CHECK_REVOCATION=1 checks Google's revocation list (online), and
+$PHONETOPC_APP_SIGNING_DIGEST=<hex SHA-256> accepts only an app signed with that
+certificate.
 `
 
 type cli struct {
@@ -203,6 +213,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+// attestationRoots replaces Google's attestation roots; only tests set it.
+var attestationRoots []*x509.Certificate
+
 func envBool(s string) bool {
 	b, err := strconv.ParseBool(s)
 	return err == nil && b
@@ -272,6 +285,14 @@ func (c *cli) dial(ctx context.Context) (*client.Client, error) {
 	opts := []client.Option{info, client.WithConfigDir(dir), client.WithDiscovery(!c.noMDNS, 0)}
 	if c.addr != "" {
 		opts = append(opts, client.WithAddress(c.addr))
+	}
+	aopts, err := client.AttestationOptionsFromEnv(c.getenv)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, aopts...)
+	if attestationRoots != nil {
+		opts = append(opts, client.WithAttestationRoots(attestationRoots...))
 	}
 	cl, err := client.DialPaired(dctx, c.device, opts...)
 	if err != nil {

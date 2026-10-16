@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 )
@@ -116,7 +120,7 @@ func (s *Server) approvalKey() *ecdsa.PrivateKey {
 	return s.opts.ApprovalKey()
 }
 
-func approvalInfo(key *ecdsa.PrivateKey) *protocol.ApprovalInfo {
+func (s *Server) approvalInfo(key *ecdsa.PrivateKey) *protocol.ApprovalInfo {
 	if key == nil {
 		return nil
 	}
@@ -124,7 +128,52 @@ func approvalInfo(key *ecdsa.PrivateKey) *protocol.ApprovalInfo {
 	if err != nil {
 		return nil
 	}
-	return &protocol.ApprovalInfo{Key: k, Pin: pin}
+	return &protocol.ApprovalInfo{Key: k, Pin: pin, Attestation: s.attestation(k, attest.PurposeSign)}
+}
+
+func (s *Server) attestation(key string, purpose attest.Purpose) []string {
+	if s.opts.Attest == nil {
+		return nil
+	}
+	spki, _ := security.DecodeB64(key)
+	return s.opts.Attest(spki, purpose)
+}
+
+// TestAttestation returns an Options.Attest that attests keys as a phone's
+// Keystore does, bound to the phone's TLS pin, but with ca as the root: only
+// a PC given ca.Root accepts it. tweak, if set, changes what is attested.
+// Chains are made once per key.
+func TestAttestation(ca *attesttest.CA, tlsPin string, tweak func(*attesttest.Description)) func([]byte, attest.Purpose) []string {
+	var (
+		mu    sync.Mutex
+		cache = map[string][]string{}
+	)
+	return func(spki []byte, purpose attest.Purpose) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		id := string(spki) + strconv.Itoa(int(purpose))
+		if c, ok := cache[id]; ok {
+			return c
+		}
+		pub, err := x509.ParsePKIXPublicKey(spki)
+		if err != nil {
+			return nil
+		}
+		d := attesttest.Good(security.PinDigest(tlsPin), purpose)
+		if tweak != nil {
+			tweak(&d)
+		}
+		ders, err := ca.Chain(pub, d)
+		if err != nil {
+			return nil
+		}
+		chain := make([]string, len(ders))
+		for i, der := range ders {
+			chain[i] = security.B64(der)
+		}
+		cache[id] = chain
+		return chain
+	}
 }
 
 // requestApproval handles request_approval (§4). Valid requests that can

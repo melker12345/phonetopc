@@ -1,6 +1,7 @@
 package mockphone_test
 
 import (
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/melker12345/phonetopc/pcd/client"
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
@@ -430,5 +433,48 @@ func TestApprovalKeyFromState(t *testing.T) {
 	k2again, _ := st.ApprovalKey()
 	if !k1.Equal(k1again) || k1.Equal(k2) || !k2.Equal(k2again) {
 		t.Error("approval key not persisted or not rotated")
+	}
+}
+
+// TestApprovalAttestation: the mock attests its keys like a phone, bound to
+// its TLS key, so a client over the pinned connection verifies them; a
+// mock without attestation, or with a broken one, is refused before
+// anything is sent.
+func TestApprovalAttestation(t *testing.T) {
+	m := startApproval(t, mockphone.ApproveAll, nil)
+	res, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+	if err != nil || !res.Approved() || res.Attestation != client.AttestedTEE {
+		t.Fatalf("%+v %v", res, err)
+	}
+	cases := []struct {
+		check string
+		pin   string // the TLS pin the chain is bound to; "": the mock's
+		tweak func(*attesttest.Description)
+	}{
+		{attest.CheckBoot, "", func(d *attesttest.Description) { d.DeviceLocked = false }},
+		{attest.CheckSecurityLevel, "", func(d *attesttest.Description) { d.KeyMintLevel = attest.Software }},
+		{attest.CheckChallenge, security.PinSPKI([]byte("another phone")), nil},
+		{client.CheckMissing, "", nil},
+	}
+	for _, c := range cases {
+		var (
+			asked bool
+			pin   string
+		)
+		m := startApproval(t, func(context.Context, mockphone.ApprovalRequest) protocol.Why { asked = true; return "" }, func(o *mockphone.Options) {
+			if c.check == client.CheckMissing {
+				o.Attest = nil
+				return
+			}
+			o.Attest = func(spki []byte, p attest.Purpose) []string {
+				return mockphone.TestAttestation(testCA, pin, c.tweak)(spki, p)
+			}
+		})
+		pin = cmp.Or(c.pin, m.id.Pin)
+		_, err := m.dialApproval(t).RequestApproval(testCtx(t), "Deploy?", 0)
+		var kae *client.KeyAttestationError
+		if !errors.As(err, &kae) || kae.Check != c.check || asked {
+			t.Errorf("%s: %v, asked %v", c.check, err, asked)
+		}
 	}
 }

@@ -94,6 +94,13 @@ type Device struct {
 	// ApprovalKey is the accepted pin of the phone's approval key
 	// (APPROVAL.md §3), empty until first seen.
 	ApprovalKey string `json:"approval_key,omitempty"`
+	// ApprovalAttestation is what attestation proved about it: AttestedTEE,
+	// AttestedStrongBox, or Unattested if the user accepted it without.
+	ApprovalAttestation string `json:"approval_attestation,omitempty"`
+	// DecryptKey is the pin of the last decryption key whose attestation
+	// verified, and DecryptAttestation its level (DECRYPT.md §3).
+	DecryptKey         string `json:"decrypt_key,omitempty"`
+	DecryptAttestation string `json:"decrypt_attestation,omitempty"`
 
 	// Extra holds members this version doesn't know. They are written back
 	// unchanged (SECURITY.md §6: readers keep unknown fields).
@@ -102,7 +109,15 @@ type Device struct {
 
 type plainDevice Device
 
-var deviceFields = []string{"id", "name", "pin", "token", "port", "addresses", "paired_at", "approval_key"}
+var deviceFields = []string{"id", "name", "pin", "token", "port", "addresses", "paired_at",
+	"approval_key", "approval_attestation", "decrypt_key", "decrypt_attestation"}
+
+// Attestation outcomes, as devices.json stores them (APPROVAL.md §3.1).
+const (
+	AttestedTEE       = "tee"
+	AttestedStrongBox = "strongbox"
+	Unattested        = "none"
+)
 
 // UnmarshalJSON reads a device, applying the defaults of SECURITY.md §6
 // (port 8765, no addresses) and keeping unknown members in Extra.
@@ -360,37 +375,60 @@ func isLoopback(host string) bool {
 }
 
 // TrustApprovalKey implements first sight of APPROVAL.md §3: if device id
-// has no approval key stored yet, pin is stored. It returns the key that
-// was stored before ("" on first sight). The caller compares it with pin.
-func (s *Store) TrustApprovalKey(id, pin string) (stored string, err error) {
-	err = s.updateDevices(func(devs []Device) ([]Device, bool, error) {
-		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == id })
-		if i < 0 {
-			return nil, false, fmt.Errorf("%w %q (unpaired meanwhile?)", ErrNotFound, id)
+// has no approval key stored yet, pin is stored with its attestation
+// outcome. A pin stored before attestation existed gets the outcome added.
+// It returns the key that was stored before ("" on first sight). The
+// caller compares it with pin.
+func (s *Store) TrustApprovalKey(id, pin, attestation string) (stored string, err error) {
+	err = s.updateDevice(id, func(d *Device) bool {
+		stored = d.ApprovalKey
+		switch {
+		case stored == "":
+			d.ApprovalKey, d.ApprovalAttestation = pin, attestation
+		case stored == pin && d.ApprovalAttestation == "":
+			d.ApprovalAttestation = attestation
+		default:
+			return false
 		}
-		stored = devs[i].ApprovalKey
-		if stored != "" {
-			return nil, false, nil
-		}
-		devs[i].ApprovalKey = pin
-		return devs, true, nil
+		return true
 	})
 	return stored, err
 }
 
-// AcceptApprovalKey stores pin as device id's approval key, replacing any
-// earlier one: the user accepted a changed key (APPROVAL.md §3).
-func (s *Store) AcceptApprovalKey(id, pin string) error {
+// AcceptApprovalKey stores pin as device id's approval key, with its
+// attestation outcome, replacing any earlier one: the user accepted a
+// changed or unattested key (APPROVAL.md §3).
+func (s *Store) AcceptApprovalKey(id, pin, attestation string) error {
+	return s.updateDevice(id, func(d *Device) bool {
+		if d.ApprovalKey == pin && d.ApprovalAttestation == attestation {
+			return false
+		}
+		d.ApprovalKey, d.ApprovalAttestation = pin, attestation
+		return true
+	})
+}
+
+// NoteDecryptKey records that the attestation of device id's decryption
+// key with pin verified, at that level.
+func (s *Store) NoteDecryptKey(id, pin, attestation string) error {
+	return s.updateDevice(id, func(d *Device) bool {
+		if d.DecryptKey == pin && d.DecryptAttestation == attestation {
+			return false
+		}
+		d.DecryptKey, d.DecryptAttestation = pin, attestation
+		return true
+	})
+}
+
+// updateDevice runs f on device id under the lock, and writes the result
+// if f returns true.
+func (s *Store) updateDevice(id string, f func(d *Device) bool) error {
 	return s.updateDevices(func(devs []Device) ([]Device, bool, error) {
 		i := slices.IndexFunc(devs, func(x Device) bool { return x.ID == id })
 		if i < 0 {
 			return nil, false, fmt.Errorf("%w %q (unpaired meanwhile?)", ErrNotFound, id)
 		}
-		if devs[i].ApprovalKey == pin {
-			return nil, false, nil
-		}
-		devs[i].ApprovalKey = pin
-		return devs, true, nil
+		return devs, f(&devs[i]), nil
 	})
 }
 

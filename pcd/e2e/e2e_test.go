@@ -472,6 +472,16 @@ func TestPairedModeStreamsApprovesAndSeesRevocation(t *testing.T) {
 	}
 	s := openStream(t, uc, "http://phonetopc/v1/events?source=gyro&rate=50")
 	wantGyro(t, s, 3)
+	// The mock's attestation comes from a test root: refused until accepted.
+	r = do(t, uc, "POST", "http://phonetopc/v1/approvals", "", `{"reason":"Deploy?"}`)
+	if r.status != 409 || r.errorCode() != "approval_key_unattested" {
+		t.Fatalf("unattested approval: %s", r.raw)
+	}
+	accept := exec.Command(filepath.Join(bin, "phonetopc"), "approval-key", "--accept", "--unattested")
+	accept.Env = env.vars
+	if out, err := accept.CombinedOutput(); err != nil || !strings.Contains(string(out), "accepted now") {
+		t.Fatalf("approval-key --accept --unattested: %v\n%s", err, out)
+	}
 	r = do(t, uc, "POST", "http://phonetopc/v1/approvals", "", `{"reason":"Deploy?"}`)
 	if r.status != 200 || r.body["approved"] != true {
 		t.Fatalf("approval: %s", r.raw)

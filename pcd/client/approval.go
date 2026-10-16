@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
 	"github.com/melker12345/phonetopc/pcd/internal/store"
@@ -53,6 +54,10 @@ type ApprovalResult struct {
 	Key, KeyPin string
 	// PhoneID and PCID are the ids the signed message names.
 	PhoneID, PCID string
+	// Attestation is the approval key's attestation outcome:
+	// AttestedStrongBox, AttestedTEE, or Unattested if the user accepted it
+	// without (APPROVAL.md §3.1).
+	Attestation string
 }
 
 // Approved reports whether the phone's user approved. It is true only if
@@ -131,36 +136,61 @@ var ErrApprovalNoAnswer = errors.New("phonetopc: approval request timed out")
 // ErrApprovalNeedsSecureMode: approvals don't exist in dev mode.
 var ErrApprovalNeedsSecureMode = errors.New("phonetopc: approvals need secure mode (a paired phone); dev mode has none")
 
+// ApprovalTrust decides whether this session's approval key, with pin, is
+// trusted (APPROVAL.md §3). attest verifies the key's attestation (§3.1)
+// when called. It returns the key's attestation outcome, or an error:
+// typically an *ApprovalKeyChangedError or a *KeyAttestationError.
+type ApprovalTrust func(pin string, attest func() (string, error)) (string, error)
+
 // WithApprovalKey makes RequestApproval of a Dial'd client accept only the
-// approval key with this pin. DialPaired uses devices.json instead.
+// approval key with this pin, and only if its attestation verifies.
+// DialPaired uses devices.json instead.
 func WithApprovalKey(pin string) Option {
-	return WithApprovalTrust(func(current string) error {
+	return WithApprovalTrust(func(current string, attest func() (string, error)) (string, error) {
 		if current != pin {
-			return &ApprovalKeyChangedError{Stored: pin, Current: current}
+			return "", &ApprovalKeyChangedError{Stored: pin, Current: current}
 		}
-		return nil
+		return attest()
 	})
 }
 
-// WithApprovalTrust sets the function deciding whether the approval key
-// pin of this session is trusted (APPROVAL.md §3): it returns nil to
-// trust it, typically an *ApprovalKeyChangedError otherwise.
-func WithApprovalTrust(f func(pin string) error) Option {
+// WithApprovalTrust sets what decides whether this session's approval key
+// is trusted.
+func WithApprovalTrust(f ApprovalTrust) Option {
 	return func(o *options) { o.approvalTrust = f }
 }
 
-// storeApprovalTrust is the trust of DialPaired: first sight stores the
-// pin in devices.json; a different stored pin is a change.
-func storeApprovalTrust(st *store.Store, dev store.Device) func(string) error {
-	return func(pin string) error {
-		stored, err := st.TrustApprovalKey(dev.ID, pin)
-		if err != nil {
-			return fmt.Errorf("phonetopc: approval key: %w", err)
-		}
-		if stored != "" && stored != pin {
+// storeApprovalTrust is the trust of DialPaired. First sight stores the pin
+// in devices.json, with the attestation outcome, if attestation verifies;
+// a different stored pin is a change. Attestation is checked once per key:
+// later sessions use the stored outcome.
+func storeApprovalTrust(st *store.Store, dev store.Device) ApprovalTrust {
+	return func(pin string, attest func() (string, error)) (string, error) {
+		changed := func(stored string) error {
 			return &ApprovalKeyChangedError{Device: dev.Name, DeviceID: dev.ID, Stored: stored, Current: pin}
 		}
-		return nil
+		d, err := st.Find(dev.ID)
+		if err != nil {
+			return "", fmt.Errorf("phonetopc: approval key: %w", err)
+		}
+		switch {
+		case d.ApprovalKey != "" && d.ApprovalKey != pin:
+			return "", changed(d.ApprovalKey)
+		case d.ApprovalKey == pin && d.ApprovalAttestation != "":
+			return d.ApprovalAttestation, nil
+		}
+		level, err := attest()
+		if err != nil {
+			return "", err
+		}
+		stored, err := st.TrustApprovalKey(dev.ID, pin, level)
+		if err != nil {
+			return "", fmt.Errorf("phonetopc: approval key: %w", err)
+		}
+		if stored != "" && stored != pin {
+			return "", changed(stored)
+		}
+		return level, nil
 	}
 }
 
@@ -174,39 +204,69 @@ func storeApprovalTrust(st *store.Store, dev store.Device) func(string) error {
 // A phone that lists capability approval without hello.approval, or the
 // reverse, offers no approvals.
 func (c *Client) CheckApprovalKey() (offered bool, err error) {
-	_, _, err = c.approvalKey()
-	if err == errNoApprovalOffered {
+	_, _, _, err = c.approvalKey(context.Background())
+	if err == ErrNoApprovalKey {
 		return false, nil
 	}
 	return true, err
 }
 
-var errNoApprovalOffered = errors.New("no approvals offered")
+// ApprovalKeyAttestation is CheckApprovalKey for a phone that offers
+// approvals: it returns the trusted key's attestation outcome, or why the
+// key isn't trusted.
+func (c *Client) ApprovalKeyAttestation(ctx context.Context) (string, error) {
+	_, _, level, err := c.approvalKey(ctx)
+	return level, err
+}
 
-// approvalKey returns this session's trusted approval key and its pin.
-func (c *Client) approvalKey() (*ecdsa.PublicKey, string, error) {
+// AttestApprovalKey verifies the attestation of this session's approval
+// key now, whatever was stored, and returns AttestedTEE or
+// AttestedStrongBox, or a *KeyAttestationError. Without an approval key it
+// returns ErrNoApprovalKey.
+func (c *Client) AttestApprovalKey(ctx context.Context) (string, error) {
 	h := c.Server()
 	if !h.HasCapability(protocol.CapabilityApproval) || h.Approval == nil {
-		return nil, "", errNoApprovalOffered
+		return "", ErrNoApprovalKey
+	}
+	der, err := security.DecodeB64(h.Approval.Key)
+	if err != nil {
+		return "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
+	}
+	return c.attestKey(ctx, "approval", h.Approval.Attestation, der, attest.PurposeSign)
+}
+
+// ErrNoApprovalKey: the phone offers no approvals.
+var ErrNoApprovalKey = errors.New("phonetopc: the phone offers no approvals")
+
+// approvalKey returns this session's trusted approval key, its pin and its
+// attestation outcome.
+func (c *Client) approvalKey(ctx context.Context) (*ecdsa.PublicKey, string, string, error) {
+	h := c.Server()
+	if !h.HasCapability(protocol.CapabilityApproval) || h.Approval == nil {
+		return nil, "", "", ErrNoApprovalKey
 	}
 	key, err := security.ParseApprovalKey(h.Approval.Key)
 	if err != nil {
-		return nil, "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
+		return nil, "", "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
 	}
 	pin, err := security.ApprovalKeyPin(h.Approval.Key)
 	if err != nil {
-		return nil, "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
+		return nil, "", "", &ApprovalInvalidError{Problem: "the phone's hello has a bad approval key", Err: err}
 	}
 	if pin != h.Approval.Pin {
-		return nil, "", &ApprovalInvalidError{Problem: fmt.Sprintf("the phone's approval key has pin %s, not the %s it claims", pin, h.Approval.Pin)}
+		return nil, "", "", &ApprovalInvalidError{Problem: fmt.Sprintf("the phone's approval key has pin %s, not the %s it claims", pin, h.Approval.Pin)}
 	}
 	if c.opts.approvalTrust == nil {
-		return nil, "", ErrNoApprovalTrust
+		return nil, "", "", ErrNoApprovalTrust
 	}
-	if err := c.opts.approvalTrust(pin); err != nil {
-		return nil, "", err
+	level, err := c.opts.approvalTrust(pin, func() (string, error) { return c.AttestApprovalKey(ctx) })
+	if err != nil {
+		return nil, "", "", err
 	}
-	return key, pin, nil
+	if err := c.checkStrongBox("approval", level); err != nil {
+		return nil, "", "", err
+	}
+	return key, pin, level, nil
 }
 
 // RequestApproval asks the phone's user to approve reason with a
@@ -217,7 +277,8 @@ func (c *Client) approvalKey() (*ecdsa.PublicKey, string, error) {
 // nonce, reason, phone id and PC id with the trusted approval key. Not
 // approved (denied, cancelled, timeout, busy, lockout, unavailable) is a
 // result, not an error. Errors: invalid arguments; an
-// *ApprovalKeyChangedError, in which case nothing was sent; an
+// *ApprovalKeyChangedError or a *KeyAttestationError, in which case
+// nothing was sent; an
 // *ApprovalInvalidError for an approval that failed verification, or,
 // with nothing sent, for a phone whose hello ids differ from the stored
 // pairing; and
@@ -267,9 +328,9 @@ func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string,
 		}
 	}
 	res.PhoneID, res.PCID = phoneID, pcID
-	key, pin, err := c.approvalKey()
+	key, pin, level, err := c.approvalKey(ctx)
 	switch {
-	case err == errNoApprovalOffered:
+	case err == ErrNoApprovalKey:
 		// §4: no capability, or capability without hello.approval (or the
 		// reverse): unavailable, and nothing is sent.
 		res.Why = WhyUnavailable
@@ -277,7 +338,7 @@ func (c *Client) RequestApprovalNonce(ctx context.Context, reason, nonce string,
 	case err != nil:
 		return res, err
 	}
-	res.Key, res.KeyPin = h.Approval.Key, pin
+	res.Key, res.KeyPin, res.Attestation = h.Approval.Key, pin, level
 	res.Nonce = nonce
 	ms := timeout.Milliseconds()
 	params := protocol.RequestApprovalParams{Reason: reason, Nonce: res.Nonce, TimeoutMS: &ms}

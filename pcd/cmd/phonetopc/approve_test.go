@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/store"
@@ -22,10 +25,27 @@ type approvalPhone struct {
 	asked atomic.Int32 // how often the "user" was asked
 }
 
-func startApprovalPhone(t *testing.T, approve mockphone.Approver, tamper bool) *approvalPhone {
+// testCA attests the mock phones' keys; the CLI trusts it in place of
+// Google's roots.
+var testCA *attesttest.CA
+
+func init() {
+	var err error
+	if testCA, err = attesttest.NewCA(); err != nil {
+		panic(err)
+	}
+	attestationRoots = []*x509.Certificate{testCA.Root}
+}
+
+func startApprovalPhone(t *testing.T, approve mockphone.Approver, tamper bool, tweaks ...func(*mockphone.Options, *mockphone.State)) *approvalPhone {
 	t.Helper()
 	ap := &approvalPhone{}
-	ap.phone = startPhoneOn(t, "", func(o *mockphone.Options, st *mockphone.State) {
+	ap.phone = startPhoneOn(t, "", append([]func(*mockphone.Options, *mockphone.State){func(o *mockphone.Options, st *mockphone.State) {
+		id, err := st.Identity("", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.Attest = mockphone.TestAttestation(testCA, id.Pin, nil)
 		o.ApprovalKey = func() *ecdsa.PrivateKey {
 			k, err := st.ApprovalKey()
 			if err != nil {
@@ -38,8 +58,18 @@ func startApprovalPhone(t *testing.T, approve mockphone.Approver, tamper bool) *
 			return approve(ctx, req)
 		}
 		o.TamperApprovals = tamper
-	})
+	}}, tweaks...)...)
 	return ap
+}
+
+// row returns the value of a row of approval-key's table.
+func row(out, label string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(l, label+" "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
 
 func storedDevice(t *testing.T, env map[string]string) store.Device {
@@ -82,7 +112,7 @@ func TestApproveApproved(t *testing.T) {
 		t.Errorf("stored approval key %q", pin)
 	}
 	code, out, _ = runCLI(t, tctx(t), env, "info")
-	if code != 0 || !strings.Contains(out, "approval") || !strings.Contains(out, pin+" (trusted)") {
+	if code != 0 || !strings.Contains(out, "approval") || !strings.Contains(out, pin+" (trusted, attestation: TEE") {
 		t.Errorf("info:\n%s", out)
 	}
 	code, out, _ = runCLI(t, tctx(t), env, "approve", "Deploy?", "--json", "--timeout", "10s")
@@ -178,7 +208,7 @@ func TestApprovalKeyChange(t *testing.T) {
 		t.Errorf("info: %d\n%s\n%s", code, out, errs)
 	}
 	code, out, _ = runCLI(t, tctx(t), env, "approval-key")
-	if code != 1 || !strings.Contains(out, "accepted  "+old) || !strings.Contains(out, "CHANGED") {
+	if code != 1 || row(out, "accepted") != old || !strings.Contains(out, "CHANGED") {
 		t.Errorf("approval-key: %d\n%s", code, out)
 	}
 
@@ -187,13 +217,13 @@ func TestApprovalKeyChange(t *testing.T) {
 		t.Fatalf("--accept: %d\n%s\n%s", code, out, errs)
 	}
 	now := storedDevice(t, env).ApprovalKey
-	if now == old || !strings.Contains(out, "current   "+now) {
+	if now == old || row(out, "current") != now || !strings.HasPrefix(row(out, "attestation"), "TEE") {
 		t.Errorf("accepted %q (old %q)\n%s", now, old, out)
 	}
 	if code, _, errs := runCLI(t, tctx(t), env, "approve", "Deploy?"); code != 0 {
 		t.Errorf("approve after accepting: %d %s", code, errs)
 	}
-	if code, out, _ := runCLI(t, tctx(t), env, "approval-key"); code != 0 || !strings.Contains(out, "status    trusted") {
+	if code, out, _ := runCLI(t, tctx(t), env, "approval-key"); code != 0 || row(out, "status") != "trusted" {
 		t.Errorf("approval-key after accepting: %d\n%s", code, out)
 	}
 }
@@ -240,5 +270,74 @@ func TestApproveErrors(t *testing.T) {
 	}
 	if code, out, _ := runCLI(t, tctx(t), env2, "info"); code != 0 || !strings.Contains(out, "approval      no") {
 		t.Errorf("info without approvals:\n%s", out)
+	}
+}
+
+// TestApprovalKeyUnattested: a key without attestation is refused like a
+// changed one, until the user accepts it explicitly as unattested.
+func TestApprovalKeyUnattested(t *testing.T) {
+	env := testEnv(t, nil)
+	ph := startApprovalPhone(t, mockphone.ApproveAll, false, func(o *mockphone.Options, _ *mockphone.State) { o.Attest = nil })
+	pairDirect(t, env, ph.phone, "phone", []string{"127.0.0.1"})
+	code, _, errs := runCLI(t, tctx(t), env, "approve", "Deploy?")
+	if code != 2 || !strings.Contains(errs, "failed key attestation (missing") || ph.asked.Load() != 0 {
+		t.Fatalf("approve: %d %s", code, errs)
+	}
+	if storedDevice(t, env).ApprovalKey != "" {
+		t.Fatal("an unattested key was stored")
+	}
+	if code, out, _ := runCLI(t, tctx(t), env, "info"); code != 0 || !strings.Contains(out, "refused") {
+		t.Errorf("info:\n%s", out)
+	}
+	code, out, errs := runCLI(t, tctx(t), env, "approval-key")
+	if code != 1 || !strings.Contains(row(out, "status"), "NOT ATTESTED") || !strings.Contains(errs, "--accept --unattested") {
+		t.Errorf("approval-key: %d\n%s\n%s", code, out, errs)
+	}
+	if code, _, _ := runCLI(t, tctx(t), env, "approval-key", "--unattested"); code != 2 {
+		t.Errorf("--unattested without --accept: %d", code)
+	}
+	if code, _, errs := runCLI(t, tctx(t), env, "approval-key", "--accept"); code != 2 || !strings.Contains(errs, "--unattested") {
+		t.Errorf("--accept: %d %s", code, errs)
+	}
+	if storedDevice(t, env).ApprovalKey != "" {
+		t.Fatal("--accept stored an unattested key")
+	}
+	code, out, errs = runCLI(t, tctx(t), env, "approval-key", "--accept", "--unattested")
+	if code != 0 || row(out, "status") != "accepted now" || !strings.HasPrefix(row(out, "attestation"), "none") {
+		t.Fatalf("--accept --unattested: %d\n%s\n%s", code, out, errs)
+	}
+	if d := storedDevice(t, env); d.ApprovalKey == "" || d.ApprovalAttestation != store.Unattested {
+		t.Errorf("stored %q %q", d.ApprovalKey, d.ApprovalAttestation)
+	}
+	if code, _, errs := runCLI(t, tctx(t), env, "approve", "Deploy?"); code != 0 {
+		t.Errorf("approve after accepting: %d %s", code, errs)
+	}
+}
+
+func TestApprovalKeyStrongBox(t *testing.T) {
+	env := testEnv(t, map[string]string{"PHONETOPC_REQUIRE_STRONGBOX": "1"})
+	ph := startApprovalPhone(t, mockphone.ApproveAll, false)
+	pairDirect(t, env, ph.phone, "phone", []string{"127.0.0.1"})
+	code, _, errs := runCLI(t, tctx(t), env, "approve", "Deploy?")
+	if code != 2 || !strings.Contains(errs, "StrongBox is required") || ph.asked.Load() != 0 {
+		t.Fatalf("approve: %d %s", code, errs)
+	}
+	if code, out, _ := runCLI(t, tctx(t), env, "approval-key", "--accept"); code != 1 || !strings.Contains(row(out, "status"), "REFUSED") {
+		t.Errorf("approval-key: %d\n%s", code, out)
+	}
+
+	env2 := testEnv(t, map[string]string{"PHONETOPC_REQUIRE_STRONGBOX": "1"})
+	sb := startApprovalPhone(t, mockphone.ApproveAll, false, func(o *mockphone.Options, st *mockphone.State) {
+		id, _ := st.Identity("", "")
+		o.Attest = mockphone.TestAttestation(testCA, id.Pin, func(d *attesttest.Description) {
+			d.AttestationLevel, d.KeyMintLevel = attest.StrongBox, attest.StrongBox
+		})
+	})
+	pairDirect(t, env2, sb.phone, "phone", []string{"127.0.0.1"})
+	if code, _, errs := runCLI(t, tctx(t), env2, "approve", "Deploy?"); code != 0 {
+		t.Fatalf("approve with StrongBox: %d %s", code, errs)
+	}
+	if d := storedDevice(t, env2); d.ApprovalAttestation != store.AttestedStrongBox {
+		t.Errorf("stored %q", d.ApprovalAttestation)
 	}
 }

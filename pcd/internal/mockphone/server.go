@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
 	"github.com/melker12345/phonetopc/pcd/internal/hostlimit"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/version"
@@ -96,6 +97,10 @@ type Options struct {
 	ApprovalKey func() *ecdsa.PrivateKey
 	// DecryptKey is ApprovalKey for the decryption key (DECRYPT.md §2).
 	DecryptKey func() *rsa.PrivateKey
+	// Attest, if set, returns the attestation chain hello sends for a key
+	// (APPROVAL.md §3.1); see TestAttestation. Without it, hello sends
+	// none, like an emulator.
+	Attest func(spki []byte, purpose attest.Purpose) []string
 	// Approve plays the user for approval and decrypt requests. Default:
 	// ApproveAll.
 	Approve Approver

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"crypto/x509"
 	"errors"
 	"io"
 	"log"
@@ -20,6 +21,8 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/plugin"
 
+	"github.com/melker12345/phonetopc/pcd/internal/attest"
+	"github.com/melker12345/phonetopc/pcd/internal/attest/attesttest"
 	"github.com/melker12345/phonetopc/pcd/internal/mockphone"
 	"github.com/melker12345/phonetopc/pcd/internal/protocol"
 	"github.com/melker12345/phonetopc/pcd/internal/security"
@@ -47,7 +50,23 @@ func (p *phone) requests() []mockphone.ApprovalRequest {
 	return append([]mockphone.ApprovalRequest(nil), p.got...)
 }
 
+// testCA attests the mock phones' keys; the plugin trusts it in place of
+// Google's roots.
+var testCA *attesttest.CA
+
+func init() {
+	var err error
+	if testCA, err = attesttest.NewCA(); err != nil {
+		panic(err)
+	}
+	attestationRoots = []*x509.Certificate{testCA.Root}
+}
+
 func newPhone(t *testing.T) *phone {
+	return newPhoneAttested(t, true)
+}
+
+func newPhoneAttested(t *testing.T, attested bool) *phone {
 	st, err := mockphone.OpenState(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +76,12 @@ func newPhone(t *testing.T) *phone {
 		t.Fatal(err)
 	}
 	p := &phone{st: st}
+	var attestation func([]byte, attest.Purpose) []string
+	if attested {
+		attestation = mockphone.TestAttestation(testCA, id.Pin, nil)
+	}
 	srv := mockphone.New(mockphone.Options{
+		Attest:       attestation,
 		Device:       protocol.DeviceInfo{ID: id.ID, Name: id.Name, Platform: "mock"},
 		Authenticate: st.Authenticate,
 		ApprovalKey:  func() *ecdsa.PrivateKey { k, _ := st.ApprovalKey(); return k },
@@ -241,5 +265,21 @@ func TestReason(t *testing.T) {
 	long := reason(strings.Repeat("x", 500))
 	if protocol.CheckReason(long) != nil || !strings.HasSuffix(long, "…") {
 		t.Errorf("long: %q", long)
+	}
+}
+
+// TestGenerateNeedsAttestation: --generate refuses a key whose attestation
+// is missing, since the recipient is derived from it, unless --unattested.
+func TestGenerateNeedsAttestation(t *testing.T) {
+	newPhoneAttested(t, false)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--generate"}, &out, &errOut); code != 1 || out.Len() != 0 ||
+		!strings.Contains(errOut.String(), "failed key attestation") || !strings.Contains(errOut.String(), "--unattested") {
+		t.Fatalf("--generate: %d %q %s", code, out.String(), errOut.String())
+	}
+	errOut.Reset()
+	if code := run([]string{"--generate", "--unattested"}, &out, &errOut); code != 0 ||
+		!strings.Contains(out.String(), "# attestation: none") || !strings.Contains(out.String(), "AGE-PLUGIN-PHONETOPC-1") {
+		t.Fatalf("--generate --unattested: %d %s %s", code, out.String(), errOut.String())
 	}
 }
