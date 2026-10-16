@@ -15,7 +15,8 @@ The full threat model, attacker by attacker, is in [`THREAT-MODEL.md`](THREAT-MO
   client, nor impersonate the phone to a PC. A phone only serves PCs the user explicitly paired, and the user can
   revoke any of them.
 - **Out of scope:** a compromised PC user account or a rooted phone. Local malware running as the same PC user
-  can read the stored token, as it could read an SSH key.
+  can read the stored token, as it could read an SSH key, unless `phonetopcd` runs as the system service, whose
+  store only it can read (§6).
 - **No custom cryptography:** only TLS, SHA-256, HMAC-SHA-256 and random numbers, which every language has.
   Implementations MUST use a cryptographically secure random generator for every secret and nonce.
 
@@ -251,6 +252,10 @@ So that any language can use a pairing made by `phonetopc pair`, the PC stores p
 - Path: `$XDG_CONFIG_HOME/phonetopc/devices.json` (default `~/.config/phonetopc/devices.json`), mode `0600`,
   directory `0700`. The PC's own key lives next to it as `pc-key.pem` (`0600`) with `pc.json` holding its
   `id` and `name`.
+- When `phonetopcd` runs as the system service ([`LOCAL-API.md`](LOCAL-API.md) §1), the store is
+  `/var/lib/phonetopc`, owned by its user `phonetopc`, and nobody else reads or changes it: pairing and the other
+  changes go through the daemon (LOCAL-API.md §9). `sudo phonetopc daemon install --system` offers to move a
+  user's store there.
 - Content:
 
 ```json
@@ -294,6 +299,9 @@ codes of §4.5. `PROTOCOL.md` §7 is the complete list.
 
 - `phonetopcd` reads `devices.json`, keeps the connection to the phone, and offers it to other programs on the PC
   as plain HTTP ([`LOCAL-API.md`](LOCAL-API.md)). Programs normally use that and never touch the store.
+- As the system service, it is the only reader. `phonetopc` and `age-plugin-phonetopc` then ask it instead: they
+  do whenever `/run/phonetopc/phonetopc.sock` exists, and `PHONETOPC_MODE=user` or `system` decides otherwise.
+  Pairing runs in the daemon, which relays the questions of §4 to `phonetopc pair` (LOCAL-API.md §9).
 - A program that speaks `PROTOCOL.md` itself (for example through the Go client library, `pcd/client`) MAY read
-  the store and connect directly, following §6.
+  a user's store and connect directly, following §6.
 - A phone with many PCs, or a PC with many phones, works; a PC with several phones picks one with `--device`.

@@ -13,18 +13,33 @@ Programs may also speak the phone protocol (`PROTOCOL.md`) directly; the daemon 
 
 ## 1. Where it listens
 
-| Listener | Default | Who can use it without a token |
+`phonetopcd` runs as a system service (recommended) or as your own user:
+
+| | System service | Your own user |
 |---|---|---|
-| TCP | `localhost:8767` (`127.0.0.1`, loopback only) | Programs of this user, on Linux |
-| Unix socket | `$XDG_RUNTIME_DIR/phonetopc.sock` (mode 0600) | This user |
+| Installed with | `sudo phonetopc daemon install --system` | `phonetopc daemon install` |
+| Runs as | the user `phonetopc` | you |
+| Unix socket | `/run/phonetopc/phonetopc.sock` (mode 0660, group `phonetopc-users`) | `$XDG_RUNTIME_DIR/phonetopc.sock` (mode 0600) |
+| TCP | `localhost:8767` (`127.0.0.1`, loopback only) | `localhost:8767` |
+| Who may use it | root and members of `phonetopc-users` | you; with the token, others |
+| Pairings (`SECURITY.md` §6) | `/var/lib/phonetopc`, readable only by `phonetopc` | `~/.config/phonetopc` |
 
 ```sh
 curl localhost:8767/v1/status
 curl -N 'localhost:8767/v1/events?source=gyro'    # -N: print each event as it arrives
+curl --unix-socket /run/phonetopc/phonetopc.sock http://phonetopc/v1/status
 ```
 
-**Token.** This API can read the phone's location and ask for fingerprint approvals, so some TCP requests need the
-token in `$XDG_RUNTIME_DIR/phonetopc.token` (mode 0600, kept across restarts of the daemon):
+**System service.** Programs running as you can't stop it, take its place (`/run/phonetopc` belongs to root) or
+read its keys and tokens; pairing and accepting keys need root (§9). To let a user use it:
+`sudo usermod -aG phonetopc-users <user>`, effective from their next login. On Linux the daemon checks every
+connection's user and groups (`SO_PEERCRED` on the socket; on TCP, the owner in `/proc/net/tcp` and the user's
+groups). It has no token: requests that may come from a web page (below) are refused. It can name the program
+asking for an approval (§5) only on the socket: on TCP, other users' processes are hidden from it.
+
+**Token.** Without the system service, this API can read the phone's location and ask for fingerprint approvals,
+so some TCP requests need the token in `$XDG_RUNTIME_DIR/phonetopc.token` (mode 0600, kept across restarts of the
+daemon):
 
 - requests from other users;
 - requests that may come from a web page: any with an `Origin` header, or a `Sec-Fetch-Site` other than `none` or
@@ -44,10 +59,9 @@ can use the API.
 Without `$XDG_RUNTIME_DIR` the files go to `$TMPDIR/phonetopc-<uid>/`. `phonetopcd --socket`, `--listen` and
 `--token-file` change them; `off` turns a listener off.
 
-**Starting on demand.** `phonetopc daemon install` installs systemd user units that hold both listeners and start
-`phonetopcd` on the first connection, like `ssh.socket` starts sshd. That first request waits until the daemon
-has tried to reach the phone, then gets the real answer. The units are in `pcd/systemd/`; without systemd, start
-`phonetopcd` at login.
+**Starting on demand.** Both installs add systemd units that hold the listeners and start `phonetopcd` on the
+first connection, like `ssh.socket` starts sshd. That first request waits until the daemon has tried to reach the
+phone, then gets the real answer. The units are in `pcd/systemd/`; without systemd, start `phonetopcd` at login.
 
 ## 2. Conventions
 
@@ -64,12 +78,13 @@ has tried to reach the phone, then gets the real answer. The units are in `pcd/s
 | 400 | `invalid_request` | Bad JSON, unknown member, invalid value (checked before asking the phone) |
 | 400 | `invalid_params` | The phone found a parameter invalid |
 | 401 | `unauthorized` | TCP without the right token, where one is needed (§1) |
-| 403 | `forbidden` | TCP with a `Host` that isn't loopback |
+| 403 | `forbidden` | TCP with a `Host` that isn't loopback; a user who may not use the API (§1); a change that needs root (§9) |
 | 403 | `not_allowed` | The phone's user hasn't allowed notifications or panels for this PC |
 | 404 | `not_found` | No such endpoint |
-| 404 | `unknown_source`, `unknown_panel` | |
+| 404 | `unknown_source`, `unknown_panel`, `unknown_device` | |
 | 405 | `method_not_allowed` | The endpoint exists, with other methods (`Allow` header) |
 | 409 | `source_unavailable`, `no_value`, `too_many_panels` | |
+| 409 | `ambiguous_device`, `busy`, `dev_mode` | See §9 |
 | 409 | `approval_key_changed`, `approval_key_unattested` | See §5 |
 | 409 | `approval_unavailable` | The phone is in developer mode, which has no approvals |
 | 409 | `decrypt_key_changed`, `decrypt_key_unattested`, `decrypt_unavailable` | See §6 |
@@ -293,9 +308,61 @@ shown through the daemon. When the phone connection drops and comes back, the da
 (`panel_attach`), and the phone replays the canvas strokes drawn meanwhile. A panel the user closes, or one
 removed with `DELETE`, is forgotten.
 
-## 9. Examples
+## 9. Pairings
 
-These run on Linux as the user who runs `phonetopcd`; elsewhere, add the token (§1).
+The daemon reads the pairings (`SECURITY.md` §6), and as the system service it is the only one that can, so
+`phonetopc pair`, `devices`, `unpair`, `pc` and `approval-key` then use these requests. Changes need root (or the
+daemon's own user): whoever changes the pairings decides whose approvals count. Without a store (developer mode)
+they answer 409 `dev_mode`.
+
+| Request | Who | Answer |
+|---|---|---|
+| `GET /v1/pc` | | `{"id", "name", "pin"}` of this PC |
+| `GET /v1/devices` | | `{"devices": [...]}`: the entries of `devices.json` without their tokens |
+| `DELETE /v1/devices/{device}` | root | `{"id", "name"}` of the phone, by id or name, now forgotten. Revoke the PC on the phone too |
+| `GET /v1/approval-key` | | The phone's approval key (`APPROVAL.md` §3), below |
+| `POST /v1/approval-key` | root | Accepts it. Body `{}`, or `{"unattested": true}` to accept a key whose attestation fails |
+| `GET /v1/pairing` | root | A WebSocket that pairs, below |
+
+A `{device}` that matches several phones is 409 `ambiguous_device`. The approval key's answer:
+
+```json
+{"device": {"id": "635f3a01db1859bc", "name": "Pixel"}, "accepted": "sha256/…", "current": "sha256/…",
+ "attestation": "strongbox", "status": "trusted"}
+```
+
+`accepted` is the key accepted before the request (`""` for none), `current` the phone's. `status` is `trusted`,
+`first_seen` (trusted from now on), `accepted` (by this POST), `changed` or `unattested` (approvals are refused
+until it is accepted; `message` says why), `refused` (it isn't in StrongBox, which is required) or `none` (the
+phone offers no approvals). A POST whose attestation fails is 409 `approval_key_unattested`.
+
+**Pairing.** `GET /v1/pairing` runs the pairing listener of `SECURITY.md` §4 in the daemon, one at a time (else
+409 `busy`). The client first sends the options, all optional (`listen` and `hosts` as for `phonetopc pair`):
+
+```json
+{"yes": false, "timeout_ms": 300000, "listen": ":8766", "hosts": ["192.168.1.20"], "no_mdns": false}
+```
+
+The daemon then sends:
+
+| `type` | Members | Meaning |
+|---|---|---|
+| `listening` | `uri`, `pc`, `port`, `random_port`, `hosts`, `advertised` | Show `uri` as a QR code |
+| `qr` | `uri` | The QR code changed (`SECURITY.md` §4.2): show this one |
+| `log` | `message` | For the user |
+| `confirm` | `prompt`, `way` (`qr` or `sas`), `phone`, `code`, `replaces` | Ask the user. `replaces` is the paired phone that a yes replaces (§4.4) |
+| `abandoned` | `prompt` | The phone went away; the question is moot |
+| `paired` | `way`, `phone` | Done |
+| `error` | `error` (`expired`, `sas_limit`, `invalid_request` or `error`), `message` | Failed |
+
+The client answers a `confirm` with `{"type": "answer", "prompt": "<its prompt>", "yes": true}`. Every question has
+a new random `prompt` and only an answer naming it counts, so nothing sent before the question was asked answers it.
+The answer must come from a person who was asked just now (`SECURITY.md` §4.2). Closing the WebSocket stops the
+pairing.
+
+## 10. Examples
+
+These run on Linux as a user who may use the API (§1); elsewhere, add the token.
 
 Shell:
 

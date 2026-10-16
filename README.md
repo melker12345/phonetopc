@@ -44,12 +44,15 @@ cd pcd && go build -o bin/ ./cmd/...   # builds phonetopcd, phonetopc and phonet
 **With a phone:** build and install the app ([`android/README.md`](android/README.md)), then:
 
 ```sh
-bin/phonetopc pair            # shows a QR code; scan it in the app
-curl localhost:8767/v1/status # check that it works
+sudo bin/phonetopc daemon install --system   # phonetopcd as a system service, as its own user
+sudo bin/phonetopc pair                      # shows a QR code; scan it in the app
+curl localhost:8767/v1/status                # check that it works (after logging in again)
 ```
 
-At the end, `pair` offers to start `phonetopcd` whenever a program connects to it, the way `ssh.socket` starts
-sshd (`bin/phonetopc daemon install`, systemd). Without that, run `bin/phonetopcd` yourself.
+The system service starts when a program first connects, the way `ssh.socket` starts sshd. It keeps the pairing
+where programs running as you can't read it, and lets members of the group `phonetopc-users` use the phone;
+`install` offers to add you, which takes effect at your next login. Without root, `bin/phonetopc pair` keeps the
+pairing in your home directory and offers to run `phonetopcd` as you instead.
 
 **Without a phone**, the fake phone stands in for it:
 
