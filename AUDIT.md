@@ -3,6 +3,9 @@
 Four read-only reviews of `main` at `3fd5d88`: Android app, Go PC side, Python client, protocol/crypto design.
 Each finding was checked against the code; "tested" means the reviewer reproduced it.
 
+The reviews, the findings and the status below were written by Claude, Anthropic's AI model, which also wrote
+most of the code it reviewed. The author checked them. No independent person has reviewed the security design.
+
 ## Status (re-checked 2026-10-16)
 
 | Finding | Status |
@@ -24,14 +27,14 @@ Each finding was checked against the code; "tested" means the reviewer reproduce
 | L-G2 | Fixed (`a43e7ba`, `bf45249`). |
 | L-G3 | Fixed (`2ee3cba`). |
 | L-P1–L-P4 | Gone with the Python client and examples. |
-| L-S1 | Claim softened (`9de3d93`). Binding the key at pairing and key attestation are still to do. |
+| L-S1 | Fixed (`9de3d93`, `97585c6`, `a2d6345`): the PC verifies the key's hardware attestation and refuses keys that fail it. |
 | L-S2 | Fixed (`2ea44ae`). |
 | L-S3 | Fixed (`a43e7ba`, `65c5337`). |
 | L-S4 | Fixed (`58a812c`). |
 | L-S5 | Fixed (`a370a79`). |
 | L-S6 | Fixed (`e8bf2d7`, `c19dafa`). |
 | L-S7 | Fixed (`9de3d93`). |
-| L-S8 | Fixed (`9de3d93`), except `plan.md` §4.3, which still describes the old approval message. |
+| L-S8 | Fixed (`9de3d93`); `plan.md` was removed. |
 
 **Summary:** 3 high, 5 medium, ~20 low. The core cryptography holds up in all three implementations
 (pinning, tokens, approval signatures). The problems are in limits, timeouts, prompts and races around it.
@@ -119,9 +122,3 @@ Each finding was checked against the code; "tested" means the reviewer reproduce
 
 **PC → phone**
 - Vibrate, show a notification, ring ("find my phone"), flashlight, open a URL, send a file.
-
-## Open decisions
-
-1. **Tests and demos off GitHub:** keep locally and publish a filtered history (recommended), delete entirely, or move to a private repo? Do the conformance suites, mock phone and `plan.md` count as essential?
-2. **Remove Claude from commits:** rewrite the 117 unpushed commits without the `Co-Authored-By` line (safe, nothing pushed).
-3. **Order:** fix High and Medium findings (+ spec update) before cleaning history and pushing.

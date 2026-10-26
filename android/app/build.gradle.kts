@@ -15,10 +15,25 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release signing comes from the environment (see README.md); without it the
+    // release APK is left unsigned.
+    val keystore = System.getenv("PHONETOPC_KEYSTORE")
+    if (keystore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("PHONETOPC_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PHONETOPC_KEY_ALIAS")
+                keyPassword = System.getenv("PHONETOPC_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 

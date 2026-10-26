@@ -39,7 +39,8 @@ the units of `systemd/system/` in `/etc/systemd/system` and the user and group i
 service when a program first connects, the way `ssh.socket` starts sshd. It offers to move your existing pairings
 to `/var/lib/phonetopc` and to add you to the group `phonetopc-users`, whose members may use it (from their next
 login; add others with `sudo usermod -aG phonetopc-users <user>`). `sudo phonetopc daemon uninstall --system`
-removes the service and keeps the pairings. Logs: `journalctl -u phonetopcd`.
+removes the service and keeps the pairings. Logs: `journalctl -u phonetopcd`. It copies only `phonetopcd`; put
+`phonetopc` and `age-plugin-phonetopc` somewhere on your `PATH` yourself (age finds the plugin there).
 
 Without root, `phonetopc daemon install` runs it as you instead (systemd user units; `phonetopc pair` offers it at
 the end, and `daemon uninstall` removes them). Without systemd, run `bin/phonetopcd` yourself.

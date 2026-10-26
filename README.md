@@ -66,5 +66,9 @@ Then write your program against [`spec/LOCAL-API.md`](spec/LOCAL-API.md).
 
 ## Status
 
-Works: pairing, the sensors, fingerprint approval, file decryption with age, notifications and panels, the daemon. Not yet: released
-builds of the app and the PC tools.
+Works: pairing, the sensors, fingerprint approval, file decryption with age, notifications and panels, the daemon.
+Not yet: released builds of the PC tools; the app has a [release](https://github.com/melker12345/phonetopc/releases).
+Most of the code, the specifications, the threat model and the audit were written by Claude, Anthropic's AI
+model, directed and tested by the author. The security claims in [`AUDIT.md`](AUDIT.md) and
+[`spec/THREAT-MODEL.md`](spec/THREAT-MODEL.md) are the model's, checked by the author, and have not been
+reviewed by an independent person. Treat them accordingly.

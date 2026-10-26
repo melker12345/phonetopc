@@ -7,6 +7,19 @@ a PC ask for fingerprint approval, and shows the PC's notifications and panels. 
 
 Needs Android 8.0 (API 26) or newer.
 
+## Install
+
+Download `phonetopc-<version>.apk` from the [releases](https://github.com/melker12345/phonetopc/releases) and
+install it (`adb install -r phonetopc-<version>.apk`, or open it on the phone and allow installs from your
+browser or file manager). Releases are signed with a key whose certificate has the SHA-256 fingerprint
+
+```
+95:F1:4A:58:F8:71:C2:90:C4:39:A7:5D:24:76:C8:CD:FF:C4:CF:BB:7E:F2:2F:3E:E3:1D:BB:AD:44:4C:A6:75
+```
+
+Check it with `apksigner verify --print-certs phonetopc-<version>.apk`. A build you make yourself is signed with
+another key, so Android won't update one with the other: uninstall first (which also removes the pairings).
+
 ## Build and install
 
 You need JDK 17 or newer and the Android SDK with platform `android-36`. Point Gradle at the SDK with
@@ -17,6 +30,9 @@ cd android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+A release build (`./gradlew assembleRelease`) is signed when `PHONETOPC_KEYSTORE`, `PHONETOPC_KEYSTORE_PASSWORD`,
+`PHONETOPC_KEY_ALIAS` and `PHONETOPC_KEY_PASSWORD` are set, and left unsigned otherwise.
 
 ## Pair a PC and start the server
 

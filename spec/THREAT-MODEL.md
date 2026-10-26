@@ -4,6 +4,9 @@ What phonetopc protects, from whom, and what it doesn't. The mechanisms are spec
 [`SECURITY.md`](SECURITY.md), [`APPROVAL.md`](APPROVAL.md), [`DECRYPT.md`](DECRYPT.md) and
 [`LOCAL-API.md`](LOCAL-API.md).
 
+This model and the mechanisms it describes were written by Claude, Anthropic's AI model, and checked by the
+author. No independent person has reviewed them; the "what it doesn't protect against" columns may be incomplete.
+
 ## What is protected
 
 | Asset | Where it lives |
@@ -27,7 +30,7 @@ What phonetopc protects, from whom, and what it doesn't. The mechanisms are spec
 | **Other users on the PC** | Files 0600, directories 0700, socket 0600; TCP requests from other users need the token in `$XDG_RUNTIME_DIR`. With the system service, only members of `phonetopc-users` may use it, checked per connection | Nothing beyond what the OS lets them do to your account; members of the group use the phone as you can |
 | **Web pages in the user's browser** | Requests with `Origin` or a cross-site `Sec-Fetch-Site` need the token; a `Host` other than loopback is refused (DNS rebinding) | Nothing, unless given the token |
 | **Root on the PC** | Nothing | Everything the user and the daemon can do |
-| **Root on the phone, or a modified app** | Keys in secure hardware can't be copied out | Fake approvals: the PC trusts the approval key the app first reports and can't yet check that it is a hardware key that needs a fingerprint |
+| **Root on the phone, or a modified app** | Keys in secure hardware can't be copied out. The PC accepts an approval or decryption key only with a hardware attestation that it needs a fingerprint for every use and belongs to the phonetopc package on a phone with verified boot; a root or custom OS fails that, and the user must accept the key with `--unattested` | Forge an attestation with a leaked attestation key, unless the PC checks Google's revocation list (`PHONETOPC_CHECK_REVOCATION=1`); show the user a different reason from the one it signs |
 | **Thief with the phone** | The screen lock; Keystore keys need a fingerprint and no PIN fallback; tokens stored as hashes; backups off | With the phone unlocked: see paired PCs, change their permissions, pair a new PC |
 | **Thief with the PC's disk** | Full-disk encryption, if used. age files need the phone and a fingerprint; the identity file holds no secret | Without disk encryption: tokens and the PC key are in plain files, so the thief acts as that PC until the user revokes it |
 | **Coercion** | Nothing | Force a fingerprint. Approvals and decryptions prove a finger was on the sensor, not that the user wanted it |
